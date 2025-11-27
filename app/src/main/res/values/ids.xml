@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+
+    <!--main_activity-->
+    <item name="main_activity_fragment_container_view" type="id"/>
+
+
+
+
+
+
+    <!--home fragment-->
+    <item name="home_fragment_basic_id" type="id"/>
+    <item name="home_fragment_toolbar" type="id"/>
+    <item name="home_fragment_recycler_notes" type="id"/>
+    <item name="home_fragment_float_button_add_note" type="id"/>
+
+    <!--home menu toolbar-->
+    <item name="home_menu_action_search" type="id"/>
+    <item name="home_menu_action_sort_name" type="id"/>
+    <item name="home_menu_action_sort_date" type="id"/>
+    <item name="home_menu_action_show_favorites" type="id"/>
+
+    <!--home adapter-->
+    <item name="home_adapter_text_note_title" type="id"/>
+    <item name="home_adapter_text_note_description" type="id"/>
+    <item name="home_adapter_image_note_favorite" type="id"/>
+    <item name="home_adapter_text_note_date" type="id"/>
+
+
+
+
+
+
+
+    <!--note fragment-->
+    <item name="note_fragment_basic_id" type="id"/>
+    <item name="note_fragment_toolbar" type="id"/>
+    <item name="note_fragment_edit_text_note_title_layout" type="id"/>
+    <item name="note_fragment_edit_text_note_title" type="id"/>
+    <item name="note_fragment_edit_text_note_description_layout" type="id"/>
+    <item name="note_fragment_edit_text_note_description" type="id"/>
+    <item name="note_fragment_edit_btn_submit" type="id"/>
+
+    <!--note menu toolbar-->
+    <item name="note_menu_action_favorite" type="id"/>
+
+
+
+</resources>
