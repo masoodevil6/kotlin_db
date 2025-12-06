@@ -1,17 +1,17 @@
-package gog.kotlin_db.data.base.QueryBuilder.Conditions.QueryConditions
+package gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditions
 
-import gog.kotlin_db.data.base.QueryBuilder.IQueryBuilder
-import gog.kotlin_db.data.base.QueryBuilder.Conditions.IQueryBuilder_conditions
+import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
+import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.IQueryTools_conditions
 
-class QueryBuilder_conditions(
+class QueryTools_conditions(
     val conditionLogical: String,
     val sideLeft: String ,
     val conditionOperation: String ,
     val sideRight : String ,
 ):
-    IQueryBuilder_conditionsMethods ,
-    IQueryBuilder_conditions ,
-    IQueryBuilder {
+    IQueryTools_conditionsMethods ,
+    IQueryTools_conditions ,
+    IQueryTools {
 
 
 

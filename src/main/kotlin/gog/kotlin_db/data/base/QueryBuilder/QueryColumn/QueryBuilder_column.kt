@@ -1,12 +1,12 @@
 package gog.kotlin_db.data.base.QueryBuilder.QueryColumn
 
-import gog.kotlin_db.data.base.QueryBuilder.IQueryBuilder
+import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 
 class QueryBuilder_column(
     val ColumnStr: String,
     val ColumnAlias: String? = null,
     val ColumnMethod: String? = null,
-) : IQueryBuilder{
+) : IQueryTools{
 
 
     private val ColumnMethodTag = "{{COLUMN_METHOD_TAG}}"

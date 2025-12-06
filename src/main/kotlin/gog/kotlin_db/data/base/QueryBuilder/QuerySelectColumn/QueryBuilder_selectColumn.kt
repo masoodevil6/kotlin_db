@@ -1,12 +1,12 @@
 package gog.kotlin_db.data.base.QueryBuilder.QuerySelectColumn
 
-import gog.kotlin_db.data.base.QueryBuilder.IQueryBuilder
+import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
 import gog.kotlin_db.data.base.QueryBuilder.QueryColumn.QueryBuilder_column
 
 class QueryBuilder_selectColumn(
 
-): IQueryBuilder {
+): IQueryTools {
 
     private val tableSelectTag = "{{TABLE_SELECT_TAG}}"
 

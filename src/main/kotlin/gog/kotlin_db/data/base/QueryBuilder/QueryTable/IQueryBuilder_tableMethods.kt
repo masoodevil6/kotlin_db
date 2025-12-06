@@ -1,6 +1,5 @@
 package gog.kotlin_db.data.base.QueryBuilder.QueryTable
 
-import gog.kotlin_db.data.base.QueryBuilder.IQueryBuilder
 import gog.kotlin_db.data.base.QueryBuilder.IQueryBuilderMethods
 import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
 

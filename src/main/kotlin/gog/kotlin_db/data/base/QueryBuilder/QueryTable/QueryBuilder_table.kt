@@ -1,11 +1,11 @@
 package gog.kotlin_db.data.base.QueryBuilder.QueryTable
 
-import gog.kotlin_db.data.base.QueryBuilder.IQueryBuilder
+import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
 
 class QueryBuilder_table(
 
-) : IQueryBuilder {
+) : IQueryTools {
 
 
     var tableName : String? = null

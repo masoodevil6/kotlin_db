@@ -1,19 +1,22 @@
 package gog.kotlin_db.data.base.QueryBuilder
 
-import gog.kotlin_db.data.base.QueryBuilder.Conditions.QueryConditionGroups.QueryBuilder_conditionsGroup
+import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroups.QueryTools_conditionsGroup
 import gog.kotlin_db.data.base.QueryBuilder.QueryColumn.QueryBuilder_column
 import gog.kotlin_db.data.base.QueryBuilder.QuerySelectColumn.IQueryBuilder_selectColumnMethods
 import gog.kotlin_db.data.base.QueryBuilder.QuerySelectColumn.QueryBuilder_selectColumn
 import gog.kotlin_db.data.base.QueryBuilder.QueryTable.IQueryBuilder_tableMethods
 import gog.kotlin_db.data.base.QueryBuilder.QueryTable.QueryBuilder_table
-import gog.kotlin_db.data.base.QueryBuilder.QueryWhere.IQueryBuilder_whereMethods
-import gog.kotlin_db.data.base.QueryBuilder.QueryWhere.QueryBuilder_where
+
+import gog.kotlin_db.data.base.QueryBuilder.tools.options.IQueryTools_options
+import gog.kotlin_db.data.base.QueryBuilder.tools.options.QueryTools_options
+import gog.kotlin_db.data.base.QueryBuilder.tools.where.IQueryTools_where
+import gog.kotlin_db.data.base.QueryBuilder.tools.where.QueryTools_where
+
 
 class QueryBuilder(
 
 ) : IQueryBuilder_selectColumnMethods  ,
     IQueryBuilder_tableMethods ,
-    IQueryBuilder_whereMethods,
     IQueryBuilder
 {
 
@@ -26,8 +29,6 @@ class QueryBuilder(
         const val _TAG_TEMP_SELECT =    "{{_TAG_TEMP_COLUMNS}}"
         const val _TAG_TEMP_TABLE=      "{{_TAG_TEMP_TABLE}}"
         const val _TAG_TEMP_JOINS=      "{{_TAG_TEMP_JOINS}}"
-        const val _TAG_TEMP_WHERES=     "{{_TAG_TEMP_WHERES}}"
-        const val _TAG_TEMP_OPTIONS=    "{{_TAG_TEMP_OPTIONS}}"
 
 
         /*----------------
@@ -70,7 +71,11 @@ class QueryBuilder(
 
     var _queryBuilderSelect : QueryBuilder_selectColumn? = QueryBuilder_selectColumn();
     var _queryBuilderTable : QueryBuilder_table? = QueryBuilder_table();
-    var _queryBuilderWhereConditions : QueryBuilder_where? = QueryBuilder_where();
+
+
+
+    var _queryBuilderWhere : IQueryTools_where? = QueryTools_where();
+    var _queryBuilderOptions : IQueryTools_options? = QueryTools_options();
 
 
 
@@ -81,7 +86,9 @@ class QueryBuilder(
         var temp = queryTemp;
         temp =  temp?.replace(_TAG_TEMP_SELECT, _queryBuilderSelect?.toSql() ?: "");
         temp =  temp?.replace(_TAG_TEMP_TABLE, _queryBuilderTable?.toSql() ?: "");
-        temp =  temp?.replace(_TAG_TEMP_WHERES, _queryBuilderWhereConditions?.toSql() ?: "");
+
+        temp =  temp?.replace(QueryTools_where._TAG_TEMP_WHERES, _queryBuilderWhere?.toSql() ?: "");
+        temp =  temp?.replace(QueryTools_options._TAG_TEMP_OPTION, _queryBuilderOptions?.toSql() ?: "");
         return  temp;
     }
 
@@ -94,7 +101,7 @@ class QueryBuilder(
     ------------------------------------ */
 
     override fun getBaseTempSql(): String? {
-        return "$_TAG_TEMP_SELECT $_TAG_TEMP_TABLE $_TAG_TEMP_JOINS $_TAG_TEMP_WHERES  $_TAG_TEMP_OPTIONS ";
+        return "$_TAG_TEMP_SELECT $_TAG_TEMP_TABLE $_TAG_TEMP_JOINS ${QueryTools_where._TAG_TEMP_WHERES}  ${QueryTools_options._TAG_TEMP_OPTION} ";
     }
 
     override fun toSql(): String? {
@@ -260,16 +267,30 @@ class QueryBuilder(
 
 
 
+
+
+
+
+
     /* ------------------------------------
       where
     ----------------------------------- */
-
-    override fun where(blockGroup: (QueryBuilder_conditionsGroup) -> QueryBuilder_conditionsGroup): QueryBuilder {
-        val conditionGroup = blockGroup(QueryBuilder_conditionsGroup(_LOGICAL_AND))
-        _queryBuilderWhereConditions?.condition = conditionGroup;
+    override fun where(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryBuilder {
+        _queryBuilderWhere = _queryBuilderWhere?.where(blockGroup)
         return this;
     }
 
+
+
+
+
+    /* ------------------------------------
+      Options
+    ----------------------------------- */
+    override fun options(blockGroup: (IQueryTools_options) -> QueryTools_options): QueryBuilder {
+        _queryBuilderOptions = _queryBuilderOptions?.options(blockGroup)
+        return this;
+    }
 
 
 

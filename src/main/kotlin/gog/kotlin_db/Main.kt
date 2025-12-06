@@ -25,8 +25,9 @@ fun main() {
         //.sum(Users::age.name , "sum")
        // .table(Users::class.simpleName)
         .table(Users.tableName)
-        .where(){ schema->
+        .where{ schema->
             schema
+                .whereLike(Users::name.name , "aaaa")
                 .group("and"){ schema->
                     schema
                         .whereAnd(
@@ -53,6 +54,12 @@ fun main() {
                             "'عباس '"
                         )
                 }
+        }
+        .options{
+            schema->
+            schema
+                .pageInit(1 , 2)
+                .addGroup(Users::name.name )
         }
         .toSql();
 
