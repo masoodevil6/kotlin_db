@@ -7,6 +7,6 @@ import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroup
 
 interface IQueryTools_where : IQueryTools {
 
-    fun where(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryTools_where;
+    fun whereSetup(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryTools_where;
 
 }

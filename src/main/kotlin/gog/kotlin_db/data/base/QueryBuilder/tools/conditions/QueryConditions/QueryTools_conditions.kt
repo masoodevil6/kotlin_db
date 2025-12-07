@@ -26,23 +26,55 @@ class QueryTools_conditions(
     }
 
 
+    companion object {
+
+        /*----------------
+          Templates
+        ----------------*/
+        const val _TAG_TEMP_CONDITION=             "{{_TAG_TEMP_CONDITION}}"
+        const val _TAG_TEMP_CONDITION_LOGICAL=     "{{_TAG_TEMP_CONDITION_LOGICAL}}"
+        const val _TAG_TEMP_CONDITION_LEFT=        "{{_TAG_TEMP_CONDITION_LEFT}}"
+        const val _TAG_TEMP_CONDITION_OPERATION=   "{{_TAG_TEMP_CONDITION_OPERATION}}"
+        const val _TAG_TEMP_CONDITION_RIGHT=       "{{_TAG_TEMP_CONDITION_RIGHT}}"
 
 
-    private val _conditionLogicalTag =     "{{CONDITION_LOGICAL_TAG}}"
-    private val _SideLeftTag =             "{{SIDE_LEFT_TAG}}"
-    private val _conditionOperationTag =   "{{CONDITION_OPERATION_TAG}}"
-    private val _SideRightTag =            "{{SIDE_RIGHT_TAG}}"
+        /*----------------
+           Logical
+        ----------------*/
+        const val _LOGICAL_AND =   "and"
+        const val _LOGICAL_ON =    "on"
+        const val _LOGICAL_OR  =   "or"
+
+
+        /*----------------
+           Operation
+        ----------------*/
+        const val _OPERATION_EQUALS =               "="
+        const val _OPERATION_NOT_EQUALS =           "<>"
+        const val _OPERATION_GEATER_THAN =          ">"
+        const val _OPERATION_LESS_THAN =            "<"
+        const val _OPERATION_GEATER_OR_EQUAL_THAN = ">="
+        const val _OPERATION_LESS_OR_EQUAL_THAN =   "<="
+        const val _OPERATION_LIKE =                 "like"
+        const val _OPERATION_IN =                   "IN"
+        const val _OPERATION_BETWEEN =              "between"
+
+
+
+    }
+
+
 
     override fun getBaseTempSql(): String? {
-        return " $_conditionLogicalTag ($_SideLeftTag) $_conditionOperationTag ($_SideRightTag)"
+        return " $_TAG_TEMP_CONDITION_LOGICAL ($_TAG_TEMP_CONDITION_LEFT) $_TAG_TEMP_CONDITION_OPERATION ($_TAG_TEMP_CONDITION_RIGHT)"
     }
 
     override fun toSql(): String? {
         var queryTemp = getBaseTempSql();
-        queryTemp =  queryTemp?.replace(_conditionLogicalTag,  if (isAddLogical) {conditionLogical} else {""});
-        queryTemp =  queryTemp?.replace(_SideLeftTag, sideLeft);
-        queryTemp =  queryTemp?.replace(_conditionOperationTag, conditionOperation);
-        queryTemp =  queryTemp?.replace(_SideRightTag, sideRight);
+        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LOGICAL,  if (isAddLogical) {conditionLogical} else {""});
+        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LEFT, sideLeft);
+        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_OPERATION, conditionOperation);
+        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_RIGHT, sideRight);
         return queryTemp;
     }
 

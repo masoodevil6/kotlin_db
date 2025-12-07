@@ -13,18 +13,16 @@ fun main() {
 
 
     var query = QueryBuilder()
-        .column(Users::id.name)
-        .column(Users::name.name)
-        /*.column(Users::name.name , "abs")
-        .column( "abs"){
-            queryBuilder ->
-            queryBuilder
+        .select{
+            schema->
+            schema
+                .column(Users::id.name)
                 .column(Users::name.name)
-                .table(Users::class.simpleName)
-        }*/
-        //.sum(Users::age.name , "sum")
-       // .table(Users::class.simpleName)
-        .table(Users.tableName)
+        }
+        .table{
+            schema->
+            schema.table(Users.tableName)
+        }
         .where{ schema->
             schema
                 .whereLike(Users::name.name , "aaaa")

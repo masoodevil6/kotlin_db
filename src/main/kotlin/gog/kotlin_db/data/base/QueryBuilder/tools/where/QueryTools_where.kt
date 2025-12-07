@@ -21,7 +21,7 @@ class QueryTools_where(
 
     var condition: QueryTools_conditionsGroup? = null;
 
-    override fun where(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryTools_where {
+    override fun whereSetup(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryTools_where {
         condition = blockGroup(QueryTools_conditionsGroup(_LOGICAL_AND))
         return this;
     }

@@ -5,7 +5,7 @@ import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 
 interface IQueryTools_options : IQueryTools{
 
-    fun options(blockGroup: (IQueryTools_options) -> QueryTools_options): QueryTools_options;
+    fun optionsSetup(blockGroup: (IQueryTools_options) -> QueryTools_options): QueryTools_options;
 
     fun addGroup(columnName: String) : QueryTools_options;
 

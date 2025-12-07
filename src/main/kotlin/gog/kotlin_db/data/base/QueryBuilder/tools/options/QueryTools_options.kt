@@ -11,8 +11,7 @@ import gog.kotlin_db.data.base.QueryBuilder.tools.options.OptionPageInit.QueryTo
 class QueryTools_options(
 
 ) :
-    IQueryTools_options ,
-    IQueryTools
+    IQueryTools_options
 {
 
     companion object {
@@ -38,7 +37,7 @@ class QueryTools_options(
 
 
 
-    override fun options(blockGroup: (IQueryTools_options) -> QueryTools_options): QueryTools_options {
+    override fun optionsSetup(blockGroup: (IQueryTools_options) -> QueryTools_options): QueryTools_options {
         return  blockGroup(QueryTools_options());
     }
 

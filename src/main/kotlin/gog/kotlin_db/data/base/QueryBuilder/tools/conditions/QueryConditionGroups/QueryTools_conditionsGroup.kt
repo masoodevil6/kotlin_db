@@ -175,27 +175,34 @@ class QueryTools_conditionsGroup(
 
 
 
+    companion object {
+
+        /*----------------
+          Templates
+        ----------------*/
+        const val _TAG_TEMP_CONDITION=             "{{_TAG_TEMP_CONDITION}}"
+        const val _TAG_TEMP_CONDITION_LOGICAL=     "{{_TAG_TEMP_CONDITION_LOGICAL}}"
+        const val _TAG_TEMP_CONDITION_GROUP=        "{{_TAG_TEMP_CONDITION_LEFT}}"
+
+    }
 
 
-
-    private val _conditionLogicalTag =     "{{CONDITION_LOGICAL_TAG}}"
-    private val _conditionTag =            "{{CONDITION_TAG}}"
 
     override fun getBaseTempSql(): String? {
-        return " $_conditionLogicalTag ($_conditionTag)"
+        return " $_TAG_TEMP_CONDITION_LOGICAL ($_TAG_TEMP_CONDITION_GROUP)"
     }
 
     override fun toSql(): String? {
         if (conditions != null && conditions.size>0) {
 
             var queryTemp = getBaseTempSql();
-            queryTemp =  queryTemp?.replace(_conditionLogicalTag, if(isAddLogical){conditionLogical} else{""});
+            queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LOGICAL, if(isAddLogical){conditionLogical} else{""});
 
             var conditionStr = "";
             for ((index, condition) in conditions.withIndex()){
                 conditionStr += condition.toWhereSql(index > 0).toString()
             }
-            queryTemp =  queryTemp?.replace(_conditionTag, conditionStr);
+            queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_GROUP, conditionStr);
 
             return queryTemp;
         }
