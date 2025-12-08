@@ -1,6 +1,5 @@
 package gog.kotlin_db.data.base.QueryBuilder.tools.options
 
-import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
 import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 
 interface IQueryTools_options : IQueryTools{

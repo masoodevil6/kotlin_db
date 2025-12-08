@@ -1,6 +1,5 @@
 package gog.kotlin_db.data.base.QueryBuilder.tools.options
 
-import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 import gog.kotlin_db.data.base.QueryBuilder.tools.options.OptionGroup.IQueryTools_optionGroup
 import gog.kotlin_db.data.base.QueryBuilder.tools.options.OptionGroup.QueryTools_optionGroup
 import gog.kotlin_db.data.base.QueryBuilder.tools.options.OptionOrder.IQueryTools_optionOrder

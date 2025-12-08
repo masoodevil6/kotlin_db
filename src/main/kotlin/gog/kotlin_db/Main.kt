@@ -16,12 +16,52 @@ fun main() {
         .select{
             schema->
             schema
+                .column("uu.id")
+                .column("uu.name")
+                .column("uu.family")
+                .column("uu.age")
+                .column("up.phone")
+        }
+        .table{
+            schema->
+            schema.table("user_users" , "uu")
+        }
+        .joins{ schema ->
+            schema
+                .join("user_phones" , "up"){condition->
+                    condition.whereAnd("uu.id" , "=" , "up.user_id" )
+                }
+        }
+        .where{ schema->
+            schema
+                .whereAnd("uu.id" , "="  , 1.toString())
+        }
+        /*.options{
+            schema->
+            schema
+                .pageInit(1 , 2)
+                .addGroup(Users::name.name )
+        }*/
+        .toSql();
+
+    println(query)
+
+  /*  var query = QueryBuilder()
+        .select{
+            schema->
+            schema
                 .column(Users::id.name)
                 .column(Users::name.name)
         }
         .table{
             schema->
             schema.table(Users.tableName)
+        }
+        .joins{ schema ->
+            schema
+                .join("user_phones"){condition->
+                    condition.whereAnd("user_users.id" , "=" , "user_phones.user_id" )
+                }
         }
         .where{ schema->
             schema
@@ -61,7 +101,7 @@ fun main() {
         }
         .toSql();
 
-    println(query)
+    println(query)*/
 
 
 

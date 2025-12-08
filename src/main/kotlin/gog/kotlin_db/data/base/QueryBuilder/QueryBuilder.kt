@@ -1,6 +1,8 @@
 package gog.kotlin_db.data.base.QueryBuilder
 
-import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroups.QueryTools_conditionsGroup
+import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroups.QueryTools_conditionsGroups
+import gog.kotlin_db.data.base.QueryBuilder.tools.join.IQueryTools_joinsConnect
+import gog.kotlin_db.data.base.QueryBuilder.tools.join.QueryTools_joinsConnect
 import gog.kotlin_db.data.base.QueryBuilder.tools.options.IQueryTools_options
 import gog.kotlin_db.data.base.QueryBuilder.tools.options.QueryTools_options
 import gog.kotlin_db.data.base.QueryBuilder.tools.select.IQueryTools_select
@@ -9,6 +11,8 @@ import gog.kotlin_db.data.base.QueryBuilder.tools.table.IQueryTools_table
 import gog.kotlin_db.data.base.QueryBuilder.tools.table.QueryTools_table
 import gog.kotlin_db.data.base.QueryBuilder.tools.where.IQueryTools_where
 import gog.kotlin_db.data.base.QueryBuilder.tools.where.QueryTools_where
+import gog.kotlin_db.data.base.QueryBuilder.tools.with.IQueryTools_withsCollection
+import gog.kotlin_db.data.base.QueryBuilder.tools.with.QueryTools_withsCollection
 
 
 class QueryBuilder(
@@ -20,60 +24,28 @@ class QueryBuilder(
 
     companion object {
 
-        /*----------------
-          Templates
-        ----------------*/
-        const val _TAG_TEMP_JOINS=      "{{_TAG_TEMP_JOINS}}"
-
-
-        /*----------------
-           Logical
-        ----------------*/
-        const val _LOGICAL_AND =   "and"
-        const val _LOGICAL_ON =    "on"
-        const val _LOGICAL_OR  =   "or"
-
-
-        /*----------------
-           Operation
-        ----------------*/
-        const val _OPERATION_EQUALS =               "="
-        const val _OPERATION_NOT_EQUALS =           "<>"
-        const val _OPERATION_GEATER_THAN =          ">"
-        const val _OPERATION_LESS_THAN =            "<"
-        const val _OPERATION_GEATER_OR_EQUAL_THAN = ">="
-        const val _OPERATION_LESS_OR_EQUAL_THAN =   "<="
-        const val _OPERATION_LIKE =                 "like"
-        const val _OPERATION_IN =                   "IN"
-        const val _OPERATION_BETWEEN =              "between"
-
-
-
     }
 
 
 
-
-    //var _queryBuilderSelect : QueryBuilder_selectColumn? = QueryBuilder_selectColumn();
-
-
-
+    var _queryBuilderWiths : IQueryTools_withsCollection? = QueryTools_withsCollection();
     var _queryBuilderSelect : IQueryTools_select? = QueryTools_select();
     var _queryBuilderTable : IQueryTools_table? = QueryTools_table();
+    var _queryBuilderJoins : IQueryTools_joinsConnect? = QueryTools_joinsConnect();
     var _queryBuilderWhere : IQueryTools_where? = QueryTools_where();
     var _queryBuilderOptions : IQueryTools_options? = QueryTools_options();
 
 
 
 
-
-
     private fun setTemplatePartQuery(queryTemp: String?): String? {
         var temp = queryTemp;
-        temp =  temp?.replace(QueryTools_select._TAG_TEMP_SELECT, _queryBuilderSelect?.toSql() ?: "");
-        temp =  temp?.replace(QueryTools_table._TAG_TEMP_TABLES, _queryBuilderTable?.toSql() ?: "");
-        temp =  temp?.replace(QueryTools_where._TAG_TEMP_WHERES, _queryBuilderWhere?.toSql() ?: "");
-        temp =  temp?.replace(QueryTools_options._TAG_TEMP_OPTION, _queryBuilderOptions?.toSql() ?: "");
+        temp =  temp?.replace(QueryTools_withsCollection._TAG_TEMP_WITH,   _queryBuilderWiths?.toSql()+"\n"    ?: "");
+        temp =  temp?.replace(QueryTools_select._TAG_TEMP_SELECT,          _queryBuilderSelect?.toSql()+"\n"   ?: "");
+        temp =  temp?.replace(QueryTools_table._TAG_TEMP_TABLES,           _queryBuilderTable?.toSql()+"\n"    ?: "");
+        temp =  temp?.replace(QueryTools_joinsConnect._TAG_TEMP_JOINS,     _queryBuilderJoins?.toSql()         ?: "");
+        temp =  temp?.replace(QueryTools_where._TAG_TEMP_WHERES,           _queryBuilderWhere?.toSql()+"\n"    ?: "");
+        temp =  temp?.replace(QueryTools_options._TAG_TEMP_OPTION,         _queryBuilderOptions?.toSql()+"\n"  ?: "");
         return  temp;
     }
 
@@ -86,7 +58,12 @@ class QueryBuilder(
     ------------------------------------ */
 
     override fun getBaseTempSql(): String? {
-        return "${QueryTools_select._TAG_TEMP_SELECT} ${QueryTools_table._TAG_TEMP_TABLES} $_TAG_TEMP_JOINS ${QueryTools_where._TAG_TEMP_WHERES}  ${QueryTools_options._TAG_TEMP_OPTION} ";
+        return "${QueryTools_withsCollection._TAG_TEMP_WITH} " +
+                " ${QueryTools_select._TAG_TEMP_SELECT} " +
+                "${QueryTools_table._TAG_TEMP_TABLES} " +
+                "${QueryTools_joinsConnect._TAG_TEMP_JOINS} " +
+                "${QueryTools_where._TAG_TEMP_WHERES}  " +
+                "${QueryTools_options._TAG_TEMP_OPTION} ";
     }
 
     override fun toSql(): String? {
@@ -101,14 +78,24 @@ class QueryBuilder(
 
 
 
+    /* ------------------------------------
+      Select
+     ----------------------------------- */
+    override fun withs(blockWiths: (IQueryTools_withsCollection) -> QueryTools_withsCollection): QueryBuilder {
+        _queryBuilderWiths = _queryBuilderWiths?.setupWiths(blockWiths)
+        return this;
+    }
+
 
     /* ------------------------------------
        Select
-    ----------------------------------- */
+     ----------------------------------- */
     override fun select(blockSelect: (IQueryTools_select) -> QueryTools_select): QueryBuilder {
         _queryBuilderSelect = _queryBuilderSelect?.selectSetup(blockSelect)
         return this;
     }
+
+
 
 
     /* ------------------------------------
@@ -120,13 +107,28 @@ class QueryBuilder(
     }
 
 
+
+
+    /* ------------------------------------
+     joins
+    ----------------------------------- */
+    override fun joins(blockJoins: (IQueryTools_joinsConnect) -> QueryTools_joinsConnect): QueryBuilder {
+        _queryBuilderJoins = _queryBuilderJoins?.setupJoins(blockJoins);
+        return this;
+    }
+
+
+
+
     /* ------------------------------------
       where
     ----------------------------------- */
-    override fun where(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryBuilder {
+    override fun where(blockGroup: (QueryTools_conditionsGroups) -> QueryTools_conditionsGroups): QueryBuilder {
         _queryBuilderWhere = _queryBuilderWhere?.whereSetup(blockGroup)
         return this;
     }
+
+
 
 
     /* ------------------------------------

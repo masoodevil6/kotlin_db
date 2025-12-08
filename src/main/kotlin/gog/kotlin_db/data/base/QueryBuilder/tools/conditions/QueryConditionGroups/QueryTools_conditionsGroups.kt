@@ -1,21 +1,18 @@
 package gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroups
 
-import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.IQueryTools_conditions
+import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.IQueryTools_isConditions
 import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditions.QueryTools_conditions
-import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
 import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
 
-class QueryTools_conditionsGroup(
+class QueryTools_conditionsGroups(
     val conditionLogical: String,
 ):
-    IQueryTools_conditionsGroupMethods ,
-    IQueryTools_conditions,
-    IQueryTools
+    IQueryTools_conditionsGroups
 {
 
     public var isAddLogical: Boolean = false;
 
-    protected var conditions: MutableList<IQueryTools_conditions> = mutableListOf()
+    protected var conditions: MutableList<IQueryTools_isConditions> = mutableListOf()
 
 
 
@@ -28,9 +25,9 @@ class QueryTools_conditionsGroup(
 
     override fun group(
         conditionLogical: String,
-        block: (QueryTools_conditionsGroup) -> IQueryTools_conditions
-    ): QueryTools_conditionsGroup {
-        val conditionSchema = block(QueryTools_conditionsGroup(conditionLogical));
+        block: (QueryTools_conditionsGroups) -> IQueryTools_isConditions
+    ): QueryTools_conditionsGroups {
+        val conditionSchema = block(QueryTools_conditionsGroups(conditionLogical));
         conditions.add(conditionSchema);
         return this;
     }
@@ -48,55 +45,55 @@ class QueryTools_conditionsGroup(
         sideLeft: String,
         conditionOperation: String,
         sideRight: String
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_AND, sideLeft, conditionOperation, sideRight);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_AND, sideLeft, conditionOperation, sideRight);
     }
 
     override fun whereAnd(
         sideLeft: String,
         conditionOperation: String,
         block: (QueryBuilder) -> QueryBuilder
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_AND, sideLeft, conditionOperation, block);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_AND, sideLeft, conditionOperation, block);
     }
 
     override fun whereOn(
         sideLeft: String,
         conditionOperation: String,
         sideRight: String
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_ON, sideLeft, conditionOperation, sideRight);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_ON, sideLeft, conditionOperation, sideRight);
     }
 
     override fun whereOn(
         sideLeft: String,
         conditionOperation: String,
         block: (QueryBuilder) -> QueryBuilder
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_ON, sideLeft, conditionOperation, block);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_ON, sideLeft, conditionOperation, block);
     }
 
     override fun whereOr(
         sideLeft: String,
         conditionOperation: String,
         sideRight: String
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_OR, sideLeft, conditionOperation, sideRight);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_OR, sideLeft, conditionOperation, sideRight);
     }
 
     override fun whereOr(
         sideLeft: String,
         conditionOperation: String,
         block: (QueryBuilder) -> QueryBuilder
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_OR, sideLeft, conditionOperation, block);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_OR, sideLeft, conditionOperation, block);
     }
 
 
     override fun whereIn(
         sideLeft: String,
         listValues: List<String>
-    ): QueryTools_conditionsGroup {
+    ): QueryTools_conditionsGroups {
         var sideRight = " (";
         for ((index, value) in listValues.withIndex()){
             sideRight +=  " $sideRight";
@@ -105,14 +102,14 @@ class QueryTools_conditionsGroup(
             }
         }
         sideRight += ") "
-        return whereCondition(QueryBuilder._LOGICAL_AND, sideLeft, QueryBuilder._OPERATION_IN, sideRight);
+        return whereCondition(_LOGICAL_AND, sideLeft, _OPERATION_IN, sideRight);
     }
 
     override fun whereIn(
         sideLeft: String,
         block: (QueryBuilder) -> QueryBuilder
-    ): QueryTools_conditionsGroup {
-        return whereCondition(QueryBuilder._LOGICAL_AND, sideLeft, QueryBuilder._OPERATION_IN, block);
+    ): QueryTools_conditionsGroups {
+        return whereCondition(_LOGICAL_AND, sideLeft, _OPERATION_IN, block);
     }
 
 
@@ -121,14 +118,14 @@ class QueryTools_conditionsGroup(
         sideLeft: String,
         search: String ,
         conditionLogical: String
-    ): QueryTools_conditionsGroup {
+    ): QueryTools_conditionsGroups {
         group(conditionLogical){
             schema->
             schema
-                .whereCondition(QueryBuilder._LOGICAL_AND , sideLeft , QueryBuilder._OPERATION_LIKE , "'$search'")
-                .whereCondition(QueryBuilder._LOGICAL_AND , sideLeft , QueryBuilder._OPERATION_LIKE , "'%$search'")
-                .whereCondition(QueryBuilder._LOGICAL_AND , sideLeft , QueryBuilder._OPERATION_LIKE , "'$search%'")
-                .whereCondition(QueryBuilder._LOGICAL_AND , sideLeft , QueryBuilder._OPERATION_LIKE , "'%$search%'")
+                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'$search'")
+                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'%$search'")
+                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'$search%'")
+                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'%$search%'")
         }
         return this;
     }
@@ -141,7 +138,7 @@ class QueryTools_conditionsGroup(
         sideLeft: String,
         conditionOperation: String,
         sideRight: String
-    ): QueryTools_conditionsGroup {
+    ): QueryTools_conditionsGroups {
         val condition = QueryTools_conditions(conditionLogical, sideLeft, conditionOperation, sideRight);
         conditions.add(condition);
         return this;
@@ -152,7 +149,7 @@ class QueryTools_conditionsGroup(
         sideLeft: String,
         conditionOperation: String,
         block: (QueryBuilder) -> QueryBuilder
-    ): QueryTools_conditionsGroup {
+    ): QueryTools_conditionsGroups {
         val sideRight = block(QueryBuilder());
         val condition = QueryTools_conditions(conditionLogical, sideLeft, conditionOperation, sideRight.toSql().toString());
         conditions.add(condition);
@@ -184,6 +181,26 @@ class QueryTools_conditionsGroup(
         const val _TAG_TEMP_CONDITION_LOGICAL=     "{{_TAG_TEMP_CONDITION_LOGICAL}}"
         const val _TAG_TEMP_CONDITION_GROUP=        "{{_TAG_TEMP_CONDITION_LEFT}}"
 
+        /*----------------
+           Logical
+        ----------------*/
+        const val _LOGICAL_AND =   "and"
+        const val _LOGICAL_ON =    "on"
+        const val _LOGICAL_OR  =   "or"
+
+
+        /*----------------
+           Operation
+        ----------------*/
+        const val _OPERATION_EQUALS =               "="
+        const val _OPERATION_NOT_EQUALS =           "<>"
+        const val _OPERATION_GEATER_THAN =          ">"
+        const val _OPERATION_LESS_THAN =            "<"
+        const val _OPERATION_GEATER_OR_EQUAL_THAN = ">="
+        const val _OPERATION_LESS_OR_EQUAL_THAN =   "<="
+        const val _OPERATION_LIKE =                 "like"
+        const val _OPERATION_IN =                   "IN"
+        const val _OPERATION_BETWEEN =              "between"
     }
 
 

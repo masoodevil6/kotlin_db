@@ -169,7 +169,7 @@ class QueryTools_select(
 
             var selects = "";
             for ((index, column) in columns.withIndex()){
-                selects +=  " ${column.toSql()}";
+                selects +=  "\n ${column.toSql()}";
                 if (index < columns.size - 1){
                     selects += ","
                 }

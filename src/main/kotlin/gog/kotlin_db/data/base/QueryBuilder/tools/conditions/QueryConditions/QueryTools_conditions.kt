@@ -1,17 +1,13 @@
 package gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditions
 
-import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
-import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.IQueryTools_conditions
-
 class QueryTools_conditions(
     val conditionLogical: String,
     val sideLeft: String ,
     val conditionOperation: String ,
     val sideRight : String ,
 ):
-    IQueryTools_conditionsMethods ,
-    IQueryTools_conditions ,
-    IQueryTools {
+    IQueryTools_conditions
+{
 
 
 
@@ -36,30 +32,6 @@ class QueryTools_conditions(
         const val _TAG_TEMP_CONDITION_LEFT=        "{{_TAG_TEMP_CONDITION_LEFT}}"
         const val _TAG_TEMP_CONDITION_OPERATION=   "{{_TAG_TEMP_CONDITION_OPERATION}}"
         const val _TAG_TEMP_CONDITION_RIGHT=       "{{_TAG_TEMP_CONDITION_RIGHT}}"
-
-
-        /*----------------
-           Logical
-        ----------------*/
-        const val _LOGICAL_AND =   "and"
-        const val _LOGICAL_ON =    "on"
-        const val _LOGICAL_OR  =   "or"
-
-
-        /*----------------
-           Operation
-        ----------------*/
-        const val _OPERATION_EQUALS =               "="
-        const val _OPERATION_NOT_EQUALS =           "<>"
-        const val _OPERATION_GEATER_THAN =          ">"
-        const val _OPERATION_LESS_THAN =            "<"
-        const val _OPERATION_GEATER_OR_EQUAL_THAN = ">="
-        const val _OPERATION_LESS_OR_EQUAL_THAN =   "<="
-        const val _OPERATION_LIKE =                 "like"
-        const val _OPERATION_IN =                   "IN"
-        const val _OPERATION_BETWEEN =              "between"
-
-
 
     }
 

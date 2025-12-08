@@ -1,7 +1,6 @@
 package gog.kotlin_db.data.base.QueryBuilder.tools.table
 
 import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
-import gog.kotlin_db.data.base.QueryBuilder.tools.options.QueryTools_options
 
 class QueryTools_table(
 

@@ -1,10 +1,7 @@
 package gog.kotlin_db.data.base.QueryBuilder.tools.where
 
-import gog.kotlin_db.data.base.QueryBuilder.tools.IQueryTools
-import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
-import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder.Companion._LOGICAL_AND
-import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroups.QueryTools_conditionsGroup
-import gog.kotlin_db.data.base.QueryBuilder.tools.options.QueryTools_options
+
+import gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditionGroups.QueryTools_conditionsGroups
 
 
 class QueryTools_where(
@@ -19,10 +16,10 @@ class QueryTools_where(
 
 
 
-    var condition: QueryTools_conditionsGroup? = null;
+    var condition: QueryTools_conditionsGroups? = null;
 
-    override fun whereSetup(blockGroup: (QueryTools_conditionsGroup) -> QueryTools_conditionsGroup): QueryTools_where {
-        condition = blockGroup(QueryTools_conditionsGroup(_LOGICAL_AND))
+    override fun whereSetup(blockGroup: (QueryTools_conditionsGroups) -> QueryTools_conditionsGroups): QueryTools_where {
+        condition = blockGroup(QueryTools_conditionsGroups(QueryTools_conditionsGroups._LOGICAL_AND))
         return this;
     }
 
