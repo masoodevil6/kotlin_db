@@ -54,7 +54,7 @@ class QueryTools_select(
         block: (QueryBuilder) -> QueryBuilder
     ): QueryTools_select {
         val columnsName = block(QueryBuilder());
-        val column = QueryTools_columns(columnsName.toSql().toString() , columnAlias);
+        val column = QueryTools_columns("(${columnsName.toSql().toString()})" , columnAlias);
         columns?.add(column);
         return this;
     }
@@ -145,7 +145,7 @@ class QueryTools_select(
         block: (QueryBuilder) -> QueryBuilder
     ): QueryTools_select {
         val columnsName = block(QueryBuilder());
-        val column = QueryTools_columns(columnsName.toSql().toString() , columnAlias ,methodName);
+        val column = QueryTools_columns("(${columnsName.toSql().toString()})" , columnAlias ,methodName);
         columns?.add(column);
         return this;
     }
@@ -169,14 +169,14 @@ class QueryTools_select(
 
             var selects = "";
             for ((index, column) in columns.withIndex()){
-                selects +=  "\n ${column.toSql()}";
+                selects +=  " ${column.toSql()}";
                 if (index < columns.size - 1){
                     selects += ","
                 }
             }
             return queryTemp?.replace(_TAG_TEMP_SELECT_COLUMNS, selects);
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

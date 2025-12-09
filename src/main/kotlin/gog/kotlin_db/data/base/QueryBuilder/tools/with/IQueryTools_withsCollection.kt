@@ -7,6 +7,6 @@ interface IQueryTools_withsCollection : IQueryTools {
 
     fun setupWiths(blockWiths: (IQueryTools_withsCollection) -> QueryTools_withsCollection): QueryTools_withsCollection;
 
-    fun with(withName: String ,  blockQuery: (QueryBuilder) -> QueryBuilder) : IQueryTools_withsCollection;
+    fun with(withName: String ,  blockQuery: (QueryBuilder) -> QueryBuilder) : QueryTools_withsCollection;
 
 }

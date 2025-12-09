@@ -38,7 +38,7 @@ class QueryTools_where(
             var queryTemp = getBaseTempSql();
             return queryTemp?.replace(_TAG_TEMP_WHERES_CONDITIONS, condition?.toWhereSql() ?: "");
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

@@ -25,5 +25,7 @@ interface IQueryBuilder: IQueryTools {
     fun options(blockGroup: (IQueryTools_options) -> QueryTools_options): QueryBuilder;
 
 
+    fun toSqlReadable(): String;
+
 
 }

@@ -21,7 +21,7 @@ class QueryTools_withsCollection(
     override fun with(
         withName: String,
         blockQuery: (QueryBuilder) -> QueryBuilder
-    ): IQueryTools_withsCollection {
+    ): QueryTools_withsCollection {
         val query = blockQuery(QueryBuilder());
         withs.add(
             QueryTools_withItem(
@@ -61,7 +61,7 @@ class QueryTools_withsCollection(
             }
             return queryTemp?.replace(_TAG_TEMP_WITH_ITEM, withStr);
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

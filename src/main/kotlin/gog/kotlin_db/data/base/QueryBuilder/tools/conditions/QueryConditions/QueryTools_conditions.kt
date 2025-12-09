@@ -2,9 +2,9 @@ package gog.kotlin_db.data.base.QueryBuilder.tools.conditions.QueryConditions
 
 class QueryTools_conditions(
     val conditionLogical: String,
-    val sideLeft: String ,
+    val sideLeft: String? ,
     val conditionOperation: String ,
-    val sideRight : String ,
+    val sideRight : String? ,
 ):
     IQueryTools_conditions
 {
@@ -38,16 +38,19 @@ class QueryTools_conditions(
 
 
     override fun getBaseTempSql(): String? {
-        return " $_TAG_TEMP_CONDITION_LOGICAL ($_TAG_TEMP_CONDITION_LEFT) $_TAG_TEMP_CONDITION_OPERATION ($_TAG_TEMP_CONDITION_RIGHT)"
+        return " $_TAG_TEMP_CONDITION_LOGICAL $_TAG_TEMP_CONDITION_LEFT $_TAG_TEMP_CONDITION_OPERATION $_TAG_TEMP_CONDITION_RIGHT"
     }
 
     override fun toSql(): String? {
         var queryTemp = getBaseTempSql();
-        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LOGICAL,  if (isAddLogical) {conditionLogical} else {""});
-        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LEFT, sideLeft);
-        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_OPERATION, conditionOperation);
-        queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_RIGHT, sideRight);
-        return queryTemp;
+        if (sideLeft != null && sideRight != null) {
+            queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LOGICAL,  if (isAddLogical) {conditionLogical} else {""});
+            queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_LEFT, sideLeft);
+            queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_OPERATION, conditionOperation);
+            queryTemp =  queryTemp?.replace(_TAG_TEMP_CONDITION_RIGHT, sideRight);
+            return queryTemp;
+        }
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

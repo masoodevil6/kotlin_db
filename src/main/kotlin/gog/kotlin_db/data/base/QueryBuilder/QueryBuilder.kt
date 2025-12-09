@@ -13,6 +13,7 @@ import gog.kotlin_db.data.base.QueryBuilder.tools.where.IQueryTools_where
 import gog.kotlin_db.data.base.QueryBuilder.tools.where.QueryTools_where
 import gog.kotlin_db.data.base.QueryBuilder.tools.with.IQueryTools_withsCollection
 import gog.kotlin_db.data.base.QueryBuilder.tools.with.QueryTools_withsCollection
+import gog.kotlin_db.utils.tools.StringTools
 
 
 class QueryBuilder(
@@ -40,12 +41,12 @@ class QueryBuilder(
 
     private fun setTemplatePartQuery(queryTemp: String?): String? {
         var temp = queryTemp;
-        temp =  temp?.replace(QueryTools_withsCollection._TAG_TEMP_WITH,   _queryBuilderWiths?.toSql()+"\n"    ?: "");
-        temp =  temp?.replace(QueryTools_select._TAG_TEMP_SELECT,          _queryBuilderSelect?.toSql()+"\n"   ?: "");
-        temp =  temp?.replace(QueryTools_table._TAG_TEMP_TABLES,           _queryBuilderTable?.toSql()+"\n"    ?: "");
-        temp =  temp?.replace(QueryTools_joinsConnect._TAG_TEMP_JOINS,     _queryBuilderJoins?.toSql()         ?: "");
-        temp =  temp?.replace(QueryTools_where._TAG_TEMP_WHERES,           _queryBuilderWhere?.toSql()+"\n"    ?: "");
-        temp =  temp?.replace(QueryTools_options._TAG_TEMP_OPTION,         _queryBuilderOptions?.toSql()+"\n"  ?: "");
+        temp =  temp?.replace(QueryTools_withsCollection._TAG_TEMP_WITH,   _queryBuilderWiths?.toSql()    ?: "");
+        temp =  temp?.replace(QueryTools_select._TAG_TEMP_SELECT,          _queryBuilderSelect?.toSql()   ?: "");
+        temp =  temp?.replace(QueryTools_table._TAG_TEMP_TABLES,           _queryBuilderTable?.toSql()    ?: "");
+        temp =  temp?.replace(QueryTools_joinsConnect._TAG_TEMP_JOINS,     _queryBuilderJoins?.toSql()    ?: "");
+        temp =  temp?.replace(QueryTools_where._TAG_TEMP_WHERES,           _queryBuilderWhere?.toSql()    ?: "");
+        temp =  temp?.replace(QueryTools_options._TAG_TEMP_OPTION,         _queryBuilderOptions?.toSql()  ?: "");
         return  temp;
     }
 
@@ -69,11 +70,16 @@ class QueryBuilder(
     override fun toSql(): String? {
         var queryTemp = getBaseTempSql();
         queryTemp = setTemplatePartQuery(queryTemp);
+        queryTemp = StringTools.normalizeSpaces(queryTemp.toString());
         return queryTemp;
     }
 
     override fun replaceInBaseTemp(query: String): String {
         return query ;
+    }
+
+    override fun toSqlReadable(): String {
+        return StringTools.formatSql(this.toSql().toString());
     }
 
 
@@ -138,7 +144,6 @@ class QueryBuilder(
         _queryBuilderOptions = _queryBuilderOptions?.optionsSetup(blockGroup)
         return this;
     }
-
 
 
 

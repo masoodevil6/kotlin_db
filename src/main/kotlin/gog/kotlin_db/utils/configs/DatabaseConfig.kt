@@ -1,4 +1,4 @@
-package gog.kotlin_db.utils
+package gog.kotlin_db.utils.configs
 
 data class DatabaseConfig(
     val dbDomain    : String = "jdbc:mysql://localhost",

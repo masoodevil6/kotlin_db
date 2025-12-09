@@ -42,72 +42,75 @@ class QueryTools_conditionsGroups(
 
 
     override fun whereAnd(
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        sideRight: String
+        sideRight: String?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_AND, sideLeft, conditionOperation, sideRight);
     }
 
     override fun whereAnd(
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        block: (QueryBuilder) -> QueryBuilder
+        block: (QueryBuilder) -> QueryBuilder?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_AND, sideLeft, conditionOperation, block);
     }
 
     override fun whereOn(
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        sideRight: String
+        sideRight: String?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_ON, sideLeft, conditionOperation, sideRight);
     }
 
     override fun whereOn(
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        block: (QueryBuilder) -> QueryBuilder
+        block: (QueryBuilder) -> QueryBuilder?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_ON, sideLeft, conditionOperation, block);
     }
 
     override fun whereOr(
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        sideRight: String
+        sideRight: String?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_OR, sideLeft, conditionOperation, sideRight);
     }
 
     override fun whereOr(
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        block: (QueryBuilder) -> QueryBuilder
+        block: (QueryBuilder) -> QueryBuilder?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_OR, sideLeft, conditionOperation, block);
     }
 
 
     override fun whereIn(
-        sideLeft: String,
+        sideLeft: String?,
         listValues: List<String>
     ): QueryTools_conditionsGroups {
-        var sideRight = " (";
-        for ((index, value) in listValues.withIndex()){
-            sideRight +=  " $sideRight";
-            if (index < listValues.size - 1){
-                sideRight += ","
+        if (listValues.size > 0){
+            var sideRight = " (";
+            for ((index, value) in listValues.withIndex()){
+                sideRight +=  " $sideRight";
+                if (index < listValues.size - 1){
+                    sideRight += ","
+                }
             }
+            sideRight += ") "
+            return whereCondition(_LOGICAL_AND, sideLeft, _OPERATION_IN, sideRight);
         }
-        sideRight += ") "
-        return whereCondition(_LOGICAL_AND, sideLeft, _OPERATION_IN, sideRight);
+        return this;
     }
 
     override fun whereIn(
-        sideLeft: String,
-        block: (QueryBuilder) -> QueryBuilder
+        sideLeft: String?,
+        block: (QueryBuilder) -> QueryBuilder?
     ): QueryTools_conditionsGroups {
         return whereCondition(_LOGICAL_AND, sideLeft, _OPERATION_IN, block);
     }
@@ -115,19 +118,39 @@ class QueryTools_conditionsGroups(
 
 
     override fun whereLike(
-        sideLeft: String,
-        search: String ,
+        sideLeft: String?,
+        search: String? ,
         conditionLogical: String
     ): QueryTools_conditionsGroups {
-        group(conditionLogical){
-            schema->
-            schema
-                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'$search'")
-                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'%$search'")
-                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'$search%'")
-                .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'%$search%'")
+        if (search != null && search.isNotEmpty()) {
+            group(conditionLogical){
+                    schema->
+                schema
+                    .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'$search'")
+                    .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'%$search'")
+                    .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'$search%'")
+                    .whereCondition(_LOGICAL_AND , sideLeft , _OPERATION_LIKE , "'%$search%'")
+            }
         }
         return this;
+    }
+
+
+
+    override fun whereNull(
+        conditionLogical: String,
+        sideLeft: String
+    ): QueryTools_conditionsGroups {
+        return whereCondition(conditionLogical, sideLeft, "", " is null ");
+    }
+
+    override fun whereNull(
+        conditionLogical: String,
+        block: (QueryBuilder) -> QueryBuilder,
+        conditionOperation: String
+    ): QueryTools_conditionsGroups {
+        val sideLeft = block(QueryBuilder());
+        return whereCondition(conditionLogical, "(${sideLeft.toSql().toString()})" , "", " is null ");
     }
 
 
@@ -135,9 +158,9 @@ class QueryTools_conditionsGroups(
 
     override fun whereCondition(
         conditionLogical: String,
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        sideRight: String
+        sideRight: String?
     ): QueryTools_conditionsGroups {
         val condition = QueryTools_conditions(conditionLogical, sideLeft, conditionOperation, sideRight);
         conditions.add(condition);
@@ -146,12 +169,12 @@ class QueryTools_conditionsGroups(
 
     override fun whereCondition(
         conditionLogical: String,
-        sideLeft: String,
+        sideLeft: String?,
         conditionOperation: String,
-        block: (QueryBuilder) -> QueryBuilder
+        block: (QueryBuilder) -> QueryBuilder?
     ): QueryTools_conditionsGroups {
         val sideRight = block(QueryBuilder());
-        val condition = QueryTools_conditions(conditionLogical, sideLeft, conditionOperation, sideRight.toSql().toString());
+        val condition = QueryTools_conditions(conditionLogical, sideLeft, conditionOperation, "(${sideRight?.toSql().toString()})");
         conditions.add(condition);
         return this;
     }
@@ -223,7 +246,7 @@ class QueryTools_conditionsGroups(
 
             return queryTemp;
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

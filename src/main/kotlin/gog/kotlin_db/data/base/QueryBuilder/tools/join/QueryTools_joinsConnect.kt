@@ -168,11 +168,11 @@ class QueryTools_joinsConnect(
 
             var joinsStr = "";
             for ((index, join) in joins.withIndex()){
-                joinsStr +=  "${join.toSql()} \n";
+                joinsStr +=  "${join.toSql()} ";
             }
             return queryTemp?.replace(_TAG_TEMP_JOINS_ITEM, joinsStr);
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

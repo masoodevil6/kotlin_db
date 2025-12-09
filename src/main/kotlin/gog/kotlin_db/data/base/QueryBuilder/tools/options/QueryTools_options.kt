@@ -97,7 +97,7 @@ class QueryTools_options(
 
 
     override fun getBaseTempSql(): String? {
-        return " ${_TAG_TEMP_OPTION_GROUP} ${_TAG_TEMP_OPTION_ORDER} ${_TAG_TEMP_OPTION_PAGE_INIT}"
+        return " ${_TAG_TEMP_OPTION_GROUP}  ${_TAG_TEMP_OPTION_ORDER}  ${_TAG_TEMP_OPTION_PAGE_INIT}"
     }
 
     override fun toSql(): String? {

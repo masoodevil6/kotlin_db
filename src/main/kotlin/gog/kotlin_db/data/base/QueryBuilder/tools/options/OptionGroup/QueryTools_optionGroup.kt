@@ -43,7 +43,7 @@ class QueryTools_optionGroup(
 
             return queryTemp;
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

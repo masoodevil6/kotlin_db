@@ -49,7 +49,7 @@ class QueryTools_optionOrder(
             queryTemp = queryTemp?.replace(QueryTools_options._TAG_TEMP_OPTION_ORDER_TYPE, _orderType ?: "");
             return queryTemp;
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

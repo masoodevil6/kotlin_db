@@ -18,7 +18,7 @@ class QueryTools_columns(
         if (ColumnMethod != null) {
             queryTemp += _TAG_TEMP_COLUMN_METHOD;
         }
-        queryTemp += "($_TAG_TEMP_COLUMN_NAME)"
+        queryTemp += _TAG_TEMP_COLUMN_NAME
         if (ColumnAlias != null) {
             queryTemp += " as $_TAG_TEMP_COLUMN_ALIAS ";
         }

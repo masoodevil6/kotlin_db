@@ -60,7 +60,7 @@ class QueryTools_table(
             queryTemp = queryTemp?.replace(_TAG_TEMP_TABLES_ALIAS, _aliasName ?: "")
             return queryTemp;
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {

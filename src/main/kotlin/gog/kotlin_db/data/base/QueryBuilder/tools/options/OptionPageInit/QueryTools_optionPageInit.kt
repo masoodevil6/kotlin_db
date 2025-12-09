@@ -32,7 +32,7 @@ class QueryTools_optionPageInit(
             queryTemp = queryTemp?.replace(QueryTools_options._TAG_TEMP_OPTION_PAGE_INIT_OFFSET, _pageOffset.toString() ?: 0.toString());
             return queryTemp;
         }
-        return null;
+        return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {
