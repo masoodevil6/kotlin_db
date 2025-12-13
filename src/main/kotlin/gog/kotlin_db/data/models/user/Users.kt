@@ -1,21 +1,23 @@
 package gog.kotlin_db.data.models.user
 
-import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
+import gog.kotlin_db.data.base.schemas.QBColumn
+import gog.kotlin_db.data.base.schemas.QBTable
 
-class Users()/*: QueryBuilder ()*/{
 
-    companion object {
-        val tableName : String= "user_users"
-    }
+@QBTable("user_users")
+class Users()
+{
 
-    val id : Int =  0
-    val name : String? =  null;
-    val family : String? =  null;
-    val age : String? =  null;
+    @QBColumn("id" , primaryKey = true)
+    val userId : Int =  0
 
-    /*init {
-        setTableName(Users.tableName);
-    }*/
+    @QBColumn("name")
+    val userName : String? =  null;
 
+    @QBColumn("family")
+    val userFamily : String? =  null;
+
+    @QBColumn("age")
+    val userAge : String? =  null;
 
 }

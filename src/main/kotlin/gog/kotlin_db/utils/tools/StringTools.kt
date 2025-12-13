@@ -21,7 +21,7 @@ object StringTools {
             .filter { it.isNotBlank() }
 
         val breakBefore = setOf(
-            "SELECT", "FROM", "WHERE", "JOIN",
+            "SELECT", "FROM", "WHERE", "JOIN", "GROUP", "ORDER",
             "INNER", "LEFT", "RIGHT", "ON",
             "LIMIT", "OFFSET", "WITH", "AND", "OR"
         )

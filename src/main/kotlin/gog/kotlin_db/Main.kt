@@ -1,9 +1,7 @@
 package gog.kotlin_db.data
 
-import gog.kotlin_db.data.base.DataBase
-import gog.kotlin_db.data.base.QueryBuilder.QueryBuilder
-import gog.kotlin_db.data.base.QueryBuilder.tools.with.QueryTools_withsCollection
-import gog.kotlin_db.data.models.user.Users
+import gog.kotlin_db.data.base.database.DataBase
+import gog.kotlin_db.data.base.query_builder.QueryBuilder
 import java.util.logging.LogManager
 
 fun main() {
@@ -37,7 +35,7 @@ fun main() {
                         .where{ schema->
                             schema.whereAnd("uu.id" , "="  , 1.toString())
                                 .whereAnd("uu.id" , "="  , null)
-                                .whereNull( "and" , "uu.id" )
+                             //   .whereNull( "and" , "uu.id" )
                         }
                 }
         }
@@ -53,73 +51,48 @@ fun main() {
         .table{ schema->
             schema.table("users" , "u")
         }
-        .options{
-            schema->
+        .limit(2)
+        .offset(0)
+        .group {schema->
             schema
-                .pageInit(1 , 2)
-        };
+                .addColumn("id")
+                .addColumn("name")
+                .addColumn("family")
+                .addColumn("age")
+                .addColumn("phone")
+        }
+        .order {scehma->
+            scehma
+                .type("asc")
+                .addColumn("id")
 
-    //println(query.toSql())
+        }
+
+
+   // println(query.toSql())
     println(query.toSqlReadable())
 
-  /*  var query = QueryBuilder()
-        .select{
-            schema->
-            schema
-                .column(Users::id.name)
-                .column(Users::name.name)
-        }
-        .table{
-            schema->
-            schema.table(Users.tableName)
-        }
-        .joins{ schema ->
-            schema
-                .join("user_phones"){condition->
-                    condition.whereAnd("user_users.id" , "=" , "user_phones.user_id" )
-                }
-        }
-        .where{ schema->
-            schema
-                .whereLike(Users::name.name , "aaaa")
-                .group("and"){ schema->
-                    schema
-                        .whereAnd(
-                            Users.tableName+"."+ Users::id.name,
-                            "=" ,
-                            1.toString()
-                        )
-                        .whereAnd(
-                            Users.tableName+"."+ Users::name.name,
-                            "like" ,
-                            "'مهدی'"
-                        )
-                }
-                .group("or"){ schema->
-                    schema
-                        .whereAnd(
-                            Users.tableName+"."+ Users::id.name,
-                            "=" ,
-                            2.toString()
-                        )
-                        .whereAnd(
-                            Users.tableName+"."+ Users::name.name,
-                            "like" ,
-                            "'عباس '"
-                        )
-                }
-        }
-        .options{
-            schema->
-            schema
-                .pageInit(1 , 2)
-                .addGroup(Users::name.name )
-        }
-        .toSql();
 
-    println(query)*/
+    val queryCreated : String? = query.toSql();
 
 
+    db.fetch(queryCreated){
+        result->
+
+        if (result != null){
+
+            while (result.next()) {
+
+                val id = result.getInt("id")
+                val name = result.getString("name")
+                val family = result.getString("family")
+                val age = result.getString("age")
+                val phone = result.getString("phone")
+
+                println("User: $id - $name $family $age $phone")
+            }
+        }
+    }
 
 
 }
