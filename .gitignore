@@ -43,3 +43,10 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### From Chat GPT ###
+/build/
+/.gradle/
+local.properties
+*.iml
+.idea/
