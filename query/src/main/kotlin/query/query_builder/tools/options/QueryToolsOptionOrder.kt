@@ -1,25 +1,37 @@
 package gog.my_project.query.query_builder.tools.options
 
+import gog.my_project.enums.SqlOrderType
+import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumnsBase
 import gog.my_project.query.interfaces.query_builders.tools.options.IQueryToolsOptionOrder
+import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
+import gog.my_project.query.query_builder.tools.column.QueryToolsColumnsBase
+import gog.my_project.tools.templates.OTemplateSqlDialect
 
 
 class QueryToolsOptionOrder(
-
+    private val sqlDialect: ISqlDialect
 ):
     IQueryToolsOptionOrder
 {
 
     protected var _orderByList: MutableList<String> = mutableListOf();
-    private var _orderType : String? = " asc ";
+    private var _orderType : String? = SqlOrderType.Asc.value;
 
 
 
 
 
+    override fun type(orderType : SqlOrderType) : IQueryToolsOptionOrder {
+        this._orderType= orderType.value;
+        return this;
+    }
 
+    override fun typeAsc(): IQueryToolsOptionOrder {
+        return this.type(SqlOrderType.Asc)
+    }
 
-    override fun orderSetup(blockOrder: (IQueryToolsOptionOrder) -> IQueryToolsOptionOrder) : IQueryToolsOptionOrder {
-        return  blockOrder(QueryToolsOptionOrder());
+    override fun typeDesc(): IQueryToolsOptionOrder {
+        return this.type(SqlOrderType.Desc)
     }
 
 
@@ -28,8 +40,12 @@ class QueryToolsOptionOrder(
         return this;
     }
 
-    override fun type(orderType : String) : IQueryToolsOptionOrder {
-        this._orderType= orderType;
+    override fun addColumn(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsOptionOrder {
+        val builder = QueryToolsColumnsBase(sqlDialect);
+        val query = builder.blockColumn().toSql();
+        if (query != null){
+            return addColumn(query);
+        }
         return this;
     }
 
@@ -42,17 +58,15 @@ class QueryToolsOptionOrder(
 
 
 
-    override fun getBaseTempSql(): String? {
-        return ""
-    }
+
 
     override fun toSql(): String? {
-        return DatabaseConfig.dbTypeName.getOptionOderSql(_orderByList , _orderType);
+        return sqlDialect.getOptionOderSql(_orderByList , _orderType);
     }
 
     override fun replaceInBaseTemp(query: String): String {
         val queryOption= toSql();
-        return query.replace(ObjectSqlTypeTemplates._TAG_TEMP_OPTION_ORDER, queryOption ?: "");
+        return query.replace(OTemplateSqlDialect._TAG_TEMP_OPTION_ORDER, queryOption ?: "");
     }
 
 

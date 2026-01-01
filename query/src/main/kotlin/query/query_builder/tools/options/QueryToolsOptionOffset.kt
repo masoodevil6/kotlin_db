@@ -1,10 +1,12 @@
 package gog.my_project.query.query_builder.tools.options
 
 import gog.my_project.query.interfaces.query_builders.tools.options.IQueryToolsOptionOffset
+import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
+import gog.my_project.tools.templates.OTemplateSqlDialect
 
 
 class QueryToolsOptionOffset(
-
+    private val sqlDialect: ISqlDialect
 ):
     IQueryToolsOptionOffset
 {
@@ -16,17 +18,16 @@ class QueryToolsOptionOffset(
     }
 
 
-    override fun getBaseTempSql(): String? {
-        return ""
-    }
+
+
 
     override fun toSql(): String? {
-        return DatabaseConfig.dbTypeName.getOptionOffsetSql(_pageOffset);
+        return sqlDialect.getOptionOffsetSql(_pageOffset);
     }
 
     override fun replaceInBaseTemp(query: String): String {
         val queryOption= toSql();
-        return query.replace(ObjectSqlTypeTemplates._TAG_TEMP_OPTION_OFFSET, queryOption ?: "");
+        return query.replace(OTemplateSqlDialect._TAG_TEMP_OPTION_OFFSET, queryOption ?: "");
     }
 
 

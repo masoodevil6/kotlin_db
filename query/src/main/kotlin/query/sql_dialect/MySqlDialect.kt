@@ -1,10 +1,17 @@
 package gog.my_project.query.sql_dialect
 
-
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumns
+import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumnsBase
+import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditions
+import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditionsGroups
 import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsIsConditions
+import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsConnect
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsItem
-import gog.my_project.query.interfaces.query_builders.tools.with.IQueryToolsWithItem
+import gog.my_project.query.interfaces.query_builders.tools.select.IQueryToolsSelect
+import gog.my_project.query.interfaces.query_builders.tools.table.IQueryToolsTable
+import gog.my_project.query.interfaces.query_builders.tools.where.IQueryToolsWhere
+import gog.my_project.query.interfaces.query_builders.tools.with.collections.IQueryToolsWithsCollection
+import gog.my_project.query.interfaces.query_builders.tools.with.item.IQueryToolsWithItem
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.tools.templates.OTemplateSqlDialect
 
@@ -22,23 +29,36 @@ class MySqlDialect : ISqlDialect {
                 "${OTemplateSqlDialect._TAG_TEMP_OPTION_OFFSET} ";
     }
 
-    override fun getWithSql(withList:  List<IQueryToolsWithItem>) : String {
-        if (withList != null && withList.size > 0) {
+    override fun getWithSql(with: IQueryToolsWithsCollection, withPrefix: Boolean) : String {
 
+        val withList:  List<IQueryToolsWithItem> = with.getListWiths();
+        if (withList.size > 0) {
             var withStr = "";
+            if (withPrefix){
+                withStr = " WITH "
+            }
             for ((index, with) in withList.withIndex()){
-                withStr +=  " ${with.toSql()}";
-                if (index < withList.size - 1){
-                    withStr += ","
+                val itemWith = this.getWithItemSql(with);
+                if (itemWith != null) {
+                    withStr +=  " ${itemWith}";
+                    if (index < withList.size - 1){
+                        withStr += ","
+                    }
                 }
             }
-            return " WITH $withStr " ;
+            return withStr ;
         }
         return "";
     }
 
-    override fun getWithItemSql(withName : String, withBody: String) : String {
-        return " $withName AS  ($withBody) " ;
+    override fun getWithItemSql(with: IQueryToolsWithItem) : String? {
+
+        val withName : String? = with.getWithName();
+        val withBody: String? = with.getWithBody();
+        if (withName != null && withBody != null) {
+            return " $withName AS  ($withBody) " ;
+        }
+        return null ;
     }
 
 
@@ -46,32 +66,78 @@ class MySqlDialect : ISqlDialect {
 
 
 
-    override fun getSelectSql(columnsList: List<IQueryToolsColumns>) : String {
-        if (columnsList != null && columnsList.size > 0) {
+    override fun getSelectSql(select: IQueryToolsSelect, withPrefix: Boolean) : String {
+        val columnsList = select.getListColumns();
+        if (columnsList.size > 0) {
             var selects = "";
+            if (withPrefix){
+                selects = "SELECT "
+            }
             for ((index, column) in columnsList.withIndex()){
-                selects +=  " ${column.toSql()}";
-                if (index < columnsList.size - 1){
-                    selects += ","
+                val itemColumn = this.getColumnSql(column);
+                if (itemColumn != null){
+                    selects +=  " $itemColumn";
+                    if (index < columnsList.size - 1){
+                        selects += ","
+                    }
                 }
             }
 
-            return " SELECT $selects "
+            return " $selects "
         }
         return "";
     }
 
+    override fun getColumnSql(column: IQueryToolsColumns) : String? {
+        val columnMethod : String? = column.getColumnMethod();
+        val columnName : String? = column.getColumnName();
+        val columnAlias : String? = column.getColumnAlias();
 
-
-    override fun getColumnSql(columnName: String , columnMethod: String? , columnAlias: String?) : String {
-
-        var queryTemp: String = ""
-        if (columnMethod != null) {
-            queryTemp += columnMethod;
+        if (columnName != null){
+            var queryTemp: String = ""
+            if (columnMethod != null) {
+                queryTemp += columnMethod;
+            }
+            queryTemp += columnName;
+            if (columnAlias != null) {
+                queryTemp += " As ${columnAlias} ";
+            }
+            return queryTemp;
         }
-        queryTemp += columnName;
-        if (columnAlias != null) {
-            queryTemp += " As ${columnAlias} ";
+        return null;
+    }
+
+    override fun getColumnBaseSql(column: IQueryToolsColumnsBase): String? {
+        val columnPrefix = column.getColumnPrefix();
+        val columnName = column.getColumnName();
+        if (columnName != null){
+            var column = ""
+            if (columnPrefix != null) {
+                column = " $columnPrefix.";
+            }
+            column += "$columnName ";
+            return column;
+        }
+        return null;
+    }
+
+
+
+
+
+    override fun getTableSql(table: IQueryToolsTable , withPrefix: Boolean) : String{
+        val tableName: String? = table.getTableName();
+        val tableAlias: String? = table.getTableAlias();
+
+        var queryTemp: String = "";
+        if (tableName != null) {
+            if (withPrefix){
+                queryTemp = " FROM ";
+            }
+            queryTemp += " $tableName ";
+            if (tableAlias != null) {
+                queryTemp += " As ${tableAlias} ";
+            }
         }
 
         return queryTemp;
@@ -83,28 +149,12 @@ class MySqlDialect : ISqlDialect {
 
 
 
-    override fun getTableSql(tableName: String , tableAlias: String?) : String{
-        var queryTemp: String = " FROM "
-        queryTemp += " $tableName ";
-        if (tableAlias != null) {
-            queryTemp += " As ${tableAlias} ";
-        }
-
-        return queryTemp;
-    }
-
-
-
-
-
-
-
-    override fun getJoinSql(joinList:  List<IQueryToolsJoinsItem>) : String {
-        if (joinList != null && joinList.size > 0) {
-
+    override fun getJoinSql(join:  IQueryToolsJoinsConnect) : String {
+        val joinList: List<IQueryToolsJoinsItem> = join.getListJoins();
+        if (joinList.size > 0) {
             var joinsStr = "";
             for ((index, join) in joinList.withIndex()){
-                joinsStr +=  "${join.toSql()} ";
+                joinsStr +=  "${this.getJoinItemSql(join)} ";
             }
             return " $joinsStr ";
         }
@@ -112,8 +162,15 @@ class MySqlDialect : ISqlDialect {
     }
 
 
-    override fun getJoinItemSql(joinConnection: String , joinTable: String , joinAlias: String , joinCondition: String) : String {
-        return " $joinConnection $joinTable AS $joinAlias ON $joinCondition " ;
+    override fun getJoinItemSql(join: IQueryToolsJoinsItem) : String {
+        var joinType: String = join.getJoinType();
+        var joinTable: IQueryToolsTable = join.getJoinTable();
+        var joinCondition: IQueryToolsConditionsGroups = join.getJoinConditions();
+
+        var joinTableStr = this.getTableSql(joinTable , false);
+        var joinConditionsStr = this.getConditionGroupSql(joinCondition);
+
+        return " $joinType $joinTableStr ON $joinConditionsStr " ;
     }
 
 
@@ -121,11 +178,12 @@ class MySqlDialect : ISqlDialect {
 
 
 
-    override fun getWhereSql(condition: String?) : String {
-        if (condition != null) {
-            return " WHERE $condition " ;
+    override fun getWhereSql(condition: IQueryToolsWhere) : String {
+        val conditionGroup = condition.getGroupCondition();
+        if (conditionGroup != null) {
+            return  " WHERE ${this.getConditionGroupSql(conditionGroup)} " ;
         }
-        return "";
+        return  "" ;
     }
 
 
@@ -185,19 +243,30 @@ class MySqlDialect : ISqlDialect {
 
 
 
-    override fun getConditionSql(conditionLogical: String, sideLeft: String? , conditionOperation: String , sideRight : String? , isAddLogical: Boolean) : String {
-        if (sideLeft != null && sideRight != null) {
+    override fun getConditionSql(condition: IQueryToolsConditions)  : String {
+
+        val conditionIsAddLogical: Boolean = condition.isAddLogical();
+        val conditionLogical: String? = condition.getConditionLogical();
+        val conditionSideLeft: String? = condition.getConditionSideLeft();
+        val conditionOperation: String? = condition.getConditionOperation();
+        val conditionSideRight: String? = condition.getConditionSideRight();
+
+        if (conditionSideLeft != null && conditionSideRight != null) {
             var queryTemp = "";
-            queryTemp += " ${if (isAddLogical) {conditionLogical} else {""}} "
-            queryTemp += " $sideLeft "
+            queryTemp += " ${if (conditionIsAddLogical) {conditionLogical} else {""}} "
+            queryTemp += " $conditionSideLeft "
             queryTemp += " $conditionOperation "
-            queryTemp += " $sideRight "
+            queryTemp += " $conditionSideRight "
             return queryTemp;
         }
         return "";
     }
 
-    override fun getConditionGroupSql(conditionLogical: String, conditions: MutableList<IQueryToolsIsConditions>, isAddLogical: Boolean) : String {
+    override fun getConditionGroupSql(group: IQueryToolsConditionsGroups): String {
+        val conditionLogical: String? = group.getGroupLogical();
+        val conditions: MutableList<IQueryToolsIsConditions> = group.getGroupConditions();
+        val isAddLogical: Boolean = group.isAddLogical();
+
         if (conditions != null && conditions.size>0) {
             var queryTemp = "";
 
@@ -207,7 +276,7 @@ class MySqlDialect : ISqlDialect {
 
             var conditionStr = "";
             for ((index, condition) in conditions.withIndex()){
-                conditionStr += condition.toWhereSql(index > 0).toString()
+                conditionStr += condition.setIsAddLogical(index > 0).toString()
             }
             queryTemp += " ($conditionStr) ";
 

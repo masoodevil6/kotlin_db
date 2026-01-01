@@ -1,9 +1,16 @@
 package gog.my_project.query.interfaces.sql_dialect
 
+import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumnsBase
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumns
-import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsIsConditions
+import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditions
+import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditionsGroups
+import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsConnect
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsItem
-import gog.my_project.query.interfaces.query_builders.tools.with.IQueryToolsWithItem
+import gog.my_project.query.interfaces.query_builders.tools.select.IQueryToolsSelect
+import gog.my_project.query.interfaces.query_builders.tools.table.IQueryToolsTable
+import gog.my_project.query.interfaces.query_builders.tools.where.IQueryToolsWhere
+import gog.my_project.query.interfaces.query_builders.tools.with.collections.IQueryToolsWithsCollection
+import gog.my_project.query.interfaces.query_builders.tools.with.item.IQueryToolsWithItem
 
 
 interface ISqlDialect {
@@ -11,38 +18,40 @@ interface ISqlDialect {
     fun getBasicSql() : String
 
 
-    fun getWithSql(withList:  List<IQueryToolsWithItem>) : String;
+    fun getWithSql(with: IQueryToolsWithsCollection, withPrefix: Boolean = true) : String;
 
-    fun getWithItemSql(withName : String, withBody: String) : String;
-
-
-
-
-
-    fun getSelectSql(columnsList: List<IQueryToolsColumns>) : String;
-
-    fun getColumnSql(columnName: String , columnMethod: String? , columnAlias: String?) : String;
+    fun getWithItemSql(with: IQueryToolsWithItem) : String?;
 
 
 
 
 
-    fun getTableSql(tableName: String , tableAlias: String?) : String;
+    fun getSelectSql(select: IQueryToolsSelect, withPrefix: Boolean=true) : String;
+
+    fun getColumnSql(column: IQueryToolsColumns) : String?;
+
+    fun getColumnBaseSql(column: IQueryToolsColumnsBase) : String?;
+
+
+
+
+
+    fun getTableSql(table: IQueryToolsTable, withPrefix: Boolean=true) : String;
 
 
 
 
 
 
-    fun getJoinSql(joinList:  List<IQueryToolsJoinsItem>) : String
+    fun getJoinSql(join:  IQueryToolsJoinsConnect) : String
 
-    fun getJoinItemSql(joinConnection: String , joinTable: String , joinAlias: String , joinCondition: String) : String
-
-
+    fun getJoinItemSql(join: IQueryToolsJoinsItem) : String
 
 
 
-    fun getWhereSql(condition: String?) : String
+
+
+    fun getWhereSql(condition: IQueryToolsWhere) : String
 
     fun getOptionGroupSql(columnsList: List<String>) : String
 
@@ -56,9 +65,9 @@ interface ISqlDialect {
 
 
 
-    fun getConditionSql(conditionLogical: String, sideLeft: String? , conditionOperation: String , sideRight : String? , isAddLogical: Boolean = false) : String
+    fun getConditionSql(condition: IQueryToolsConditions) : String
 
-    fun getConditionGroupSql(conditionLogical: String, conditions: MutableList<IQueryToolsIsConditions>, isAddLogical: Boolean = false) : String
+    fun getConditionGroupSql(group: IQueryToolsConditionsGroups) : String
 
 
 }

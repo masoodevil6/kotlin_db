@@ -2,21 +2,33 @@ package gog.my_project.query.query_builder.tools.table
 
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.table.IQueryToolsTable
+import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.QueryBuilder
+import gog.my_project.query.query_builder.tools.column.QueryToolsColumns
+import gog.my_project.tools.templates.OTemplateSqlDialect
 
 
 class QueryToolsTable(
-
+    private val sqlDialect: ISqlDialect
 ) : IQueryToolsTable {
 
-    var _tableName : String? = null
-    var _tableAlias : String? = null
+    var _tableName : String? = null;
+    var _tableAlias : String? = null;
 
-
-
-    override fun tableSetup(blockTable: (IQueryToolsTable) -> IQueryToolsTable): IQueryToolsTable {
-        return  blockTable(QueryToolsTable());
+    override fun getTableName(): String? {
+        return _tableName;
     }
+
+    override fun getTableAlias(): String? {
+        return _tableAlias;
+    }
+
+
+
+
+
+
+
 
 
     override fun table(tableName: String?): IQueryToolsTable {
@@ -24,35 +36,37 @@ class QueryToolsTable(
         return this;
     }
 
-    override fun table(tableName: String? , aliasName: String?): IQueryToolsTable {
-        this._tableName = tableName;
-        this._tableAlias = aliasName;
-        return this;
-    }
-
-    override fun table(aliasName: String , block: (IQueryBuilder) -> IQueryBuilder) : IQueryToolsTable {
-        val tableName = block(QueryBuilder());
+    override fun table(block: IQueryBuilder.() -> IQueryBuilder): IQueryToolsTable {
+        val builder = QueryBuilder(sqlDialect);
+        val tableName = builder.block();
         this._tableName = "(${tableName.toSql().toString()})";
+        return this;
+    }
+
+
+
+
+
+    override fun alias(aliasName: String?): IQueryToolsTable {
         this._tableAlias = aliasName;
         return this;
     }
 
 
 
-    override fun getBaseTempSql(): String? {
-        return "";
-    }
+
+
 
     override fun toSql(): String? {
         if (_tableName != null) {
-            return DatabaseConfig.dbTypeName.getTableSql(_tableName!! , _tableAlias);
+            return sqlDialect.getTableSql(this);
         }
         return "";
     }
 
     override fun replaceInBaseTemp(query: String): String {
         val queryFrom = toSql();
-        return query.replace(ObjectSqlTypeTemplates._TAG_TEMP_TABLES, queryFrom ?: "");
+        return query.replace(OTemplateSqlDialect._TAG_TEMP_TABLES, queryFrom ?: "");
     }
 
 

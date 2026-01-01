@@ -1,6 +1,6 @@
 package gog.my_project.data_base.config
 
-
+import gog.my_project.core.sql_dialect.DialectQuery
 
 
 internal object DefaultDatabaseConfig {

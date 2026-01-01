@@ -1,16 +1,24 @@
 package gog.my_project.query.interfaces.query_builders.tools.conditions
 
-import gog.my_project.query.interfaces.query_builders.IQueryBuilder
-import gog.my_project.query.query_builder.tools.conditions.QueryToolsConditionsGroups.Companion._LOGICAL_AND
+import gog.my_project.enums.SqlLogical
 
 
 interface IQueryToolsConditionsGroups : IQueryToolsIsConditions {
 
+    fun getGroupLogical(): String?;
+    fun getGroupConditions(): MutableList<IQueryToolsIsConditions>;
 
-    fun group( conditionLogical: String , block: (IQueryToolsConditionsGroups) -> IQueryToolsIsConditions): IQueryToolsConditionsGroups;
+    fun logical(logical: SqlLogical): IQueryToolsConditionsGroups;
+    fun logicalAnd(): IQueryToolsConditionsGroups;
+    fun logicalOr(): IQueryToolsConditionsGroups;
+    fun logicalOn(): IQueryToolsConditionsGroups;
+
+    fun addGroup(blockGroup: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsConditionsGroups;
+
+    fun addCondition(blockCondition: IQueryToolsConditions.() -> IQueryToolsConditions): IQueryToolsConditionsGroups;
 
 
-    fun whereAnd(sideLeft: String? , conditionOperation: String , sideRight: String?): IQueryToolsConditionsGroups;
+    /*fun whereAnd(sideLeft: String? , conditionOperation: String , sideRight: String?): IQueryToolsConditionsGroups;
     fun whereAnd(sideLeft: String? , conditionOperation: String , block: (IQueryBuilder) -> IQueryBuilder?) : IQueryToolsConditionsGroups;
 
 
@@ -35,5 +43,5 @@ interface IQueryToolsConditionsGroups : IQueryToolsIsConditions {
 
     fun whereCondition(conditionLogical: String , sideLeft: String? , conditionOperation: String , sideRight: String?): IQueryToolsConditionsGroups;
     fun whereCondition(conditionLogical: String ,sideLeft: String? , conditionOperation: String , block: (IQueryBuilder) -> IQueryBuilder?) : IQueryToolsConditionsGroups;
-
+*/
 }
