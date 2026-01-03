@@ -4,42 +4,48 @@ import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsC
 import gog.my_project.query.interfaces.query_builders.tools.options.IQueryToolsOptionGroup
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.tools.column.QueryToolsColumnsBase
-import gog.my_project.tools.templates.OTemplateSqlDialect
-
 
 class QueryToolsOptionGroup(
-    private val sqlDialect: ISqlDialect
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
 ):
     IQueryToolsOptionGroup
 {
 
-    protected var _groupByList: MutableList<String> = mutableListOf();
+    protected var _groupByList: MutableList<IQueryToolsColumnsBase> = mutableListOf();
 
 
 
-
-    override fun addColumn(columnName : String): IQueryToolsOptionGroup {
-        _groupByList.add(columnName);
-        return this;
+    /* ==============================================================
+    template
+    ============================================================== */
+    override fun getListColumns(): MutableList<IQueryToolsColumnsBase> {
+        return _groupByList;
     }
 
+
+
+
+
+    /* ==============================================================
+    Builder
+    ============================================================== */
+    override fun toSql(sqlDialect: ISqlDialect): String? {
+        return sqlDialect.getOptionGroupSql(this);
+    }
+
+
+
+
+
+
+    /* ==============================================================
+    structure
+    ============================================================== */
     override fun addColumn(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsOptionGroup {
-        val builder = QueryToolsColumnsBase(sqlDialect);
-        val query = builder.blockColumn().toSql();
-        if (query != null){
-            return addColumn(query);
-        }
+        val builder = QueryToolsColumnsBase();
+        val column = builder.blockColumn();
+        _groupByList.add(column)
         return this;
-    }
-
-
-    override fun toSql(): String? {
-        return sqlDialect.getOptionGroupSql(_groupByList);
-    }
-
-    override fun replaceInBaseTemp(query: String): String {
-        val queryOption= toSql();
-        return query.replace(OTemplateSqlDialect._TAG_TEMP_OPTION_GROUP, queryOption ?: "");
     }
 
 

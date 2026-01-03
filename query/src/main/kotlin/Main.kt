@@ -2,7 +2,12 @@ package gog.my_project
 
 import gog.my_project.core.sql_dialect.DialectQuery
 import gog.my_project.data_base.base.DatabaseBuilder
+import gog.my_project.query.interfaces.query_builders.tools.where.IQueryToolsWhere
+import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
+import gog.my_project.query.query_builder.QueryBuilder
 import gog.my_project.query.query_builder.QueryContext
+import gog.my_project.query.query_builder.tools.table.QueryToolsTable
+import gog.my_project.query.sql_dialect.SqlDialectFactory
 import java.sql.Connection
 import java.util.logging.LogManager
 
@@ -23,85 +28,104 @@ fun main() {
         }
         .dialect(DialectQuery.MY_SQL);
 
+    val sqlDialect: ISqlDialect = SqlDialectFactory().create(dbBuilder.getDialect())
+
 
 
     val db: Connection = dbBuilder.build();
     println("Connected: ${db.isValid(2)}")
 
 
-
-    val queryBuilder = QueryContext(dbBuilder.getDialect()).createQueryBuilder();
-    var query = queryBuilder
+    //val queryBuilder = QueryContext(dbBuilder.getDialect()).createQueryBuilder();
+    var query = QueryBuilder()
         .withs{
             addWith {
                 withName("users")
                 withBody {
                     select {
                         addColumn {
-                            column("uu.id")
+                            column {
+                                columnPrefix("uu")
+                                columnName("id")
+                            }
                         }
                         addColumn {
-                            column("uu.name")
+                            column {
+                                columnPrefix("uu")
+                                columnName("name")
+                            }
                         }
                         addColumn {
-                            column("uu.family")
+                            column {
+                                columnPrefix("uu")
+                                columnName("family")
+                            }
                         }
                         addColumn {
-                            column("uu.age")
+                            column {
+                                columnPrefix("uu")
+                                columnName("age")
+                            }
                         }
                         addColumn {
-                            column("up.phone")
+                            column {
+                                columnPrefix("up")
+                                columnName("phone")
+                            }
                         }
                     }
                     table{
-                        alias("uu")
                         table("user_users")
+                        alias("uu")
                     }
                     joins {
                         addJoin {
                             innerJoin()
-                            tableJoin {
-                                alias("up")
+                            table {
                                 table("user_phones")
+                                alias("up")
                             }
-                            conditionJoin {
+                            condition {
                                 addCondition {
                                     logicalOn()
-                                   // sideLeft("uu.id")
                                     sideLeft {
                                         columnPrefix("uu")
                                         columnName("id")
                                     }
                                     operationEqual()
-                                    sideRight("up.user_id")
                                     sideRight {
                                         columnPrefix("up")
                                         columnName("user_id")
                                     }
-                                    //sideRight("up.user_id")
                                 }
                             }
                         }
                     }
                     where{
-                        addCondition {
+                        /*addCondition {
                             logicalAnd();
-                            sideLeft("uu.id")
+                            sideRight {
+                                columnPrefix("uu")
+                                columnName("id")
+                            }
                             sideLeft {
                                 columnPrefix("uu")
                                 columnName("id")
                             }
                             operationEqual()
-                            sideRight(1.toString())
-                        }
-                        addCondition {
-                            logicalAnd();
-                            sideLeft {
-                                columnPrefix("uu")
-                                columnName("id")
+                            sideRightValue(1.toString())
+                        }*/
+
+                        addGroup {
+                            addCondition {
+                                logicalAnd();
+                                sideLeft {
+                                    columnPrefix("uu")
+                                    columnName("id")
+                                }
+                                //sideLeft("uu.id")
+                                operationIsNotNull();
                             }
-                            //sideLeft("uu.id")
-                            operationIsNotNull();
                         }
                     }
                 }
@@ -143,8 +167,12 @@ fun main() {
             table("users")
             alias("u")
         }
-        .limit(2)
-        .offset(0)
+        .limit {
+            setOptionLimit(2)
+        }
+        .offset {
+            setOptionOffset(0)
+        }
         .group {
             addColumn{
                 columnPrefix("u")
@@ -168,17 +196,26 @@ fun main() {
             }
         }
         .order {
-            typeAsc()
+            orderAsc()
             addColumn{
                 columnPrefix("u")
                 columnName("id")
             }
         }
-    println(query.toSqlReadable())
 
 
 
-    val queryCreated : String? = query.toSql();
+    var q2 = QueryToolsTable()
+        .table("users")
+        .alias("u")
+
+
+    println("aaa: " +q2.toSql(sqlDialect))
+
+    println(query.toSqlReadable(sqlDialect))
+
+
+    val queryCreated : String? = query.toSql(sqlDialect);
     dbBuilder.fetch(queryCreated){
             result->
 
@@ -187,11 +224,11 @@ fun main() {
             var number = 1;
             while (result.next()) {
 
-                val id = result.getInt("id")
-                val name = result.getString("name")
+                val id =     result.getInt("id")
+                val name =   result.getString("name")
                 val family = result.getString("family")
-                val age = result.getString("age")
-                val phone = result.getString("phone")
+                val age =    result.getString("age")
+                val phone =  result.getString("phone")
 
                 println("User: $number - $id $name $family $age $phone");
                 number ++;

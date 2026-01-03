@@ -10,17 +10,19 @@ import gog.my_project.query.query_builder.tools.table.QueryToolsTable
 
 
 class QueryToolsJoinsItem(
-    private val sqlDialect: ISqlDialect ,
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
 ) :
     IQueryToolsJoinsItem
 {
 
-    private var joinType: String = SqlTypeJoin.InnerJoin.value;
-    private var joinTable: IQueryToolsTable = QueryToolsTable(sqlDialect);
-    private var joinConditions: IQueryToolsConditionsGroups = QueryToolsConditionsGroups(sqlDialect)
+    private var joinType:       SqlTypeJoin = SqlTypeJoin.InnerJoin;
+    private var joinTable:      IQueryToolsTable = QueryToolsTable();
+    private var joinConditions: IQueryToolsConditionsGroups = QueryToolsConditionsGroups()
 
-
-    override fun getJoinType(): String {
+    /* ==============================================================
+    template
+    ============================================================== */
+    override fun getJoinType(): SqlTypeJoin {
         return joinType;
     }
 
@@ -38,23 +40,35 @@ class QueryToolsJoinsItem(
 
 
 
-    override fun typeJoin(joinType: SqlTypeJoin): IQueryToolsJoinsItem {
-        this.joinType = joinType.value;
-        return this;
+    /* ==============================================================
+    Builder
+    ============================================================== */
+    override fun toSql(sqlDialect: ISqlDialect): String? {
+        return sqlDialect.getJoinItemSql(this);
     }
 
+
+
+
+
+
+
+    /* ==============================================================
+    structure
+    ============================================================== */
+
     override fun innerJoin(): IQueryToolsJoinsItem {
-        this.joinType = SqlTypeJoin.InnerJoin.value;
+        this.joinType = SqlTypeJoin.InnerJoin;
         return this;
     }
 
     override fun leftJoin(): IQueryToolsJoinsItem {
-        this.joinType = SqlTypeJoin.LeftJoin.value;
+        this.joinType = SqlTypeJoin.LeftJoin;
         return this;
     }
 
     override fun rightJoin(): IQueryToolsJoinsItem {
-        this.joinType = SqlTypeJoin.RightJoin.value;
+        this.joinType = SqlTypeJoin.RightJoin;
         return this;
     }
 
@@ -62,33 +76,26 @@ class QueryToolsJoinsItem(
 
 
 
-    override fun tableJoin(blockTable: IQueryToolsTable.() -> IQueryToolsTable): IQueryToolsJoinsItem {
-        val builder = QueryToolsTable(sqlDialect);
+
+    override fun table(blockTable: IQueryToolsTable.() -> IQueryToolsTable): IQueryToolsJoinsItem {
+        val builder = QueryToolsTable();
         joinTable = builder.blockTable();
         return this;
     }
 
 
 
-    override fun conditionJoin(blockCondition: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsJoinsItem {
-        val builder = QueryToolsConditionsGroups(sqlDialect);
+
+
+
+    override fun condition(blockCondition: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsJoinsItem {
+        val builder = QueryToolsConditionsGroups();
         joinConditions = builder.blockCondition();
         return this;
     }
 
 
 
-
-
-
-
-    override fun toSql(): String? {
-        return sqlDialect.getJoinItemSql(this);
-    }
-
-    override fun replaceInBaseTemp(query: String): String {
-        return toSql() ?: "";
-    }
 
 
 

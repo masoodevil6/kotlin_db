@@ -7,16 +7,18 @@ import gog.my_project.query.interfaces.query_builders.tools.table.IQueryToolsTab
 
 interface IQueryToolsJoinsItem : IQueryTools {
 
-    fun getJoinType(): String;
+    var params: MutableList<Any?>
+
+    fun getJoinType(): SqlTypeJoin;
     fun getJoinTable(): IQueryToolsTable;
     fun getJoinConditions(): IQueryToolsConditionsGroups;
 
-    fun typeJoin(joinType: SqlTypeJoin): IQueryToolsJoinsItem;
+
     fun innerJoin(): IQueryToolsJoinsItem;
     fun leftJoin(): IQueryToolsJoinsItem;
     fun rightJoin(): IQueryToolsJoinsItem;
 
-    fun tableJoin(blockTable: IQueryToolsTable.() -> IQueryToolsTable): IQueryToolsJoinsItem;
+    fun table(blockTable: IQueryToolsTable.() -> IQueryToolsTable): IQueryToolsJoinsItem;
 
-    fun conditionJoin(blockCondition: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsJoinsItem;
+    fun condition(blockCondition: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsJoinsItem;
 }

@@ -5,11 +5,14 @@ import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsTable : IQueryTools {
 
+    var params: MutableList<Any?>
+
     fun getTableName(): String?;
     fun getTableAlias(): String?;
+    fun getTableQuery(): IQueryBuilder?;
 
     fun table(tableName: String?): IQueryToolsTable;
-    fun table(block: IQueryBuilder.() -> IQueryBuilder): IQueryToolsTable;
+    fun tableQuery(block: IQueryBuilder.() -> IQueryBuilder): IQueryToolsTable;
 
     fun alias(aliasName: String?): IQueryToolsTable;
 

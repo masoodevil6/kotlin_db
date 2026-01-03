@@ -5,6 +5,8 @@ import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsJoinsConnect : IQueryTools {
 
+    var params: MutableList<Any?>
+
     fun getListJoins(): List<IQueryToolsJoinsItem>
 
     fun addJoin(blockJoin: IQueryToolsJoinsItem.()-> IQueryToolsJoinsItem): IQueryToolsJoinsConnect;

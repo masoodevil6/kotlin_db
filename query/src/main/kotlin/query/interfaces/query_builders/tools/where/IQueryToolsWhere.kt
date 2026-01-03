@@ -6,8 +6,9 @@ import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToo
 
 interface IQueryToolsWhere : IQueryTools {
 
-    fun getGroupCondition(): IQueryToolsConditionsGroups?;
+    var params: MutableList<Any?>
 
+    fun getGroupCondition(): IQueryToolsConditionsGroups?;
 
     fun whereSetup(blockGroup: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsWhere;
 

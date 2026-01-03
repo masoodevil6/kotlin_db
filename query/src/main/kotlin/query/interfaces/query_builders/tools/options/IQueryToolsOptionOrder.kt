@@ -7,11 +7,14 @@ import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsC
 
 interface IQueryToolsOptionOrder: IQueryTools {
 
-    fun type(orderType : SqlOrderType) : IQueryToolsOptionOrder;
-    fun typeAsc() : IQueryToolsOptionOrder;
-    fun typeDesc() : IQueryToolsOptionOrder;
+    var params: MutableList<Any?>
 
-    fun addColumn(columnName : String) : IQueryToolsOptionOrder;
+    fun getOrderType(): SqlOrderType;
+    fun getListColumns(): MutableList<IQueryToolsColumnsBase>;
+
+    fun orderAsc() : IQueryToolsOptionOrder;
+    fun orderDesc() : IQueryToolsOptionOrder;
+
     fun addColumn(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsOptionOrder
 
 }

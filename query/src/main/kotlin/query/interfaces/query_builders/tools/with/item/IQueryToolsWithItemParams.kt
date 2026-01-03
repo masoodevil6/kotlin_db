@@ -5,6 +5,8 @@ import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsWithItemParams : IQueryTools {
 
+    var params: MutableList<Any?>
+
     fun getWithName(): String?;
     fun getWithBody(): String?;
 

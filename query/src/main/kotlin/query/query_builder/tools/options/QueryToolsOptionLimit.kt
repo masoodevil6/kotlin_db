@@ -2,34 +2,42 @@ package gog.my_project.query.query_builder.tools.options
 
 import gog.my_project.query.interfaces.query_builders.tools.options.IQueryToolsOptionLimit
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
-import gog.my_project.tools.templates.OTemplateSqlDialect
-
 
 class QueryToolsOptionLimit(
-    private val sqlDialect: ISqlDialect
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
 ):
     IQueryToolsOptionLimit
 {
 
-    var _pageLimit : Int? = null;
+    var _pageLimit : Long? = null;
 
-    override fun setOptionLimit(optionLimit: Int) : IQueryToolsOptionLimit {
+    /* ==============================================================
+    template
+    ============================================================== */
+    override fun getOptionLimit(): Long? {
+        return _pageLimit
+    }
+
+
+
+
+    /* ==============================================================
+    Builder
+    ============================================================== */
+    override fun toSql(sqlDialect: ISqlDialect): String? {
+        return sqlDialect.getOptionLimitSql(this);
+    }
+
+
+
+
+    /* ==============================================================
+    structure
+    ============================================================== */
+    override fun setOptionLimit(optionLimit: Long) : IQueryToolsOptionLimit {
         this._pageLimit = optionLimit;
         return this;
     }
-
-
-
-
-    override fun toSql(): String? {
-        return sqlDialect.getOptionLimitSql(_pageLimit);
-    }
-
-    override fun replaceInBaseTemp(query: String): String {
-        val queryOption= toSql();
-        return query.replace(OTemplateSqlDialect._TAG_TEMP_OPTION_LIMIT, queryOption ?: "");
-    }
-
 
 
 

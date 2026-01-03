@@ -4,6 +4,10 @@ import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsOptionLimit: IQueryTools {
 
-    fun setOptionLimit(optionLimit: Int) : IQueryToolsOptionLimit;
+    var params: MutableList<Any?>
+
+    fun getOptionLimit(): Long?
+
+    fun setOptionLimit(optionLimit: Long) : IQueryToolsOptionLimit;
 
 }

@@ -1,5 +1,6 @@
 package gog.my_project.query.query_builder.tools.column
 
+import gog.my_project.enums.SqlMethodColumn
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumns
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumnsBase
@@ -9,24 +10,28 @@ import gog.my_project.query.query_builder.tools.options.QueryToolsOptionOrder
 
 
 class QueryToolsColumns(
-    private val sqlDialect: ISqlDialect ,
-
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
 ) :
     IQueryToolsColumns
 {
 
 
-    private var ColumnMethod: String? = null;
-    private var ColumnName: String? = "";
-    private var ColumnAlias: String? = null;
+    private var ColumnMethod: SqlMethodColumn? = null;
+    private var ColumnName:   IQueryToolsColumnsBase? = null;
+    private var ColumnAlias:  String? = null;
 
 
 
-    override fun getColumnMethod(): String? {
+
+
+    /* ==============================================================
+    template
+    ============================================================== */
+    override fun getColumnMethod(): SqlMethodColumn? {
         return ColumnMethod;
     }
 
-    override fun getColumnName(): String? {
+    override fun getColumnName(): IQueryToolsColumnsBase? {
         return ColumnName;
     }
 
@@ -38,71 +43,63 @@ class QueryToolsColumns(
 
 
 
+    /* ==============================================================
+    Builder
+    ============================================================== */
 
-    override fun toSql(): String? {
+    override fun toSql(sqlDialect: ISqlDialect): String? {
         return sqlDialect.getColumnSql(this);
     }
 
-    override fun replaceInBaseTemp(query: String): String {
-        return toSql() ?: "";
+
+
+
+
+    /* ==============================================================
+    structure
+    ============================================================== */
+    override fun method(method: SqlMethodColumn): IQueryToolsColumns {
+        this.ColumnMethod = method;
+        return this;
     }
 
-
-
-
-
-
-
     override fun sum(): IQueryToolsColumns {
-        this.ColumnMethod = "sum";
+        this.ColumnMethod = SqlMethodColumn.Sum;
         return this;
     }
 
     override fun count(): IQueryToolsColumns {
-        this.ColumnMethod = "count";
+        this.ColumnMethod = SqlMethodColumn.Count;
         return this;
     }
 
     override fun avg(): IQueryToolsColumns {
-        this.ColumnMethod = "avg";
+        this.ColumnMethod = SqlMethodColumn.Avg;
         return this;
     }
 
     override fun min(): IQueryToolsColumns {
-        this.ColumnMethod = "min";
+        this.ColumnMethod = SqlMethodColumn.Min;
         return this;
     }
 
     override fun max(): IQueryToolsColumns {
-        this.ColumnMethod = "max";
+        this.ColumnMethod = SqlMethodColumn.Max;
         return this;
     }
 
 
 
 
-    override fun column(columnName: String): IQueryToolsColumns {
-        this.ColumnName = columnName;
-        return this;
-    }
+
+
 
     override fun column(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsColumns {
-        val builder = QueryToolsColumnsBase(sqlDialect);
-        val query = builder.blockColumn().toSql();
-        if (query != null){
-            this.ColumnName = query;
-        }
+        val builder = QueryToolsColumnsBase();
+        this.ColumnName = builder.blockColumn();
         return this;
     }
 
-    override fun columnQuery(blockQuery: IQueryBuilder.() -> IQueryBuilder): IQueryToolsColumns {
-        val builder = QueryBuilder(sqlDialect);
-        val query = builder.blockQuery().toSql();
-        if (query != null){
-            this.ColumnName = query;
-        }
-        return this;
-    }
 
 
 

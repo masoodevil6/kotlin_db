@@ -1,4 +1,4 @@
-package gog.my_project.tools.scripts.tools.scripts
+package gog.my_project.tools.scripts
 
 import kotlin.collections.filter
 import kotlin.text.isNotBlank

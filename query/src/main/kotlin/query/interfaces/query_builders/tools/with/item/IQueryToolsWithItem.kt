@@ -5,11 +5,12 @@ import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsWithItem : IQueryTools {
 
+    var params: MutableList<Any?>
+
     fun getWithName(): String?;
-    fun getWithBody(): String?;
+    fun getWithBody(): IQueryBuilder?;
 
     fun withName(withName : String): IQueryToolsWithItem;
 
-    fun withBody(withBody : String): IQueryToolsWithItem;
     fun withBody(blockWith: IQueryBuilder.() -> IQueryBuilder): IQueryToolsWithItem;
 }

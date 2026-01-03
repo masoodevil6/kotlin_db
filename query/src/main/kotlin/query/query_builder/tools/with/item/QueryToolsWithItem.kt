@@ -6,53 +6,55 @@ import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.QueryBuilder
 
 class QueryToolsWithItem(
-    private val sqlDialect: ISqlDialect,
-
-    ) :
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
+) :
     IQueryToolsWithItem
 {
 
     private var withName : String? = null;
-    private var withBody: String? = null
+    private var withBody: IQueryBuilder? = null
 
+
+
+    /* ==============================================================
+    template
+    ============================================================== */
     override fun getWithName(): String? {
         return withName;
     }
 
-    override fun getWithBody(): String? {
+    override fun getWithBody(): IQueryBuilder? {
         return withBody;
     }
 
 
 
+
+    /* ==============================================================
+    Builder
+    ============================================================== */
+    override fun toSql(sqlDialect: ISqlDialect): String? {
+        return sqlDialect.getWithItemSql(this);
+    }
+
+
+
+    /* ==============================================================
+    structure
+    ============================================================== */
     override fun withName(withName: String): IQueryToolsWithItem {
         this.withName = withName;
         return this;
     }
 
-    override fun withBody(withBody: String): IQueryToolsWithItem {
-        this.withBody = withBody;
-        return this;
-    }
 
     override fun withBody(blockWith: IQueryBuilder.() -> IQueryBuilder): IQueryToolsWithItem {
-        val builder = QueryBuilder(sqlDialect);
-        this.withBody = builder.blockWith().toSql();
+        val builder = QueryBuilder();
+        this.withBody = builder.blockWith();
         return this;
     }
 
 
-
-
-
-
-    override fun toSql(): String? {
-        return sqlDialect.getWithItemSql(this);
-    }
-
-    override fun replaceInBaseTemp(query: String): String {
-        return toSql() ?: "";
-    }
 
 
 

@@ -4,17 +4,23 @@ import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.table.IQueryToolsTable
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.QueryBuilder
-import gog.my_project.query.query_builder.tools.column.QueryToolsColumns
-import gog.my_project.tools.templates.OTemplateSqlDialect
 
 
 class QueryToolsTable(
-    private val sqlDialect: ISqlDialect
-) : IQueryToolsTable {
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
+) :
+    IQueryToolsTable
+{
 
     var _tableName : String? = null;
     var _tableAlias : String? = null;
+    var _tableQuery : IQueryBuilder? = null;
 
+
+
+    /* ==============================================================
+    template
+    ============================================================== */
     override fun getTableName(): String? {
         return _tableName;
     }
@@ -23,23 +29,34 @@ class QueryToolsTable(
         return _tableAlias;
     }
 
+    override fun getTableQuery(): IQueryBuilder? {
+        return _tableQuery;
+    }
 
 
 
 
+    /* ==============================================================
+    Builder
+    ============================================================== */
+    override fun toSql(sqlDialect: ISqlDialect): String? {
+        return sqlDialect.getTableSql(this);
+    }
 
 
 
 
+    /* ==============================================================
+    structure
+    ============================================================== */
     override fun table(tableName: String?): IQueryToolsTable {
         this._tableName = tableName;
         return this;
     }
 
-    override fun table(block: IQueryBuilder.() -> IQueryBuilder): IQueryToolsTable {
-        val builder = QueryBuilder(sqlDialect);
-        val tableName = builder.block();
-        this._tableName = "(${tableName.toSql().toString()})";
+    override fun tableQuery(block: IQueryBuilder.() -> IQueryBuilder): IQueryToolsTable {
+        val builder = QueryBuilder();
+        this._tableQuery = builder.block();
         return this;
     }
 
@@ -52,22 +69,6 @@ class QueryToolsTable(
         return this;
     }
 
-
-
-
-
-
-    override fun toSql(): String? {
-        if (_tableName != null) {
-            return sqlDialect.getTableSql(this);
-        }
-        return "";
-    }
-
-    override fun replaceInBaseTemp(query: String): String {
-        val queryFrom = toSql();
-        return query.replace(OTemplateSqlDialect._TAG_TEMP_TABLES, queryFrom ?: "");
-    }
 
 
 

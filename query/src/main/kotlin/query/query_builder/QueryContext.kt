@@ -12,6 +12,6 @@ class QueryContext(
         SqlDialectFactory().create(dialectQuery)
 
     fun createQueryBuilder(): QueryBuilder {
-        return QueryBuilder(sqlDialect)
+        return QueryBuilder()
     }
 }

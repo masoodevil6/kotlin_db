@@ -7,19 +7,19 @@ import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsC
 
 interface IQueryToolsConditions : IQueryToolsIsConditions {
 
-    fun getConditionLogical(): String?;
-    fun getConditionSideLeft(): String?;
-    fun getConditionOperation(): String?;
-    fun getConditionSideRight(): String?;
+    var params: MutableList<Any?>
+
+    fun getConditionLogical(): SqlLogical?;
+    fun getConditionSideLeft(): IQueryToolsColumnsBase?;
+    fun getConditionOperation(): SqlConditionOperation?;
+    fun getConditionSideRight(): IQueryToolsColumnsBase?;
 
     fun logical(logical: SqlLogical): IQueryToolsConditions;
     fun logicalAnd(): IQueryToolsConditions;
     fun logicalOr(): IQueryToolsConditions;
     fun logicalOn(): IQueryToolsConditions;
 
-    fun sideLeft(sideLeft : String): IQueryToolsConditions;
     fun sideLeft(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
-    fun sideLeftQuery(blockQuery: IQueryBuilder.() -> IQueryBuilder): IQueryToolsConditions
 
     fun operation(operation: SqlConditionOperation): IQueryToolsConditions;
     fun operationEqual(): IQueryToolsConditions;
@@ -38,7 +38,6 @@ interface IQueryToolsConditions : IQueryToolsIsConditions {
     fun operationIsNotNull(): IQueryToolsConditions;
     fun operationContains(): IQueryToolsConditions;
 
-    fun sideRight(sideRight: String): IQueryToolsConditions;
     fun sideRight(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
-    fun sideRightQuery(blockQuery: IQueryBuilder.() -> IQueryBuilder): IQueryToolsConditions
+    fun <T> sideRightValue(value: T , queryStr: String = "?"): IQueryToolsConditions
 }

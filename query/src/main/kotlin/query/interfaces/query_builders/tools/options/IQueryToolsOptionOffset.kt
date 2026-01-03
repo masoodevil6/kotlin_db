@@ -5,6 +5,10 @@ import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsOptionOffset: IQueryTools {
 
-    fun setOptionOffset(optionOffset: Int) : IQueryToolsOptionOffset;
+    var params: MutableList<Any?>
+
+    fun getOptionOffset() : Long?
+
+    fun setOptionOffset(optionOffset: Long) : IQueryToolsOptionOffset;
 
 }

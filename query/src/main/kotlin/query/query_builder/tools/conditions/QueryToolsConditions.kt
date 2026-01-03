@@ -11,32 +11,40 @@ import gog.my_project.query.query_builder.tools.column.QueryToolsColumnsBase
 
 
 class QueryToolsConditions(
-    private val sqlDialect: ISqlDialect
+    override var params: MutableList<Any?> = mutableListOf<Any?>()
 ):
     IQueryToolsConditions
 {
 
 
     private var isAddLogical: Boolean = false;
-    private var conditionLogical: String? = null;
-    private var conditionSideLeft: String? = null;
-    private var conditionOperation: String? = null;
-    private var conditionSideRight : String? = null;
+    private var conditionLogical:    SqlLogical? = null;
+    private var conditionSideLeft:   IQueryToolsColumnsBase? = null;
+    private var conditionOperation:  SqlConditionOperation? = null;
+    private var conditionSideRight : IQueryToolsColumnsBase? = null;
 
 
-    override fun getConditionLogical(): String? {
+
+
+
+
+
+    /* ==============================================================
+    template
+    ============================================================== */
+    override fun getConditionLogical(): SqlLogical? {
         return conditionLogical;
     }
 
-    override fun getConditionSideLeft(): String? {
+    override fun getConditionSideLeft(): IQueryToolsColumnsBase? {
         return conditionSideLeft;
     }
 
-    override fun getConditionOperation(): String? {
+    override fun getConditionOperation(): SqlConditionOperation? {
         return conditionOperation;
     }
 
-    override fun getConditionSideRight(): String? {
+    override fun getConditionSideRight(): IQueryToolsColumnsBase? {
         return conditionSideRight;
     }
 
@@ -49,38 +57,30 @@ class QueryToolsConditions(
 
 
 
-    override fun toSql(): String? {
+    /* ==============================================================
+    Builder
+    ============================================================== */
+    override fun toSql(sqlDialect: ISqlDialect): String? {
         return sqlDialect.getConditionSql(this);
     }
 
-    override fun replaceInBaseTemp(query: String): String {
-        return toSql() ?: "";
-    }
 
 
 
 
 
-
-
-
-
-
-    override fun setIsAddLogical(isAddLogical: Boolean): String? {
+    /* ==============================================================
+    structure
+    ============================================================== */
+    override fun setIsAddLogical(isAddLogical: Boolean){
         this.isAddLogical = isAddLogical;
-        return toSql();
     }
-
-
-
-
 
 
 
 
     override fun logical(logical: SqlLogical): IQueryToolsConditions {
-        this.conditionLogical = logical.value;
-        this.conditionSideLeft = "";
+        this.conditionLogical = logical;
         return this;
     }
 
@@ -99,42 +99,19 @@ class QueryToolsConditions(
 
 
 
-
-
-
-    override fun sideLeft(sideLeft: String): IQueryToolsConditions {
-        this.conditionSideLeft = sideLeft;
-        this.conditionOperation = "";
-        return this;
-    }
-
     override fun sideLeft(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions {
-        val builder = QueryToolsColumnsBase(sqlDialect);
-        val query = builder.blockColumn().toSql();
-        if (query != null){
-            return sideLeft(query);
-        }
+        val builder = QueryToolsColumnsBase();
+        val query = builder.blockColumn();
+        this.conditionSideLeft = query
         return this;
     }
-
-    override fun sideLeftQuery(blockQuery: IQueryBuilder.() -> IQueryBuilder): IQueryToolsConditions {
-        val builder = QueryBuilder(sqlDialect);
-        val query = builder.blockQuery().toSql();
-        if (query != null){
-            return sideLeft("($query)");
-        }
-        return this;
-    }
-
-
 
 
 
 
 
     override fun operation(operation: SqlConditionOperation): IQueryToolsConditions {
-        this.conditionOperation = operation.value;
-        this.conditionSideRight = "";
+        this.conditionOperation = operation;
         return this;
     }
 
@@ -187,11 +164,19 @@ class QueryToolsConditions(
     }
 
     override fun operationIsNull(): IQueryToolsConditions {
-        return this.operation(SqlConditionOperation.IsNull);
+        this.operation(SqlConditionOperation.IsNull);
+        this.sideRight {
+            columnName("")
+        }
+        return this;
     }
 
     override fun operationIsNotNull(): IQueryToolsConditions {
-        return this.operation(SqlConditionOperation.IsNotNull);
+        this.operation(SqlConditionOperation.IsNotNull);
+        this.sideRight {
+            columnName("")
+        }
+        return this;
     }
 
     override fun operationContains(): IQueryToolsConditions {
@@ -206,27 +191,16 @@ class QueryToolsConditions(
 
 
 
-
-    override fun sideRight(sideRight: String): IQueryToolsConditions {
-        this.conditionSideRight = sideRight;
-        return this;
-    }
-
     override fun sideRight(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions {
-        val builder = QueryToolsColumnsBase(sqlDialect);
-        val query = builder.blockColumn().toSql();
-        if (query != null){
-            return sideRight(query);
-        }
+        val builder = QueryToolsColumnsBase();
+        val query = builder.blockColumn();
+        this.conditionSideRight = query
         return this;
     }
 
-    override fun sideRightQuery(blockQuery: IQueryBuilder.() -> IQueryBuilder): IQueryToolsConditions {
-        val builder = QueryBuilder(sqlDialect);
-        val query = builder.blockQuery().toSql();
-        if (query != null){
-            this.conditionSideRight = "($query)";
-        }
+    override fun <T> sideRightValue(value: T , queryStr: String): IQueryToolsConditions {
+        this.conditionSideRight = QueryToolsColumnsBase().columnName(queryStr)
+        TODO("add params ? for sql")
         return this;
     }
 
