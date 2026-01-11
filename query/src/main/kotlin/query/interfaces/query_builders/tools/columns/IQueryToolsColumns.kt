@@ -1,12 +1,11 @@
 package gog.my_project.query.interfaces.query_builders.tools.columns
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.enums.SqlMethodColumn
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsColumns : IQueryTools  {
-
-    var params: MutableList<Any?>
 
     fun getColumnMethod(): SqlMethodColumn?;
     fun getColumnName():   IQueryToolsColumnsBase?;

@@ -236,7 +236,7 @@ class MySqlDialect(
     override fun getWhereSql(condition: IQueryToolsWhere?) : String {
         if (condition != null){
             val conditionGroup = condition.getGroupCondition();
-            val conditionStr = this.getConditionGroupSql(conditionGroup , null)
+            val conditionStr = this.getConditionGroupSql(conditionGroup )
             if (conditionStr != null) {
                 return  " WHERE $conditionStr " ;
             }
@@ -320,9 +320,47 @@ class MySqlDialect(
 
 
 
-    override fun getConditionSql(condition: IQueryToolsConditions?  , forceIsAddLogical: Boolean?)  : String? {
+    override fun getConditionGroupSql(group: IQueryToolsConditionsGroups?  , hasLogical: Boolean, forceHasLogical: Boolean ): String? {
+        if (group != null){
+
+            val groups = group.getGroupConditions();
+            val groupLogical = if (hasLogical){group.getGroupLogical()}else{""}
+
+            if (groups.isNotEmpty()) {
+
+                var queryTemp = " $groupLogical (";
+
+                for ((index, condition) in groups.withIndex()){
+                    var hasLogical = false;
+                    if (index > 0 ){
+                        hasLogical = true;
+                    }
+
+                    var conditionString : String? = null;
+                    if (condition is IQueryToolsConditions){
+                        conditionString = this.getConditionSql(condition , hasLogical)
+                    }
+                    else if (condition is IQueryToolsConditionsGroups){
+                        conditionString = this.getConditionGroupSql(condition , hasLogical)
+                    }
+
+                    if (conditionString != null){
+                        queryTemp +=  " $conditionString ";
+                    }
+                }
+
+                queryTemp += " ) ";
+
+                return queryTemp;
+            }
+        }
+
+        return null;
+    }
+
+    override fun getConditionSql(condition: IQueryToolsConditions? , hasLogical: Boolean )  : String? {
         if (condition != null){
-            val conditionIsAddLogical: Boolean = condition.isAddLogical();
+
             val conditionLogical = condition.getConditionLogical()?.value;
             val conditionSideLeft = condition.getConditionSideLeft();
             val conditionOperation: String? = condition.getConditionOperation()?.value;
@@ -333,59 +371,11 @@ class MySqlDialect(
             if (conditionSideLeftStr != null && conditionSideRightStr != null) {
                 var queryTemp = "";
 
-                if (conditionLogical != null){
-                    if (forceIsAddLogical == null && conditionIsAddLogical){
-                        queryTemp += conditionLogical
-                    }
-                    else if(forceIsAddLogical != null && forceIsAddLogical){
-                        queryTemp += conditionLogical
-                    }
+                if (conditionLogical != null && hasLogical){
+                    queryTemp += conditionLogical
                 }
 
-                queryTemp += " $conditionSideLeftStr "
-                queryTemp += " $conditionOperation "
-                queryTemp += " $conditionSideRightStr "
-                return queryTemp;
-            }
-        }
-
-        return null;
-    }
-
-    override fun getConditionGroupSql(group: IQueryToolsConditionsGroups?  , forceIsAddLogical: Boolean? ): String? {
-        if (group != null) {
-            val conditionLogical: String? = group.getGroupLogical()?.value;
-            val conditions = group.getGroupConditions();
-            val conditionIsAddLogical: Boolean = group.isAddLogical();
-
-            if (conditions.size>0) {
-                var queryTemp = "";
-
-                if (conditionLogical != null){
-                    if (forceIsAddLogical == null && conditionIsAddLogical){
-                        queryTemp += conditionLogical
-                    }
-                    else if(forceIsAddLogical != null && forceIsAddLogical){
-                        queryTemp += conditionLogical
-                    }
-                }
-
-                for ((index, condition) in conditions.withIndex()){
-
-                    if (condition is IQueryToolsConditions){
-                        val conditionString = this.getConditionSql(condition, forceIsAddLogical)
-                        if (conditionString != null){
-                            queryTemp += conditionString;
-                        }
-                    }
-                    else if (condition is IQueryToolsConditionsGroups){
-                        val conditionString = this.getConditionGroupSql(condition , forceIsAddLogical)
-                        if (conditionString != null){
-                            queryTemp += " ($conditionString) ";
-                        }
-                    }
-                }
-
+                queryTemp += " $conditionSideLeftStr $conditionOperation $conditionSideRightStr  "
                 return queryTemp;
             }
         }

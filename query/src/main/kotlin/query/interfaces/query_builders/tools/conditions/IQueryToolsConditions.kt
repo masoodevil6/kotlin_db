@@ -1,13 +1,12 @@
 package gog.my_project.query.interfaces.query_builders.tools.conditions
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.enums.SqlLogical
 import gog.my_project.enums.SqlConditionOperation
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumnsBase
 
 interface IQueryToolsConditions : IQueryToolsIsConditions {
-
-    var params: MutableList<Any?>
 
     fun getConditionLogical(): SqlLogical?;
     fun getConditionSideLeft(): IQueryToolsColumnsBase?;
@@ -39,5 +38,5 @@ interface IQueryToolsConditions : IQueryToolsIsConditions {
     fun operationContains(): IQueryToolsConditions;
 
     fun sideRight(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
-    fun <T> sideRightValue(value: T , queryStr: String = "?"): IQueryToolsConditions
+    fun <T> sideRightValue(paramName: String , paramValue: T): IQueryToolsConditions
 }

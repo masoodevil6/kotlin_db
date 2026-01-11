@@ -1,15 +1,5 @@
 package gog.my_project.tools.scripts
 
-import kotlin.collections.filter
-import kotlin.text.isNotBlank
-import kotlin.text.matches
-import kotlin.text.repeat
-import kotlin.text.replace
-import kotlin.text.split
-import kotlin.text.toRegex
-import kotlin.text.trim
-import kotlin.text.uppercase
-
 object StringTools {
 
     fun normalizeSpaces(sql: String): String {

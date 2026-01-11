@@ -1,6 +1,7 @@
 package gog.my_project.query.query_builder.tools.select
 
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumns
 import gog.my_project.query.interfaces.query_builders.tools.select.IQueryToolsSelect
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
@@ -9,7 +10,7 @@ import kotlin.reflect.KProperty
 import kotlin.reflect.full.findAnnotation
 
 class QueryToolsSelect(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) : IQueryToolsSelect {
 
 
@@ -41,7 +42,7 @@ class QueryToolsSelect(
     structure
     ============================================================== */
     override fun addColumn(blockColumn: IQueryToolsColumns.() -> IQueryToolsColumns): IQueryToolsSelect {
-        val builder = QueryToolsColumns();
+        val builder = QueryToolsColumns(params);
         columns.add( builder.blockColumn());
         return this;
     }

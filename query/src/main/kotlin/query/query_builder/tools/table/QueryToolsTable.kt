@@ -1,5 +1,6 @@
 package gog.my_project.query.query_builder.tools.table
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.table.IQueryToolsTable
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
@@ -7,7 +8,7 @@ import gog.my_project.query.query_builder.QueryBuilder
 
 
 class QueryToolsTable(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) :
     IQueryToolsTable
 {
@@ -55,7 +56,7 @@ class QueryToolsTable(
     }
 
     override fun tableQuery(block: IQueryBuilder.() -> IQueryBuilder): IQueryToolsTable {
-        val builder = QueryBuilder();
+        val builder = QueryBuilder(params);
         this._tableQuery = builder.block();
         return this;
     }

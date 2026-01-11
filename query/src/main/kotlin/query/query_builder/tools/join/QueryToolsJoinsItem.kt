@@ -1,5 +1,6 @@
 package gog.my_project.query.query_builder.tools.join
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.enums.SqlTypeJoin
 import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditionsGroups
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsItem
@@ -10,7 +11,7 @@ import gog.my_project.query.query_builder.tools.table.QueryToolsTable
 
 
 class QueryToolsJoinsItem(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) :
     IQueryToolsJoinsItem
 {
@@ -78,7 +79,7 @@ class QueryToolsJoinsItem(
 
 
     override fun table(blockTable: IQueryToolsTable.() -> IQueryToolsTable): IQueryToolsJoinsItem {
-        val builder = QueryToolsTable();
+        val builder = QueryToolsTable(params);
         joinTable = builder.blockTable();
         return this;
     }
@@ -89,7 +90,7 @@ class QueryToolsJoinsItem(
 
 
     override fun condition(blockCondition: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsJoinsItem {
-        val builder = QueryToolsConditionsGroups();
+        val builder = QueryToolsConditionsGroups(params);
         joinConditions = builder.blockCondition();
         return this;
     }

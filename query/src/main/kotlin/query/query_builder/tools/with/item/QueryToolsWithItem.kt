@@ -1,12 +1,13 @@
 package gog.my_project.query.query_builder.tools.with.item
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.with.item.IQueryToolsWithItem
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.QueryBuilder
 
 class QueryToolsWithItem(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) :
     IQueryToolsWithItem
 {
@@ -49,7 +50,7 @@ class QueryToolsWithItem(
 
 
     override fun withBody(blockWith: IQueryBuilder.() -> IQueryBuilder): IQueryToolsWithItem {
-        val builder = QueryBuilder();
+        val builder = QueryBuilder(params);
         this.withBody = builder.blockWith();
         return this;
     }

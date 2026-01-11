@@ -1,10 +1,11 @@
 package gog.my_project.query.query_builder.tools.options
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.options.IQueryToolsOptionOffset
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 
 class QueryToolsOptionOffset(
-    override  var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ):
     IQueryToolsOptionOffset
 {

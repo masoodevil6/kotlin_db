@@ -1,11 +1,12 @@
 package gog.my_project.query.query_builder.tools.join
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsConnect
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsItem
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 
 class QueryToolsJoinsConnect(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) :
     IQueryToolsJoinsConnect {
 
@@ -39,7 +40,7 @@ class QueryToolsJoinsConnect(
     structure
     ============================================================== */
     override fun addJoin(blockJoin: IQueryToolsJoinsItem.() -> IQueryToolsJoinsItem): IQueryToolsJoinsConnect {
-        val builder = QueryToolsJoinsItem();
+        val builder = QueryToolsJoinsItem(params);
         joins.add(builder.blockJoin());
         return this;
     }

@@ -1,10 +1,9 @@
 package gog.my_project.query.interfaces.query_builders.tools.options
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 interface IQueryToolsOptionLimit: IQueryTools {
-
-    var params: MutableList<Any?>
 
     fun getOptionLimit(): Long?
 

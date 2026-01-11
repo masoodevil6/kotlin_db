@@ -1,12 +1,13 @@
 package gog.my_project.query.query_builder.tools.where
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditionsGroups
 import gog.my_project.query.interfaces.query_builders.tools.where.IQueryToolsWhere
 import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.tools.conditions.QueryToolsConditionsGroups
 
 class QueryToolsWhere(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) :
     IQueryToolsWhere
 {
@@ -23,7 +24,6 @@ class QueryToolsWhere(
 
 
 
-
     /* ==============================================================
     Builder
     ============================================================== */
@@ -36,12 +36,11 @@ class QueryToolsWhere(
     /* ==============================================================
     structure
     ============================================================== */
-    override fun whereSetup(blockGroup: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsWhere {
-        val builder = QueryToolsConditionsGroups();
-        condition = builder.blockGroup();
+    override fun conditions(blockCondition: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryToolsWhere {
+        val builder = QueryToolsConditionsGroups(params);
+        condition = builder.blockCondition();
         return this;
     }
-
 
 
 

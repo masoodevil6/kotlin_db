@@ -9,6 +9,7 @@ import gog.my_project.query.query_builder.QueryContext
 import gog.my_project.query.query_builder.tools.table.QueryToolsTable
 import gog.my_project.query.sql_dialect.SqlDialectFactory
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.util.logging.LogManager
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
@@ -37,6 +38,7 @@ fun main() {
 
 
     //val queryBuilder = QueryContext(dbBuilder.getDialect()).createQueryBuilder();
+
     var query = QueryBuilder()
         .withs{
             addWith {
@@ -86,8 +88,8 @@ fun main() {
                                 alias("up")
                             }
                             condition {
+                                logicalOn()
                                 addCondition {
-                                    logicalOn()
                                     sideLeft {
                                         columnPrefix("uu")
                                         columnName("id")
@@ -102,30 +104,28 @@ fun main() {
                         }
                     }
                     where{
-                        /*addCondition {
-                            logicalAnd();
-                            sideRight {
-                                columnPrefix("uu")
-                                columnName("id")
-                            }
-                            sideLeft {
-                                columnPrefix("uu")
-                                columnName("id")
-                            }
-                            operationEqual()
-                            sideRightValue(1.toString())
-                        }*/
+                        conditions {
 
-                        addGroup {
+                            addGroup {
+                                addCondition {
+                                    sideLeft {
+                                        columnPrefix("uu")
+                                        columnName("id")
+                                    }
+                                    operationIsNotNull();
+                                }
+                            }
+
                             addCondition {
-                                logicalAnd();
+                                logicalAnd()
                                 sideLeft {
                                     columnPrefix("uu")
                                     columnName("id")
                                 }
-                                //sideLeft("uu.id")
-                                operationIsNotNull();
+                                operationEqual()
+                                sideRightValue(  "id1" ,1)
                             }
+
                         }
                     }
                 }
@@ -205,17 +205,28 @@ fun main() {
 
 
 
-    var q2 = QueryToolsTable()
+
+    /*var q2 = QueryToolsTable()
         .table("users")
         .alias("u")
 
+    println("aaa: " +q2.toSql(sqlDialect))*/
 
-    println("aaa: " +q2.toSql(sqlDialect))
 
     println(query.toSqlReadable(sqlDialect))
 
 
-    val queryCreated : String? = query.toSql(sqlDialect);
+    val queryBuilder =
+        QueryContext(dbBuilder.getDialect())
+            .setQuery(query)
+            .execute();
+
+
+
+
+
+
+    /*val queryCreated : String? = query.toSql(sqlDialect);
     dbBuilder.fetch(queryCreated){
             result->
 
@@ -234,6 +245,19 @@ fun main() {
                 number ++;
             }
         }
-    }
+    }*/
+
+
+    /*val query2 = "select id , name from user_users where id= ?";
+    val ps = db.prepareStatement(query2)
+    //ps.setInt(1 , 1);
+    ps.setObject(1 , 1);
+    val exe = ps.executeQuery();
+
+    while (exe.next()){
+        val id =     exe.getInt("id")
+        val name =   exe.getString("name")
+        println("User: - $id $name ");
+    }*/
 
 }

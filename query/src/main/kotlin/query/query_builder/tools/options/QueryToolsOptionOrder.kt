@@ -1,5 +1,6 @@
 package gog.my_project.query.query_builder.tools.options
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.enums.SqlOrderType
 import gog.my_project.query.interfaces.query_builders.tools.columns.IQueryToolsColumnsBase
 import gog.my_project.query.interfaces.query_builders.tools.options.IQueryToolsOptionOrder
@@ -7,7 +8,7 @@ import gog.my_project.query.interfaces.sql_dialect.ISqlDialect
 import gog.my_project.query.query_builder.tools.column.QueryToolsColumnsBase
 
 class QueryToolsOptionOrder(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ):
     IQueryToolsOptionOrder
 {
@@ -67,7 +68,7 @@ class QueryToolsOptionOrder(
 
 
     override fun addColumn(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsOptionOrder {
-        val builder = QueryToolsColumnsBase();
+        val builder = QueryToolsColumnsBase(params);
         val column = builder.blockColumn();
         _orderByList.add(column);
         return this;

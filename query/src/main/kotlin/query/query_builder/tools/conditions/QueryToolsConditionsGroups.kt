@@ -1,5 +1,6 @@
 package gog.my_project.query.query_builder.tools.conditions
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.enums.SqlLogical
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditions
@@ -10,13 +11,13 @@ import gog.my_project.query.query_builder.QueryBuilder
 
 
 open class QueryToolsConditionsGroups(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ):
     IQueryToolsConditionsGroups
 {
 
     private var isAddLogical:     Boolean = false;
-    private var conditionLogical: SqlLogical? = null;
+    private var conditionLogical: SqlLogical? = SqlLogical.And;
     private var conditions:       MutableList<IQueryToolsIsConditions> = mutableListOf()
 
 
@@ -88,7 +89,7 @@ open class QueryToolsConditionsGroups(
     override fun addGroup(
         blockGroup: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups
     ): IQueryToolsConditionsGroups {
-        val builder = QueryToolsConditionsGroups();
+        val builder = QueryToolsConditionsGroups(params);
         val conditionSchema = builder.blockGroup();
         conditions.add(conditionSchema);
         return this;
@@ -99,7 +100,7 @@ open class QueryToolsConditionsGroups(
     override fun addCondition(
         blockCondition: IQueryToolsConditions.() -> IQueryToolsConditions
     ): IQueryToolsConditionsGroups {
-        val builder = QueryToolsConditions();
+        val builder = QueryToolsConditions(params);
         val conditionSchema = builder.blockCondition();
         conditions.add(conditionSchema);
         return this;

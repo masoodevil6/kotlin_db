@@ -1,5 +1,8 @@
 package gog.my_project.query.query_builder
 
+import gog.my_project.core.sql_dialect.DialectQuery
+import gog.my_project.datas.BuiltQuery
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.IQueryBuilder
 import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditionsGroups
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsConnect
@@ -19,12 +22,13 @@ import gog.my_project.query.query_builder.tools.options.QueryToolsOptionOffset
 import gog.my_project.query.query_builder.tools.options.QueryToolsOptionOrder
 import gog.my_project.query.query_builder.tools.select.QueryToolsSelect
 import gog.my_project.query.query_builder.tools.table.QueryToolsTable
+import gog.my_project.query.query_builder.tools.where.QueryToolsWhere
 import gog.my_project.query.query_builder.tools.with.collections.QueryToolsWithsCollection
 import gog.my_project.tools.scripts.StringTools
 
 
 class QueryBuilder(
-    override var params: MutableList<Any?> = mutableListOf<Any?>()
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) :
     IQueryBuilder
 {
@@ -94,9 +98,6 @@ class QueryBuilder(
 
 
 
-
-
-
     /* ==============================================================
     structure
     ============================================================== */
@@ -150,11 +151,9 @@ class QueryBuilder(
     /* ------------------------------------
       where
     ----------------------------------- */
-    override fun where(blockGroup: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryBuilder {
-        /*val builder = QueryToolsWhere();
+    override fun where(blockGroup: IQueryToolsWhere.() -> IQueryToolsWhere): IQueryBuilder {
+        val builder = QueryToolsWhere(params);
         _queryBuilderWhere = builder.blockGroup();
-        return this;*/
-        _queryBuilderWhere = _queryBuilderWhere?.whereSetup(blockGroup)
         return this;
     }
 
@@ -176,7 +175,6 @@ class QueryBuilder(
     override fun offset(blockOffset: IQueryToolsOptionOffset.() -> IQueryToolsOptionOffset): IQueryBuilder {
         val builder = QueryToolsOptionOffset(params);
         _queryBuilderOptionOffset = builder.blockOffset();
-        params = _queryBuilderOptionOffset?.params!!
         return this;
     }
 

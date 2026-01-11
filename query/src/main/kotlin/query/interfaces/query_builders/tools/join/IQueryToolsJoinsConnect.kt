@@ -1,11 +1,10 @@
 package gog.my_project.query.interfaces.query_builders.tools.join
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 
 
 interface IQueryToolsJoinsConnect : IQueryTools {
-
-    var params: MutableList<Any?>
 
     fun getListJoins(): List<IQueryToolsJoinsItem>
 

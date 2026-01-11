@@ -1,5 +1,6 @@
 package gog.my_project.query.interfaces.query_builders
 
+import gog.my_project.datas.SqlParameter
 import gog.my_project.query.interfaces.query_builders.tools.IQueryTools
 import gog.my_project.query.interfaces.query_builders.tools.conditions.IQueryToolsConditionsGroups
 import gog.my_project.query.interfaces.query_builders.tools.join.IQueryToolsJoinsConnect
@@ -15,8 +16,6 @@ import gog.my_project.query.interfaces.query_builders.tools.with.collections.IQu
 
 interface IQueryBuilder: IQueryTools {
 
-    var params: MutableList<Any?>
-
     fun getQueryWiths(): IQueryToolsWithsCollection?;
     fun getQuerySelect(): IQueryToolsSelect?;
     fun getQueryTable(): IQueryToolsTable?;
@@ -31,7 +30,7 @@ interface IQueryBuilder: IQueryTools {
     fun select(blockSelect: IQueryToolsSelect.() -> IQueryToolsSelect): IQueryBuilder;
     fun table(blockTable: IQueryToolsTable.() -> IQueryToolsTable): IQueryBuilder;
     fun joins(blockJoins: IQueryToolsJoinsConnect.() -> IQueryToolsJoinsConnect): IQueryBuilder;
-    fun where(blockGroup: IQueryToolsConditionsGroups.() -> IQueryToolsConditionsGroups): IQueryBuilder;
+    fun where(blockGroup: IQueryToolsWhere.() -> IQueryToolsWhere): IQueryBuilder;
 
 //    fun pageInit(optionLimit: Long , optionOffset: Long) : IQueryBuilder;
 //    fun limit(optionLimit: Long) : IQueryBuilder;
