@@ -70,5 +70,9 @@ object StringTools {
     }
 
 
+    fun createRandomString(length: Int): String {
+
+        return ""
+    }
 
 }

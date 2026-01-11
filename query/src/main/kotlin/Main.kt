@@ -29,12 +29,12 @@ fun main() {
         }
         .dialect(DialectQuery.MY_SQL);
 
-    val sqlDialect: ISqlDialect = SqlDialectFactory().create(dbBuilder.getDialect())
+    //val sqlDialect: ISqlDialect = SqlDialectFactory().create(dbBuilder.getDialect())
 
 
 
-    val db: Connection = dbBuilder.build();
-    println("Connected: ${db.isValid(2)}")
+    //val db: Connection = dbBuilder.build();
+    //println("Connected: ${db.isValid(2)}")
 
 
     //val queryBuilder = QueryContext(dbBuilder.getDialect()).createQueryBuilder();
@@ -213,14 +213,25 @@ fun main() {
     println("aaa: " +q2.toSql(sqlDialect))*/
 
 
-    println(query.toSqlReadable(sqlDialect))
+    //println(query.toSqlReadable(sqlDialect))
 
 
-    val queryBuilder =
-        QueryContext(dbBuilder.getDialect())
+    val ps =
+        QueryContext(dbBuilder)
             .setQuery(query)
             .execute();
 
+    if (ps is PreparedStatement) {
+        val exe = ps.executeQuery();
+        while (exe.next()){
+            val id =     exe.getInt("id")
+            val name =   exe.getString("name")
+            val family =   exe.getString("family")
+            val age =   exe.getInt("age")
+            val phone =   exe.getString("phone")
+            println("User: - $id $name $family $age $phone");
+        }
+    }
 
 
 
