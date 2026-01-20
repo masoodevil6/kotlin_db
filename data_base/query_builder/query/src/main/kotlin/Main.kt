@@ -1,12 +1,24 @@
-package gog.my_project
+package gog.my_project.data_base.query_builder.query
 
-import gog.my_project.core.sql_dialect.DialectQuery
-import gog.my_project.data_base.base.DatabaseBuilder
-
+import java.util.logging.LogManager
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 fun main() {
+    LogManager.getLogManager().reset()
+
+
+
+
+    //val sqlDialect: ISqlDialect = SqlDialectFactory().create(dbBuilder.getDialect())
+
+
+
+    //val db: Connection = dbBuilder.build();
+    //println("Connected: ${db.isValid(2)}")
+
+
+    //val queryBuilder = QueryContext(dbBuilder.getDialect()).createQueryBuilder();
 
     /*var query = QueryBuilder()
         .withs{
@@ -172,7 +184,11 @@ fun main() {
             }
         }*/
 
-    /*val dbBuilder =  DatabaseBuilder()
+
+
+    //val sqlDialect: ISqlDialect = SqlDialectFactory().create(dbBuilder.getDialect())
+
+   /* val dbBuilder =  DatabaseBuilder()
         .config {
             domain("jdbc:mysql://127.0.0.1")
             port(3306)
@@ -181,22 +197,76 @@ fun main() {
             password("")
         }
         .dialect(DialectQuery.MY_SQL)
-        .execute(
-            blockQuery = {
-                dialect ->
-                return query.readyExecuteSql(dialect)
-            } ,
-            blockExecute = {
-                    result->
-                while (result!!.next()){
-                    val id =       result.getInt("id")
-                    val name =     result.getString("name")
-                    val family =   result.getString("family")
-                    val age =      result.getInt("age")
-                    val phone =    result.getString("phone")
-                    println("User: - $id $name $family $age $phone");
-                }
+        .execute(query.readyExecuteSql(DialectQuery.MY_SQL)){
+            result->
+            while (result!!.next()){
+                val id =       result.getInt("id")
+                val name =     result.getString("name")
+                val family =   result.getString("family")
+                val age =      result.getInt("age")
+                val phone =    result.getString("phone")
+                println("User: - $id $name $family $age $phone");
             }
-        )*/
+        }*/
+
+
+
+
+    /*var q2 = QueryToolsTable()
+        .table("users")
+        .alias("u")
+
+    println("aaa: " +q2.toSql(sqlDialect))*/
+
+    //println(query.toSqlReadable(sqlDialect))
+
+   /* val execute =
+        QueryExecute()
+            .dbBuilder(dbBuilder)
+            .query(query)
+            .execute();
+
+    while (execute!!.next()){
+        val id =       execute.getInt("id")
+        val name =     execute.getString("name")
+        val family =   execute.getString("family")
+        val age =      execute.getInt("age")
+        val phone =    execute.getString("phone")
+        println("User: - $id $name $family $age $phone");
+    }
+*/
+
+    /*val queryCreated : String? = query.toSql(sqlDialect);
+    dbBuilder.fetch(queryCreated){
+            result->
+
+        if (result != null){
+
+            var number = 1;
+            while (result.next()) {
+
+                val id =     result.getInt("id")
+                val name =   result.getString("name")
+                val family = result.getString("family")
+                val age =    result.getString("age")
+                val phone =  result.getString("phone")
+
+                println("User: $number - $id $name $family $age $phone");
+                number ++;
+            }
+        }
+    }*/
+
+    /*val query2 = "select id , name from user_users where id= ?";
+    val ps = db.prepareStatement(query2)
+    //ps.setInt(1 , 1);
+    ps.setObject(1 , 1);
+    val exe = ps.executeQuery();
+
+    while (exe.next()){
+        val id =     exe.getInt("id")
+        val name =   exe.getString("name")
+        println("User: - $id $name ");
+    }*/
 
 }

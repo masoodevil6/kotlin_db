@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "gog.my_project"
+group = "gog.my_project.data_base"
 version = "unspecified"
 
 repositories {
@@ -10,7 +10,13 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":core"))
+    implementation(project(":data_base:connection"))
+    implementation(project(":data_base:annotations"))
+    implementation(project(":data_base:models"))
+    implementation(project(":data_base:query_builder"))
+
+    // implementation(project(":dialect"))
+//    implementation(project(":query"))
 
     implementation("mysql:mysql-connector-java:8.0.33")
 }
