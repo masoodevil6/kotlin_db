@@ -8,6 +8,7 @@ import gog.my_project.data_base.query_builder.dialect.dialect.SqlDialectFactory
 import gog.my_project.data_base.query_builder.dialect.dialects.ISqlDialect
 import gog.my_project.data_base.query_builder.query.interfaces.IQueryBuilder
 import java.sql.ResultSet
+import java.sql.SQLException
 import javax.management.Query
 
 class QueryManager(
@@ -27,16 +28,47 @@ class QueryManager(
     }
 
 
-    fun execute(queryBuilder: IQueryBuilder ,  blockExecute: (ResultSet?) -> Unit){
+    fun execute(
+        queryBuilder: IQueryBuilder,
+        blockExecute: (status: Boolean, message: String, result: ResultSet?) -> Unit,
+        blockQueryInfo: ((query: String , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
+    ){
         val db = this.connectToDataBase()
 
         val query: String? = SqlDialectFactory(db.getDialect()).translate(queryBuilder);
         val params: MutableList<SqlParameter<*>> = queryBuilder.params;
 
-        db.execute(
-            BuiltQuery(query , params) ,
-            blockExecute
-        )
+        if (query != null){
+
+            if (blockQueryInfo != null){
+                val paramsMap: MutableMap<String , Any?> = params.associate { it -> it.name to it.value }.toMutableMap()
+
+                blockQueryInfo(query , paramsMap)
+            }
+
+
+            try {
+                db.execute(
+                    builtQuery = BuiltQuery(query , params) ,
+                    blockExecute = {
+                        result ->
+                        blockExecute(
+                            true ,
+                            "Execute query success" ,
+                            result)
+                    }
+                )
+
+            }
+            catch (ex: SQLException){
+                blockExecute(
+                    false ,
+                    ex.toString() ,
+                    null
+                )
+            }
+        }
+
     }
 
 }

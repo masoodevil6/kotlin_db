@@ -5,6 +5,7 @@ import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToo
 import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToolsColumnsBase
 import gog.my_project.data_base.query_builder.query.interfaces.conditions.IQueryToolsConditions
 import gog.my_project.data_base.query_builder.query.interfaces.conditions.IQueryToolsConditionsGroups
+import gog.my_project.data_base.query_builder.query.interfaces.conditions.condition_in.IQueryToolsConditionsCollection
 import gog.my_project.data_base.query_builder.query.interfaces.join.IQueryToolsJoinsConnect
 import gog.my_project.data_base.query_builder.query.interfaces.join.IQueryToolsJoinsItem
 import gog.my_project.data_base.query_builder.query.interfaces.options.IQueryToolsOptionGroup
@@ -366,7 +367,15 @@ class MySqlDialect(
             val conditionSideRight = condition.getConditionSideRight();
 
             val conditionSideLeftStr = this.getColumnBaseSql(conditionSideLeft);
-            val conditionSideRightStr = this.getColumnBaseSql(conditionSideRight);
+
+            val conditionSideRightStr =
+                when (conditionSideRight) {
+                    is IQueryToolsColumnsBase ->  this.getColumnBaseSql(conditionSideRight);
+                    is IQueryToolsConditionsCollection ->  this.getConditionCollectionSql(conditionSideRight);
+                    is String -> conditionSideRight;
+                    else -> null;
+                };
+
             if (conditionSideLeftStr != null && conditionSideRightStr != null) {
                 var queryTemp = "";
 
@@ -377,6 +386,23 @@ class MySqlDialect(
                 queryTemp += " $conditionSideLeftStr $conditionOperation $conditionSideRightStr  "
                 return queryTemp;
             }
+        }
+
+        return null;
+    }
+
+    override fun getConditionCollectionSql(params: IQueryToolsConditionsCollection?): String? {
+        val paramsIn = params?.getParamsCollection();
+        if (paramsIn != null){
+            var paramInStr = " ( ";
+            for ((index, paramName) in paramsIn.withIndex()){
+                paramInStr += " :$paramName ";
+                if (index < paramsIn.size - 1){
+                    paramInStr += ","
+                }
+            }
+            paramInStr += " ) "
+            return paramInStr;
         }
 
         return null;

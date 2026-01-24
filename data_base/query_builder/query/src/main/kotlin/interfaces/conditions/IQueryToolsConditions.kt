@@ -1,6 +1,7 @@
 package gog.my_project.data_base.query_builder.query.interfaces.conditions
 
 import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToolsColumnsBase
+import gog.my_project.data_base.query_builder.query.interfaces.conditions.condition_in.IQueryToolsConditionsCollection
 import gog.my_project.data_base.query_builder.query.tools.enums.SqlConditionOperation
 import gog.my_project.data_base.query_builder.query.tools.enums.SqlLogical
 
@@ -9,14 +10,14 @@ interface IQueryToolsConditions : IQueryToolsIsConditions {
     fun getConditionLogical(): SqlLogical?;
     fun getConditionSideLeft(): IQueryToolsColumnsBase?;
     fun getConditionOperation(): SqlConditionOperation?;
-    fun getConditionSideRight(): IQueryToolsColumnsBase?;
+    fun getConditionSideRight(): Any?;
 
     fun logical(logical: SqlLogical): IQueryToolsConditions;
     fun logicalAnd(): IQueryToolsConditions;
     fun logicalOr(): IQueryToolsConditions;
     fun logicalOn(): IQueryToolsConditions;
 
-    fun sideLeft(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
+    fun sideSelector(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
 
     fun operation(operation: SqlConditionOperation): IQueryToolsConditions;
     fun operationEqual(): IQueryToolsConditions;
@@ -31,10 +32,16 @@ interface IQueryToolsConditions : IQueryToolsIsConditions {
     fun operationNotIn(): IQueryToolsConditions;
     fun operationBetween(): IQueryToolsConditions;
     fun operationNotBetween(): IQueryToolsConditions;
-    fun operationIsNull(): IQueryToolsConditions;
-    fun operationIsNotNull(): IQueryToolsConditions;
+    fun operationIs(): IQueryToolsConditions;
+    fun operationIsNot(): IQueryToolsConditions;
     fun operationContains(): IQueryToolsConditions;
 
-    fun sideRight(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
-    fun <T> sideRightValue(paramName: String , paramValue: T): IQueryToolsConditions
+    fun sideValue(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions
+
+    //fun <T> sideValue( paramValue: T): IQueryToolsConditions
+    fun <T> sideValue(paramName: String , paramValue: T): IQueryToolsConditions
+
+    //    fun sideValueCollection( blockParamsCollection: IQueryToolsConditionsCollection.() -> IQueryToolsConditionsCollection): IQueryToolsConditions
+    fun sideValueCollection(paramName: String , blockParamsCollection: IQueryToolsConditionsCollection.() -> IQueryToolsConditionsCollection): IQueryToolsConditions
+
 }

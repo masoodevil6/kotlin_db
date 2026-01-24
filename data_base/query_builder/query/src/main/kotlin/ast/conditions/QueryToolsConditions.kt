@@ -2,8 +2,10 @@ package gog.my_project.data_base.query_builder.query.ast.conditions
 
 import gog.my_project.data_base.connection.tools.datas.SqlParameter
 import gog.my_project.data_base.query_builder.query.ast.column.QueryToolsColumnsBase
+import gog.my_project.data_base.query_builder.query.ast.conditions.condition_in.QueryToolsConditionsCollection
 import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToolsColumnsBase
 import gog.my_project.data_base.query_builder.query.interfaces.conditions.IQueryToolsConditions
+import gog.my_project.data_base.query_builder.query.interfaces.conditions.condition_in.IQueryToolsConditionsCollection
 import gog.my_project.data_base.query_builder.query.tools.enums.SqlConditionOperation
 import gog.my_project.data_base.query_builder.query.tools.enums.SqlLogical
 
@@ -23,7 +25,7 @@ class QueryToolsConditions(
     private var conditionLogical:    SqlLogical? = SqlLogical.And;
     private var conditionSideLeft:   IQueryToolsColumnsBase? = null;
     private var conditionOperation:  SqlConditionOperation? = null;
-    private var conditionSideRight : IQueryToolsColumnsBase? = null;
+    private var conditionSideRight : Any? = null;
 
 
 
@@ -46,7 +48,7 @@ class QueryToolsConditions(
         return conditionOperation;
     }
 
-    override fun getConditionSideRight(): IQueryToolsColumnsBase? {
+    override fun getConditionSideRight(): Any? {
         return conditionSideRight;
     }
 
@@ -54,17 +56,6 @@ class QueryToolsConditions(
         return isAddLogical;
     }
 
-
-
-
-
-
-    /* ==============================================================
-    Builder
-    ============================================================== */
-    /*override fun toSql(sqlDialect: ISqlDialect): String? {
-        return sqlDialect.getConditionSql(this);
-    }*/
 
 
 
@@ -101,7 +92,7 @@ class QueryToolsConditions(
 
 
 
-    override fun sideLeft(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions {
+    override fun sideSelector(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions {
         val builder = QueryToolsColumnsBase(params);
         val query = builder.blockColumn();
         this.conditionSideLeft = query
@@ -165,19 +156,13 @@ class QueryToolsConditions(
         return this.operation(SqlConditionOperation.NotBetween);
     }
 
-    override fun operationIsNull(): IQueryToolsConditions {
-        this.operation(SqlConditionOperation.IsNull);
-        this.sideRight {
-            columnName("")
-        }
+    override fun operationIs(): IQueryToolsConditions {
+        this.operation(SqlConditionOperation.Is);
         return this;
     }
 
-    override fun operationIsNotNull(): IQueryToolsConditions {
-        this.operation(SqlConditionOperation.IsNotNull);
-        this.sideRight {
-            columnName("")
-        }
+    override fun operationIsNot(): IQueryToolsConditions {
+        this.operation(SqlConditionOperation.IsNot);
         return this;
     }
 
@@ -193,20 +178,47 @@ class QueryToolsConditions(
 
 
 
-    override fun sideRight(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions {
+    override fun sideValue(blockColumn: IQueryToolsColumnsBase.() -> IQueryToolsColumnsBase): IQueryToolsConditions {
         val builder = QueryToolsColumnsBase(params);
         val query = builder.blockColumn();
         this.conditionSideRight = query
         return this;
     }
 
-    override fun <T> sideRightValue(paramName: String , paramValue: T): IQueryToolsConditions {
-        this.conditionSideRight = QueryToolsColumnsBase(
-            params
-        ).columnName(":${paramName}");
+
+
+
+    override fun <T> sideValue(
+        paramName: String ,
+        paramValue: T
+    ): IQueryToolsConditions {
+        this.conditionSideRight = ":${paramName}";
         params += SqlParameter.of(paramName , paramValue)
         return this;
     }
+
+
+
+    override fun  sideValueCollection(
+        paramName: String,
+        blockParamsCollection: IQueryToolsConditionsCollection.() -> IQueryToolsConditionsCollection
+    ): IQueryToolsConditions {
+        val paramsCollection = QueryToolsConditionsCollection(params , paramName)
+        this.conditionSideRight = blockParamsCollection(paramsCollection)
+        return this;
+    }
+
+
+
+
+//    override fun sideValue(
+//        paramName: String,
+//        blockParamsLike: IQueryToolsConditionLike.() -> IQueryToolsConditionLike
+//    ): IQueryToolsConditions {
+//        val paramsIn = QueryToolsConditionLike(params, paramName)
+//        this.conditionSideRight = blockParamsLike(paramsIn)
+//        return this;
+//    }
 
 
 }

@@ -13,7 +13,7 @@ enum class SqlConditionOperation(val value: String) {
     NotIn("not in")  ,
     Between("between")  ,
     NotBetween("not between") ,
-    IsNull("is null")  ,
-    IsNotNull("is not null")  ,
+    Is("is")  ,
+    IsNot("is not")  ,
     Contains("contains")  ,
 }

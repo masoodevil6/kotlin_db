@@ -12,8 +12,7 @@ repositories {
 dependencies {
     implementation(project(":data_base:query_builder:renderer"))
     implementation(project(":data_base:query_builder:query"))
-    //implementation(project(":data_base"))
-   // implementation(project(":dialect"))
+    implementation(project(":tools"))
 }
 
 tasks.test {

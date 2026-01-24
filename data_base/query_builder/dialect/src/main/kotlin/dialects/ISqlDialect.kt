@@ -5,6 +5,7 @@ import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToo
 import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToolsColumnsBase
 import gog.my_project.data_base.query_builder.query.interfaces.conditions.IQueryToolsConditions
 import gog.my_project.data_base.query_builder.query.interfaces.conditions.IQueryToolsConditionsGroups
+import gog.my_project.data_base.query_builder.query.interfaces.conditions.condition_in.IQueryToolsConditionsCollection
 import gog.my_project.data_base.query_builder.query.interfaces.join.IQueryToolsJoinsConnect
 import gog.my_project.data_base.query_builder.query.interfaces.join.IQueryToolsJoinsItem
 import gog.my_project.data_base.query_builder.query.interfaces.options.IQueryToolsOptionGroup
@@ -77,5 +78,6 @@ interface ISqlDialect {
     fun getConditionGroupSql(group: IQueryToolsConditionsGroups?, hasLogical: Boolean = false, forceHasLogical: Boolean = false) : String?
 
     fun getConditionSql(condition: IQueryToolsConditions?, hasLogical: Boolean = false) : String?
+    fun getConditionCollectionSql(params: IQueryToolsConditionsCollection?) : String?
 
 }

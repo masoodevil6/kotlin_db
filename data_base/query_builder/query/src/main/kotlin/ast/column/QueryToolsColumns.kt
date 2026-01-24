@@ -41,18 +41,6 @@ class QueryToolsColumns(
 
 
     /* ==============================================================
-    Builder
-    ============================================================== */
-
-   /* override fun toSql(sqlDialect: ISqlDialect): String? {
-        return sqlDialect.getColumnSql(this);
-    }*/
-
-
-
-
-
-    /* ==============================================================
     structure
     ============================================================== */
     override fun method(method: SqlMethodColumn): IQueryToolsColumns {

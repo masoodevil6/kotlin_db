@@ -76,7 +76,6 @@ class DatabaseBuilder {
             for ((index , paramName) in paramsNames.withIndex()) {
                 for (paramData in params) {
                     if (paramName == paramData.name) {
-                        println(index+1)
                         when (paramData.sqlType) {
                             Types.NULL ->       ps.setNull(index+1  , java.sql.Types.NULL)
                             Types.INTEGER ->    ps.setInt(index+1, paramData.value as Int)
@@ -98,45 +97,5 @@ class DatabaseBuilder {
 
         return ps;
     }
-
-
-
- /*   fun execute(blockQuery :  (ISqlDialect) -> BuiltQuery , blockExecute: (ResultSet?) -> Unit) {
-        val sqlDialect: ISqlDialect = SqlDialectFactory().create(this.dialect)
-
-        var builtQuery: BuiltQuery = blockQuery(sqlDialect)
-        //var builtQuery: BuiltQuery = queryBuilder.readyExecuteSql(sqlDialect)
-
-        val query = builtQuery.getReadyQuery();
-        val params =  builtQuery.params;
-        val paramsNames = builtQuery.getListParamNames();
-
-        val connection = build();
-
-        connection.use {conn->
-            conn.prepareStatement(query).use { stmt ->
-                val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-                val resultExecute = ps?.executeQuery();
-                blockExecute(resultExecute);
-            }
-        }
-    }
-    */
-
-
-
-
-
-
-   /* fun fetch(query: String?, execute: (ResultSet?) -> Unit) {
-        val connection = build();
-        connection.use {conn->
-            conn?.prepareStatement(query).use { stmt ->
-                val resultExecute = stmt?.executeQuery();
-                execute(resultExecute);
-            }
-        }
-    }*/
-
 
 }

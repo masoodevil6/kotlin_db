@@ -37,16 +37,6 @@ class QueryToolsColumnsBase(
 
 
     /* ==============================================================
-    Builder
-    ============================================================== */
-   /* override fun toSql(sqlDialect: ISqlDialect): String? {
-        return sqlDialect.getColumnBaseSql(this);
-    }*/
-
-
-
-
-    /* ==============================================================
     structure
     ============================================================== */
     override fun columnPrefix(columnPrefix: String): IQueryToolsColumnsBase {
