@@ -7,6 +7,7 @@ import gog.my_project.data_base.connection.tools.datas.SqlParameter
 import gog.my_project.data_base.query_builder.dialect.dialect.SqlDialectFactory
 import gog.my_project.data_base.query_builder.dialect.dialects.ISqlDialect
 import gog.my_project.data_base.query_builder.query.interfaces.IQueryBuilder
+import gog.my_project.data_base.query_builder.renderer.tools.ExecuteResult
 import java.sql.ResultSet
 import java.sql.SQLException
 import javax.management.Query
@@ -30,7 +31,7 @@ class QueryManager(
 
     fun execute(
         queryBuilder: IQueryBuilder,
-        blockExecute: (status: Boolean, message: String, result: ResultSet?) -> Unit,
+        blockExecute: (ExecuteResult) -> Unit,
         blockQueryInfo: ((query: String , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
     ){
         val db = this.connectToDataBase()
@@ -53,20 +54,22 @@ class QueryManager(
                     blockExecute = {
                         result ->
                         blockExecute(
-                            true ,
-                            "Execute query success" ,
-                            result)
+                            ExecuteResult.SuccessExecute(result)
+                        )
                     }
                 )
 
             }
             catch (ex: SQLException){
                 blockExecute(
-                    false ,
-                    ex.toString() ,
-                    null
+                    ExecuteResult.ErrorExecute(ex)
                 )
             }
+        }
+        else{
+            blockExecute(
+                ExecuteResult.Error("Error executing query ")
+            )
         }
 
     }
