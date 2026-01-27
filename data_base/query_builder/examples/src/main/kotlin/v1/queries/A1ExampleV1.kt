@@ -1,5 +1,7 @@
 package  gog.my_project.data_base.query_builder.examples.v1.queries
 
+import gog.my_project.data_base.models.users.UserPhones
+import gog.my_project.data_base.models.users.Users
 import gog.my_project.data_base.query_builder.query.ast.QueryBuilder
 import gog.my_project.data_base.query_builder.query.interfaces.IQueryBuilder
 import gog.my_project.data_base.query_builder.renderer.manager.QueryManager
@@ -11,7 +13,7 @@ class A1ExampleV1()
     : IAExampleV1 {
 
 
-    override fun query(): IQueryBuilder {
+    /*override fun query(): IQueryBuilder {
         return QueryBuilder()
             .withs{
                 addWith {
@@ -20,32 +22,27 @@ class A1ExampleV1()
                         select {
                             addColumn {
                                 column {
-                                    columnPrefix("uu")
-                                    columnName("id")
+                                    column(Users::userId)
                                 }
                             }
                             addColumn {
                                 column {
-                                    columnPrefix("uu")
-                                    columnName("name")
+                                    column(Users::userName)
                                 }
                             }
                             addColumn {
                                 column {
-                                    columnPrefix("uu")
-                                    columnName("family")
+                                    column(Users::userFamily)
                                 }
                             }
                             addColumn {
                                 column {
-                                    columnPrefix("uu")
-                                    columnName("age")
+                                    column(Users::userAge)
                                 }
                             }
                             addColumn {
                                 column {
-                                    columnPrefix("up")
-                                    columnName("phone")
+                                    column(UserPhones::userPhone)
                                 }
                             }
                         }
@@ -64,13 +61,11 @@ class A1ExampleV1()
                                     logicalOn()
                                     addCondition {
                                         sideSelector {
-                                            columnPrefix("uu")
-                                            columnName("id")
+                                            column(Users::userId)
                                         }
                                         operationEqual()
                                         sideValue {
-                                            columnPrefix("up")
-                                            columnName("user_id")
+                                            column(UserPhones::userId)
                                         }
                                     }
                                 }
@@ -82,8 +77,7 @@ class A1ExampleV1()
                                 addCondition {
                                     logicalAnd()
                                     sideSelector {
-                                        columnPrefix("uu")
-                                        columnName("id")
+                                        column(Users::userId)
                                     }
                                     operationEqual()
                                     sideValue(
@@ -168,6 +162,77 @@ class A1ExampleV1()
                     columnName("id")
                 }
             }
+    }*/
+
+    override fun query(): IQueryBuilder {
+        return QueryBuilder()
+            .select {
+                addColumn {
+                    column {
+                        column(Users::class ,Users::userId)
+                    }
+                }
+                addColumn {
+                    column {
+                        column(Users::class ,Users::userName)
+                    }
+                }
+                addColumn {
+                    column {
+                        column(Users::class ,Users::userFamily)
+                    }
+                }
+                addColumn {
+                    column {
+                        column(Users::class ,Users::userAge)
+                    }
+                }
+                addColumn {
+                    column {
+                        column(UserPhones::class ,UserPhones::userPhone)
+                    }
+                }
+            }
+            .table{
+                table(Users::class)
+            }
+            .joins {
+                addJoin {
+                    innerJoin()
+                    table {
+                        table(UserPhones::class)
+                    }
+                    condition {
+                        logicalOn()
+                        addCondition {
+                            sideSelector {
+                                column(Users::class ,Users::userId)
+                            }
+                            operationEqual()
+                            sideValue {
+                                column(UserPhones::class ,UserPhones::userId)
+                            }
+                        }
+                    }
+                }
+            }
+            .where{
+                conditions {
+
+                    addCondition {
+                        logicalAnd()
+                        sideSelector {
+                            column(Users::class ,Users::userId)
+                        }
+                        operationEqual()
+                        sideValue(
+                            "id1" ,
+                            1
+                        )
+                    }
+
+                }
+        }
     }
 
     override fun execute(queryManager : QueryManager) {

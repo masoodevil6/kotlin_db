@@ -1,19 +1,35 @@
 package gog.my_project.data_base.models.users
 
-@QBTable("user_users")
-class Users()
+import gog.my_project.data_base.annotations.models.QBColumn
+import gog.my_project.data_base.annotations.models.QBTable
+import gog.my_project.data_base.models.main.BaseModel
+
+@QBTable(
+    name="user_users" ,
+    alias = "uu"
+)
+class Users() : BaseModel()
 {
 
-    @QBColumn("id" , primaryKey = true)
+    @QBColumn(
+        name="id" ,
+        primaryKey = true
+    )
     val userId : Int =  0
 
-    @QBColumn("name")
+    @QBColumn(
+        name="name"
+    )
     val userName : String? =  null;
 
-    @QBColumn("family")
+    @QBColumn(
+        name="family"
+    )
     val userFamily : String? =  null;
 
-    @QBColumn("age")
+    @QBColumn(
+        name="age"
+    )
     val userAge : String? =  null;
 
 }

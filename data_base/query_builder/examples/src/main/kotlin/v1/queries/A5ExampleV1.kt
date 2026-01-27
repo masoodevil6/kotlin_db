@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query_builder.examples.v1.queries
 
+import gog.my_project.data_base.models.users.Users
 import gog.my_project.data_base.query_builder.query.ast.QueryBuilder
 import gog.my_project.data_base.query_builder.query.interfaces.IQueryBuilder
 import gog.my_project.data_base.query_builder.renderer.manager.QueryManager
@@ -15,45 +16,39 @@ class A5ExampleV1()
             .select {
                 addColumn {
                     column {
-                        columnPrefix("uu")
-                        columnName("id")
+                        column(Users::class ,Users::userId)
                     }
                 }
                 addColumn {
                     column {
-                        columnPrefix("uu")
-                        columnName("name")
+                        column(Users::class ,Users::userName)
                     }
                 }
                 addColumn {
                     column {
-                        columnPrefix("uu")
-                        columnName("family")
+                        column(Users::class ,Users::userFamily)
                     }
                 }
                 addColumn {
                     column {
-                        columnPrefix("uu")
-                        columnName("age")
+                        column(Users::class ,Users::userAge)
                     }
                 }
             }
-            .table {
-                table("user_users")
-                alias("uu")
+            .table{
+                table(Users::class)
             }
             .where{
                 conditions {
                     addCondition {
                         logicalAnd()
                         sideSelector {
-                            columnPrefix("u")
-                            columnName("age")
+                            column(Users::class ,Users::userAge)
                         }
                         operationIs()
                         sideValue(
                             "user_age" ,
-                            null
+                            1
                         )
                     }
                 }

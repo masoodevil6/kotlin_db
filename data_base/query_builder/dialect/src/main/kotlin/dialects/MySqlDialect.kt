@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query_builder.dialect.dialects
 
+import gog.my_project.data_base.annotations.models.QBTable
 import gog.my_project.data_base.query_builder.query.interfaces.IQueryBuilder
 import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToolsColumns
 import gog.my_project.data_base.query_builder.query.interfaces.columns.IQueryToolsColumnsBase
@@ -136,23 +137,16 @@ class MySqlDialect(
 
     override fun getColumnBaseSql(column: IQueryToolsColumnsBase?): String? {
         if (column != null){
-            val columnPrefix = column.getColumnPrefix();
-            val columnName = column.getColumnName();
-            val columnQuery = column.getColumnQuery();
+            val table = column.getTable();
+            val column = column.getColumn();
 
-            if (columnName != null){
-                var column = ""
-                if (columnPrefix != null) {
-                    column = " $columnPrefix.";
+            if (column != null && table != null){
+                var columnStr = ""
+                if (table.alias != "") {
+                    columnStr = " ${table.alias}.";
                 }
-                column += "$columnName ";
-                return column;
-            }
-            else if (columnQuery != null){
-                val query = this.getBasicSql(columnQuery)
-                if (query != null){
-                    return " ($query) ";
-                }
+                columnStr += "${column.name} ";
+                return columnStr;
             }
         }
         return null;
@@ -163,30 +157,16 @@ class MySqlDialect(
 
     override fun getTableSql(table: IQueryToolsTable?, withPrefix: Boolean) : String{
         if (table != null){
-            val tableName: String? = table.getTableName();
-            val tableAlias: String? = table.getTableAlias();
-            val tableQuery: IQueryBuilder? = table.getTableQuery();
+            val table: QBTable? = table.getTable();
 
             var queryTemp: String = "";
-            if (tableName != null) {
+            if (table != null) {
                 if (withPrefix){
                     queryTemp = " FROM ";
                 }
-                queryTemp += " $tableName ";
-                if (tableAlias != null) {
-                    queryTemp += " As ${tableAlias} ";
-                }
-            }
-            else if (tableQuery != null){
-                val query = this.getBasicSql(tableQuery);
-                if (query != null){
-                    if (withPrefix){
-                        queryTemp = " FROM ";
-                    }
-                    queryTemp += " ($query) ";
-                    if (tableAlias != null) {
-                        queryTemp += " As ${tableAlias} ";
-                    }
+                queryTemp += " ${table.name} ";
+                if (table.alias != "") {
+                    queryTemp += " As ${table.alias} ";
                 }
             }
 

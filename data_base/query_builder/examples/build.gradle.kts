@@ -12,6 +12,7 @@ repositories {
 dependencies {
     implementation(project(":data_base:query_builder:renderer"))
     implementation(project(":data_base:query_builder:query"))
+    implementation(project(":data_base:models"))
     implementation(project(":tools"))
 }
 

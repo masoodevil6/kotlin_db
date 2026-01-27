@@ -11,6 +11,8 @@ repositories {
 
 dependencies {
     implementation(project(":data_base:connection"))
+    implementation(project(":data_base:annotations"))
+    implementation(project(":data_base:models"))
 
     testImplementation(kotlin("test"))
 
