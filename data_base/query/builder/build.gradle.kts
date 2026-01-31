@@ -2,8 +2,8 @@ plugins {
     kotlin("jvm")
 }
 
-group = "gog.my_project.data_base.models"
-version = "unspecified"
+group = "gog.my_project.data_base.query.builder"
+version = ""
 
 repositories {
     mavenCentral()
@@ -11,8 +11,11 @@ repositories {
 
 dependencies {
     implementation(project(":data_base:core"))
+    implementation(project(":data_base:query:definition"))
 
     testImplementation(kotlin("test"))
+
+    implementation("org.jetbrains.kotlin:kotlin-reflect:1.8.20")
 }
 
 tasks.test {

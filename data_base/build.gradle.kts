@@ -10,10 +10,10 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":data_base:connection"))
-    implementation(project(":data_base:annotations"))
-    implementation(project(":data_base:models"))
-    implementation(project(":data_base:query_builder"))
+//    implementation(project(":data_base:connection"))
+//    implementation(project(":data_base:annotations"))
+//    implementation(project(":data_base:models"))
+//    implementation(project(":data_base:query_builder"))
 
     // implementation(project(":dialect"))
 //    implementation(project(":query"))

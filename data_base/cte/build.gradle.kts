@@ -2,8 +2,8 @@ plugins {
     kotlin("jvm")
 }
 
-group = "gog.my_project.data_base.models"
-version = "unspecified"
+group = "gog.my_project.data_base.cte"
+version = ""
 
 repositories {
     mavenCentral()
@@ -11,6 +11,7 @@ repositories {
 
 dependencies {
     implementation(project(":data_base:core"))
+    implementation(project(":data_base:models"))
 
     testImplementation(kotlin("test"))
 }

@@ -10,6 +10,8 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":data_base:core"))
+
     testImplementation(kotlin("test"))
 
     implementation("mysql:mysql-connector-java:8.0.33")

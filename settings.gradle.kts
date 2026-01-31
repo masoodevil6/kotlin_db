@@ -25,22 +25,18 @@ rootProject.name = "my_project"
 include(":app")
 include(":utils")
 
-
-include("core")
-
+include(":tools")
 
 
 include(":data_base")
+include(":data_base:core")
 include(":data_base:connection")
-include(":data_base:annotations")
 include(":data_base:models")
+include(":data_base:cte")
 
-include(":data_base:query_builder")
-include(":data_base:query_builder:query")
-include(":data_base:query_builder:dialect")
-include(":data_base:query_builder:renderer")
-include(":data_base:query_builder:examples")
-
-
-include(":tools")
-
+include(":data_base:query")
+include(":data_base:query:definition")
+include(":data_base:query:builder")
+include(":data_base:query:dialect")
+include(":data_base:query:renderer")
+include(":data_base:query:example")
