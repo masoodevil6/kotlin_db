@@ -11,11 +11,16 @@ repositories {
 
 dependencies {
     implementation(project(":data_base:core"))
-    implementation(project(":data_base:connection"))
 
-    implementation(project(":data_base:query:builder"))
+    implementation(project(":data_base:query:ast"))
     implementation(project(":data_base:query:dialect"))
-    implementation(project(":data_base:query:renderer"))
+
+
+//    implementation(project(":data_base:connection"))
+//
+//    implementation(project(":data_base:query:builder"))
+//    implementation(project(":data_base:query:dialect"))
+//    implementation(project(":data_base:query:renderer"))
 
     testImplementation(kotlin("test"))
 }

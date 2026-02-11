@@ -28,8 +28,9 @@
             <option value="$PROJECT_DIR$/data_base/cte" />
             <option value="$PROJECT_DIR$/data_base/models" />
             <option value="$PROJECT_DIR$/data_base/query" />
+            <option value="$PROJECT_DIR$/data_base/query/api" />
+            <option value="$PROJECT_DIR$/data_base/query/ast" />
             <option value="$PROJECT_DIR$/data_base/query/builder" />
-            <option value="$PROJECT_DIR$/data_base/query/definition" />
             <option value="$PROJECT_DIR$/data_base/query/dialect" />
             <option value="$PROJECT_DIR$/data_base/query/example" />
             <option value="$PROJECT_DIR$/data_base/query/renderer" />

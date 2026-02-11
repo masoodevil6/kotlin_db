@@ -18,7 +18,7 @@ dependencies {
     implementation(project(":data_base:models"))
     implementation(project(":data_base:cte"))
 
-    implementation(project(":data_base:query:definition"))
+    implementation(project(":data_base:query:api"))
     implementation(project(":data_base:query:renderer"))
 }
 

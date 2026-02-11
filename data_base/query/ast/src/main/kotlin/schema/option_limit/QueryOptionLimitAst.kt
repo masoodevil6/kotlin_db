@@ -1,0 +1,9 @@
+package gog.my_project.data_base.query.ast.schema.option_limit
+
+import gog.my_project.data_base.query.ast.interfaces.option_limit.IQueryOptionLimitAst
+
+class QueryOptionLimitAst : IQueryOptionLimitAst {
+
+    override  var pageLimit : Long?                 = null;
+
+}

@@ -1,6 +1,6 @@
 package gog.my_project.data_base.query.example.v1.queries
 
-import gog.my_project.data_base.query.definition.interfaces.IQueryDefinition
+import gog.my_project.data_base.query.definition.interfaces.IQuery
 import gog.my_project.data_base.query.renderer.manager.QueryManager
 import gog.my_project.data_base.query.renderer.tools.ExecuteResult
 import gog.my_project.tools.scripts.StringTools
@@ -8,7 +8,7 @@ import gog.my_project.tools.scripts.StringTools
 
 class A4ExampleV1: IAExampleV1 {
 
-    override fun query(): IQueryDefinition {
+    override fun query(): IQuery {
         return QueryBuilder()
             .select {
                 addColumn {

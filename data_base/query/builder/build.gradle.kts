@@ -11,7 +11,8 @@ repositories {
 
 dependencies {
     implementation(project(":data_base:core"))
-    implementation(project(":data_base:query:definition"))
+    implementation(project(":data_base:query:ast"))
+    implementation(project(":data_base:query:api"))
 
     testImplementation(kotlin("test"))
 

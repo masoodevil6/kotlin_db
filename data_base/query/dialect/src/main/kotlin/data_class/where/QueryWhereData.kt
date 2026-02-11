@@ -1,0 +1,7 @@
+package gog.my_project.data_base.query.dialect.data_class.where
+
+import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
+
+data class QueryWhereData(
+    val _dummy: Int = 0
+): QueryDataClass()
