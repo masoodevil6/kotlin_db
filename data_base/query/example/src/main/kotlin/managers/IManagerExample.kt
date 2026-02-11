@@ -1,6 +1,6 @@
 package gog.my_project.data_base.query.example.managers
 
-import gog.my_project.data_base.query.renderer.manager.QueryManager
+import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 interface IManagerExample<T> {
 
@@ -8,5 +8,5 @@ interface IManagerExample<T> {
 
     fun readyListExamples();
 
-    fun renderExamples(queryManager: QueryManager);
+    fun renderExamples(queryManager: IQueryBuilderExecutor);
 }

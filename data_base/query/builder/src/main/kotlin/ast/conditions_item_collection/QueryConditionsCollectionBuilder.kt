@@ -19,7 +19,7 @@ class QueryConditionsCollectionBuilder(
     {
         val paramName = "$paramName${this.ast.paramsCollection.size}"
         this.ast.paramsCollection.add(paramName);
-        params plusAssign SqlParameter.Companion.of(paramName , paramValue)
+        params += SqlParameter.of(paramName , paramValue)
         return this;
     }
 

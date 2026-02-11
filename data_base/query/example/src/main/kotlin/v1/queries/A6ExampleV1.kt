@@ -1,14 +1,14 @@
 package gog.my_project.data_base.query.example.v1.queries
 
 
-import gog.my_project.data_base.query.definition.interfaces.IQuery
-import gog.my_project.data_base.query.renderer.manager.QueryManager
-import gog.my_project.data_base.query.renderer.tools.ExecuteResult
-import gog.my_project.tools.scripts.StringTools
+import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.query.api.interfaces.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.builder.ast.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 class A6ExampleV1(): IAExampleV1 {
 
-    override fun query(): IQuery {
+    override fun query(): IQueryRenderSelectApi {
         /*return QueryBuilder()
             .withs{
                 addWith {
@@ -74,12 +74,12 @@ class A6ExampleV1(): IAExampleV1 {
                     column(CteInfoUser::class , CteInfoUser::cteUserId)
                 }
             }*/
-        return QueryBuilder();
+        return QueryRenderSelectBuilder();
     }
 
-    override fun execute(queryManager: QueryManager) {
+    override fun execute(queryManager : IQueryBuilderExecutor) {
         queryManager.execute(
-            queryBuilder = this.query() as IQueryBuilder,
+            queryBuilder = this.query() ,
             blockQueryInfo = {
                     query , paramsMap->
 
@@ -87,7 +87,7 @@ class A6ExampleV1(): IAExampleV1 {
                 println("V1-Ex6: Query with cte ");
                 println("---------------------------");
 
-                print("query: ${StringTools.formatSql(query)} \n");
+                print("query: ${query} \n");
                 println("---------------------------");
                 var paramsStr = "";
                 paramsMap.forEach {

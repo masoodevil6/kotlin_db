@@ -1,76 +1,55 @@
-package gog.my_project.data_base.builder.base
+package gog.my_project.data_base.manager.execute.manager
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConfigBuilder
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
-import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import java.sql.Connection
+import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
+import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import java.sql.Date
-import java.sql.DriverManager
 import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Time
 import java.sql.Timestamp
 import java.sql.Types
 import kotlin.use
 
-class DatabaseBuilder {
+class QueryExecute(
 
-    private var config: DatabaseConfig = DefaultDatabaseConfig.config
-    private var dialect: DialectQuery = DefaultDatabaseConfig.dialect;
+) : IQueryExecute {
 
-    fun config(block: DatabaseConfigBuilder.() -> Unit): DatabaseBuilder {
-        val builder = DatabaseConfigBuilder()
-        builder.block()
-        config = builder.build()
-        return this
-    }
-
-    fun dialect(dialect: DialectQuery): DatabaseBuilder {
-        this.dialect = dialect
-        return this
-    }
-
-    fun getDialect(): DialectQuery = dialect
-
-    fun build(): Connection {
-        return try {
-            DriverManager.getConnection(
-                config.getDbUrl(),
-                config.dbUserName ,
-                config.dbPassword
-            )
-        }
-        catch (e: SQLException) {
-            throw RuntimeException("can not connect to database")
-        }
-    }
-
-
-
-
-    fun execute(
+    override fun execute(
         builtQuery: BuiltQuery,
-        blockExecute: (ResultSet?) -> Unit
+        blockExecute: (ExecuteResult) -> Unit
     ) {
         val query = builtQuery.getReadyQuery();
         val params =  builtQuery.params;
         val paramsNames = builtQuery.getListParamNames();
-
-        val connection = build();
+        val connection = DatabaseConnection().build();
 
         connection.use {conn->
-            conn.prepareStatement(query).use { stmt ->
-                val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-
-                val resultExecute = ps?.executeQuery();
-                blockExecute(resultExecute);
+            if (query != null){
+                try {
+                    conn.prepareStatement(query).use { stmt ->
+                        val ps = this.readyParamsInQuery(stmt , params , paramsNames);
+                        val resultExecute = ps?.executeQuery();
+                        blockExecute(ExecuteResult.SuccessExecute(resultExecute));
+                    }
+                }
+                catch (ex: SQLException){
+                    blockExecute(
+                        ExecuteResult.ErrorExecute(ex)
+                    )
+                }
+            }
+            else{
+                blockExecute(
+                    ExecuteResult.Error("Error executing query ")
+                )
             }
         }
     }
+
+
 
     private fun readyParamsInQuery(ps : PreparedStatement?, params :MutableList<SqlParameter<*>>, paramsNames: List<String>) : PreparedStatement?{
         if (ps != null){

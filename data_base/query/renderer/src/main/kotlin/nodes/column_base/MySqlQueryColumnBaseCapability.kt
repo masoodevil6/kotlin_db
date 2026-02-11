@@ -14,11 +14,11 @@ class MySqlQueryColumnBaseCapability : IQueryColumnBaseCapability {
     ): String? {
 
         val table = ast.table;
-        val tableAlias = ast.table;
+        val tableAlias = ast.tableAlias;
         val tableColumn = ast.column;
 
         val cte = ast.cte;
-        val cteAlias = ast.cte;
+        val cteAlias = ast.cteAlias;
         val cteSelect = ast.select;
 
         var columnStr = ""
@@ -26,14 +26,14 @@ class MySqlQueryColumnBaseCapability : IQueryColumnBaseCapability {
             if (tableAlias != "") {
                 columnStr = " ${tableAlias}.";
             }
-            columnStr += "${cteSelect} ";
+            columnStr += "${tableColumn} ";
         }
 
         if (cteSelect != null && cte != null){
             if (cteAlias != "") {
                 columnStr = " ${cteAlias}.";
             }
-            columnStr += "${tableColumn} ";
+            columnStr += "${cteSelect} ";
         }
 
         return columnStr;

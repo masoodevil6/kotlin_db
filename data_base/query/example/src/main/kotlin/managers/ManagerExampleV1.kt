@@ -6,7 +6,7 @@ import gog.my_project.data_base.query.example.v1.queries.A3ExampleV1
 import gog.my_project.data_base.query.example.v1.queries.A4ExampleV1
 import gog.my_project.data_base.query.example.v1.queries.A5ExampleV1
 import gog.my_project.data_base.query.example.v1.queries.IAExampleV1
-import gog.my_project.data_base.query.renderer.manager.QueryManager
+import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 
 class ManagerExampleV1() : IManagerExample<IAExampleV1> {
@@ -21,7 +21,7 @@ class ManagerExampleV1() : IManagerExample<IAExampleV1> {
         listExamples.add(A5ExampleV1())   // V1-Ex3: Create error
     }
 
-    override fun renderExamples(queryManager: QueryManager) {
+    override fun renderExamples(queryManager: IQueryBuilderExecutor) {
         for(example in listExamples) {
             example.execute(queryManager)
         }

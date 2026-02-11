@@ -18,8 +18,12 @@ dependencies {
     implementation(project(":data_base:models"))
     implementation(project(":data_base:cte"))
 
+    implementation(project(":data_base:manager:execute"))
+
     implementation(project(":data_base:query:api"))
+    implementation(project(":data_base:query:builder"))
     implementation(project(":data_base:query:renderer"))
+    implementation(project(":data_base:query:executor"))
 }
 
 tasks.test {

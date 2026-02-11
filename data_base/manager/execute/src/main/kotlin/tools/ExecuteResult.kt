@@ -1,4 +1,4 @@
-package gog.my_project.data_base.query.renderer.tools
+package gog.my_project.data_base.manager.execute.tools
 
 import java.sql.ResultSet
 import java.sql.SQLException

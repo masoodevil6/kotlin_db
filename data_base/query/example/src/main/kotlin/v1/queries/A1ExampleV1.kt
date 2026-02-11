@@ -1,9 +1,11 @@
 package  gog.my_project.data_base.query.example.v1.queries
 
-import gog.my_project.data_base.query.definition.interfaces.IQuery
-import gog.my_project.data_base.query.renderer.manager.QueryManager
-import gog.my_project.data_base.query.renderer.tools.ExecuteResult
-import gog.my_project.tools.scripts.StringTools
+import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.models.modules.users.UserPhones
+import gog.my_project.data_base.models.modules.users.Users
+import gog.my_project.data_base.query.api.interfaces.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.builder.ast.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 class A1ExampleV1()
     : IAExampleV1 {
@@ -160,8 +162,8 @@ class A1ExampleV1()
             }
     }*/
 
-    override fun query(): IQuery {
-        return QueryBuilder()
+    override fun query(): IQueryRenderSelectApi {
+        return QueryRenderSelectBuilder()
             .select {
                 addColumn {
                     column {
@@ -231,16 +233,16 @@ class A1ExampleV1()
         }
     }
 
-    override fun execute(queryManager : QueryManager) {
+    override fun execute(queryManager : IQueryBuilderExecutor) {
         queryManager.execute(
-            queryBuilder = this.query() as IQueryBuilder,
+            queryBuilder = this.query() ,
             blockQueryInfo = {
                 query , paramsMap->
                 println("\n=============================================");
                 println("V1-Ex1: select simple");
                 println("---------------------------");
 
-                print("query: ${StringTools.formatSql(query)} \n");
+                print("query: ${query} \n");
                 println("---------------------------");
                 var paramsStr = "";
                 paramsMap.forEach {

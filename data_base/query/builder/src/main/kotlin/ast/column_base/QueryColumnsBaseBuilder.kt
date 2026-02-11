@@ -36,7 +36,7 @@ class QueryColumnsBaseBuilder(
         select: KProperty1<T, R>
     ): IQueryColumnsBaseApi {
         this.ast.cte =         cte.findAnnotation<QBCte>()?.name;
-        this.ast.cte =         cte.findAnnotation<QBCte>()?.alias;
+        this.ast.cteAlias =    cte.findAnnotation<QBCte>()?.alias;
         this.ast.select =      select.findAnnotation<QBCteSelect>()?.name;
         return this;
     }

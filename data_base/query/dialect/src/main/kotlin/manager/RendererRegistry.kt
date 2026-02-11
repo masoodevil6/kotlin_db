@@ -32,10 +32,13 @@ class RendererRegistry : IRendererRegistry {
     {
         if(ast==null) return "" ;
 
-        val renderer = renderers[ast::class] ?: error("No renderer registered for ${ast::class}")
+        val rendererEntry = renderers.entries.firstOrNull{
+            it.key.java.isAssignableFrom(ast::class.java)
+        } ?: error("No renderer registered for ${ast::class}")
 
-        return (renderer as IAstRenderer<Any , QueryDataClass?>)
-            .render(
+        val renderer = rendererEntry.value as IAstRenderer<Any , QueryDataClass?>
+
+        return renderer.render(
                 ast ,
                 RenderContext(dialect, this),
                 dataClass

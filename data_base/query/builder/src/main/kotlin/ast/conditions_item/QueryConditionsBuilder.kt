@@ -156,7 +156,7 @@ class QueryConditionsBuilder(
     ): IQueryConditionsApi
     {
         this.ast.conditionSideRight = ":${paramName}";
-        params plusAssign SqlParameter.Companion.of(paramName , paramValue)
+        params += SqlParameter.of(paramName , paramValue)
         return this;
     }
 

@@ -16,11 +16,11 @@ class MySqlQueryConditionGroupCapability : IQueryConditionGroupCapability {
     ): String? {
 
         val groups = ast.conditions;
-        val groupLogical = if (dataClass?._hasLogical == false){ast.conditionLogical}else{""}
+        val groupLogical = if (dataClass?._hasLogical == false && ast.conditionLogical != null){ast.conditionLogical}else{""}
 
         if (groups.isNotEmpty()) {
 
-            var queryTemp = " $groupLogical (";
+            var queryTemp = " $groupLogical  (";
 
             for ((index, condition) in groups.withIndex()){
 
