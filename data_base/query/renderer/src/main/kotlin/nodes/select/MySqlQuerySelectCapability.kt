@@ -25,7 +25,7 @@ class MySqlQuerySelectCapability : IQuerySelectCapability {
                     ctx.registry.render(
                         column ,
                         ctx.dialect ,
-                        QueryColumnData()
+                        QueryColumnData(_withAlias = true)
                     );
                 if (itemColumn != null){
                     selects +=  " $itemColumn";

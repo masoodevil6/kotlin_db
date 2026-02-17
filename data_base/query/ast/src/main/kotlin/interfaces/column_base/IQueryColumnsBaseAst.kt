@@ -4,11 +4,11 @@ import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 
 interface IQueryColumnsBaseAst  : IQueryAst{
 
-    var table:          String?;
+    var tableAttribute:  String?;
+
     var tableAlias:     String?;
     var column:         String?;
 
-    var cte:            String?;
     var cteAlias:       String?;
     var select:         String?;
 

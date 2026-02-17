@@ -6,7 +6,7 @@ import gog.my_project.data_base.query.ast.interfaces.column_base.IQueryColumnsBa
 class QueryColumnsAst() : IQueryColumnsAst {
 
     override var ColumnMethod: String?                = null;
-    override var ColumnName:   IQueryColumnsBaseAst?  = null;
+    override var Column:   IQueryColumnsBaseAst?  = null;
     override var ColumnAlias:  String?                = null;
 
 }

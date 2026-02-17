@@ -1,9 +1,9 @@
 package gog.my_project.data_base.query.builder.ast.joins_item
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.api.interfaces.conditions_group.IQueryConditionsGroupsApi
-import gog.my_project.data_base.query.api.interfaces.joins_item.IQueryJoinsItemApi
-import gog.my_project.data_base.query.api.interfaces.table.IQueryTableApi
+import gog.my_project.data_base.query.api.interfaces.api.conditions_group.IQueryConditionsGroupsApi
+import gog.my_project.data_base.query.api.interfaces.api.joins_item.IQueryJoinsItemApi
+import gog.my_project.data_base.query.api.interfaces.api.table.IQueryTableApi
 import gog.my_project.data_base.query.api.tools.enums.SqlTypeJoin
 import gog.my_project.data_base.query.ast.interfaces.joins_item.IQueryJoinsItemAst
 import gog.my_project.data_base.query.ast.schema.conditions_group.QueryConditionsGroupsAst
@@ -13,8 +13,8 @@ import gog.my_project.data_base.query.builder.ast.conditions_group.QueryConditio
 import gog.my_project.data_base.query.builder.ast.table.QueryTableBuilder
 
 class QueryJoinsItemBuilder(
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryJoinsItemAst = QueryJoinsItemAst(),
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 )  : IQueryJoinsItemApi {
 
 
@@ -51,7 +51,7 @@ class QueryJoinsItemBuilder(
     ): IQueryJoinsItemApi
     {
         val ast = QueryTableAst();
-        QueryTableBuilder(ast, params).apply(blockTable)
+        QueryTableBuilder(params ,ast).apply(blockTable)
         this.ast.joinTable = ast;
         return this;
     }
@@ -67,7 +67,7 @@ class QueryJoinsItemBuilder(
     ): IQueryJoinsItemApi
     {
         val ast = QueryConditionsGroupsAst();
-        QueryConditionsGroupsBuilder(ast, params).apply(blockCondition)
+        QueryConditionsGroupsBuilder(params , ast).apply(blockCondition)
         this.ast.joinConditions = ast;
         return this;
     }

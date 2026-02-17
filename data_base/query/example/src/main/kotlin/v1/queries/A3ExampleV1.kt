@@ -1,8 +1,8 @@
 package gog.my_project.data_base.query.example.v1.queries
 
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.models.modules.users.Users
-import gog.my_project.data_base.query.api.interfaces.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.models.eloquent.modules.users.Users
+import gog.my_project.data_base.query.api.interfaces.api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
@@ -14,27 +14,31 @@ class A3ExampleV1: IAExampleV1 {
             .select {
                 addColumn {
                     column {
-                        column(Users::class ,Users::userId)
+                        tableColumn("uu" , "id")
                     }
+                    alias("user_id")
                 }
                 addColumn {
                     column {
-                        column(Users::class ,Users::userName)
+                        tableColumn("uu" , "name")
                     }
+                    alias("user_name")
                 }
                 addColumn {
                     column {
-                        column(Users::class ,Users::userFamily)
+                        tableColumn("uu" , "family")
                     }
+                    alias("user_family")
                 }
                 addColumn {
                     column {
-                        column(Users::class ,Users::userAge)
+                        tableColumn("uu" , "age")
                     }
+                    alias("user_age")
                 }
             }
             .table{
-                table(Users::class)
+                table("user_users" , "uu")
             }
             .where{
                 conditions {
@@ -42,7 +46,7 @@ class A3ExampleV1: IAExampleV1 {
                         addCondition {
                             logicalAnd()
                             sideSelector {
-                                column(Users::class ,Users::userName)
+                                tableColumn("uu" , "name")
                             }
                             operationLike()
                             sideValue(
@@ -53,7 +57,7 @@ class A3ExampleV1: IAExampleV1 {
                         addCondition {
                             logicalOr()
                             sideSelector {
-                                column(Users::class ,Users::userName)
+                                tableColumn("uu" , "name")
                             }
                             operationLike()
                             sideValue(
@@ -64,7 +68,7 @@ class A3ExampleV1: IAExampleV1 {
                         addCondition {
                             logicalOr()
                             sideSelector {
-                                column(Users::class ,Users::userName)
+                                tableColumn("uu" , "name")
                             }
                             operationLike()
                             sideValue(
@@ -75,7 +79,7 @@ class A3ExampleV1: IAExampleV1 {
                         addCondition {
                             logicalOr()
                             sideSelector {
-                                column(Users::class ,Users::userName)
+                                tableColumn("uu" , "name")
                             }
                             operationLike()
                             sideValue(
@@ -114,10 +118,10 @@ class A3ExampleV1: IAExampleV1 {
                         result.result?.let {
                                 rs->
                             while (rs!!.next()){
-                                val id =       rs.getInt("id")
-                                val name =     rs.getString("name")
-                                val family =   rs.getString("family")
-                                val age =      rs.getInt("age")
+                                val id =       rs.getInt("user_id")
+                                val name =     rs.getString("user_name")
+                                val family =   rs.getString("user_family")
+                                val age =      rs.getInt("user_age")
                                 println("exe: - $id $name $family $age ");
                             }
                         }

@@ -1,16 +1,16 @@
 package gog.my_project.data_base.query.builder.ast.query_render_select
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.api.interfaces.joins.IQueryJoinsApi
-import gog.my_project.data_base.query.api.interfaces.option_group.IQueryOptionGroupApi
-import gog.my_project.data_base.query.api.interfaces.option_limit.IQueryOptionLimitApi
-import gog.my_project.data_base.query.api.interfaces.option_offset.IQueryOptionOffsetApi
-import gog.my_project.data_base.query.api.interfaces.option_order.IQueryOptionOrderApi
-import gog.my_project.data_base.query.api.interfaces.query_render_select.IQueryRenderSelectApi
-import gog.my_project.data_base.query.api.interfaces.select.IQuerySelectApi
-import gog.my_project.data_base.query.api.interfaces.table.IQueryTableApi
-import gog.my_project.data_base.query.api.interfaces.where.IQueryWhereApi
-import gog.my_project.data_base.query.api.interfaces.withs.IQueryWithsApi
+import gog.my_project.data_base.query.api.interfaces.api.joins.IQueryJoinsApi
+import gog.my_project.data_base.query.api.interfaces.api.option_group.IQueryOptionGroupApi
+import gog.my_project.data_base.query.api.interfaces.api.option_limit.IQueryOptionLimitApi
+import gog.my_project.data_base.query.api.interfaces.api.option_offset.IQueryOptionOffsetApi
+import gog.my_project.data_base.query.api.interfaces.api.option_order.IQueryOptionOrderApi
+import gog.my_project.data_base.query.api.interfaces.api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.api.interfaces.api.select.IQuerySelectApi
+import gog.my_project.data_base.query.api.interfaces.api.table.IQueryTableApi
+import gog.my_project.data_base.query.api.interfaces.api.where.IQueryWhereApi
+import gog.my_project.data_base.query.api.interfaces.api.withs.IQueryWithsApi
 import gog.my_project.data_base.query.ast.interfaces.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.ast.schema.joins.QueryJoinsAst
 import gog.my_project.data_base.query.ast.schema.option_group.QueryOptionGroupAst
@@ -33,8 +33,8 @@ import gog.my_project.data_base.query.builder.ast.where.QueryWhereBuilder
 import gog.my_project.data_base.query.builder.ast.withs.QueryWithsBuilder
 
 class QueryRenderSelectBuilder(
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryRenderSelectAst = QueryRenderSelectAst(),
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) : IQueryRenderSelectApi
 {
 
@@ -48,7 +48,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryWithsAst();
-        QueryWithsBuilder(ast, params).apply(blockWiths);
+        QueryWithsBuilder(params ,ast).apply(blockWiths);
         this.ast.withs = ast;
         return this;
     }
@@ -63,7 +63,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QuerySelectAst();
-        QuerySelectBuilder(ast, params).apply(blockSelect);
+        QuerySelectBuilder(params ,ast).apply(blockSelect);
         this.ast.select = ast;
         return this;
     }
@@ -78,7 +78,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryTableAst();
-        QueryTableBuilder(ast, params).apply(blockTable);
+        QueryTableBuilder(params ,ast).apply(blockTable);
         this.ast.table = ast;
         return this;
     }
@@ -93,7 +93,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryJoinsAst();
-        QueryJoinsBuilder(ast, params).apply(blockJoins);
+        QueryJoinsBuilder(params , ast).apply(blockJoins);
         this.ast.joins = ast;
         return this;
     }
@@ -109,7 +109,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryWhereAst();
-        QueryWhereBuilder(ast, params).apply(blockGroup);
+        QueryWhereBuilder(params , ast).apply(blockGroup);
         this.ast.where = ast;
         return this;
     }
@@ -124,7 +124,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryOptionLimitAst();
-        QueryOptionLimitBuilder(ast, params).apply(blockLimit);
+        QueryOptionLimitBuilder(params ,ast).apply(blockLimit);
         this.ast.optionLimit = ast;
         return this;
     }
@@ -135,7 +135,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryOptionOffsetAst();
-        QueryOptionOffsetBuilder(ast, params).apply(blockOffset);
+        QueryOptionOffsetBuilder(params ,ast).apply(blockOffset);
         this.ast.optionOffset = ast;
         return this;
     }
@@ -146,7 +146,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         var ast = QueryOptionGroupAst();
-        QueryOptionGroupBuilder(ast, params).apply(blockGroup);
+        QueryOptionGroupBuilder(params ,ast).apply(blockGroup);
         this.ast.optionGroup = ast;
         return this;
     }
@@ -157,7 +157,7 @@ class QueryRenderSelectBuilder(
     ): IQueryRenderSelectApi
     {
         val ast = QueryOptionOrderAst();
-        QueryOptionOrderBuilder(ast, params).apply(blockOrder);
+        QueryOptionOrderBuilder(params , ast).apply(blockOrder);
         this.ast.optionOrder = ast;
         return this;
     }

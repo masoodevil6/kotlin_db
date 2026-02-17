@@ -1,16 +1,16 @@
 package gog.my_project.data_base.query.builder.ast.select
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.api.interfaces.column.IQueryColumnsApi
-import gog.my_project.data_base.query.api.interfaces.select.IQuerySelectApi
+import gog.my_project.data_base.query.api.interfaces.api.column.IQueryColumnsApi
+import gog.my_project.data_base.query.api.interfaces.api.select.IQuerySelectApi
 import gog.my_project.data_base.query.ast.interfaces.select.IQuerySelectAst
 import gog.my_project.data_base.query.ast.schema.column.QueryColumnsAst
 import gog.my_project.data_base.query.ast.schema.select.QuerySelectAst
 import gog.my_project.data_base.query.builder.ast.column.QueryColumnsBuilder
 
 class QuerySelectBuilder(
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQuerySelectAst = QuerySelectAst(),
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ) : IQuerySelectApi {
 
     override fun addColumn(
@@ -18,7 +18,7 @@ class QuerySelectBuilder(
     ): IQuerySelectApi
     {
         val ast = QueryColumnsAst();
-        QueryColumnsBuilder(ast , params).apply(blockColumn);
+        QueryColumnsBuilder(params ,ast).apply(blockColumn);
         this.ast.columns.add(ast);
         return this;
     }

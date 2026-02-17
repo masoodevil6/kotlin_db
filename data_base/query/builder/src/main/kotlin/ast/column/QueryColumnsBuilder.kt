@@ -1,8 +1,8 @@
 package gog.my_project.data_base.query.builder.ast.column
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.api.interfaces.column.IQueryColumnsApi
-import gog.my_project.data_base.query.api.interfaces.column_base.IQueryColumnsBaseApi
+import gog.my_project.data_base.query.api.interfaces.api.column.IQueryColumnsApi
+import gog.my_project.data_base.query.api.interfaces.api.column_base.IQueryColumnsBaseApi
 import gog.my_project.data_base.query.api.tools.enums.SqlMethodColumn
 import gog.my_project.data_base.query.ast.interfaces.column.IQueryColumnsAst
 import gog.my_project.data_base.query.ast.schema.column.QueryColumnsAst
@@ -10,8 +10,8 @@ import gog.my_project.data_base.query.ast.schema.column_base.QueryColumnsBaseAst
 import gog.my_project.data_base.query.builder.ast.column_base.QueryColumnsBaseBuilder
 
 class QueryColumnsBuilder(
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>() ,
     override var ast: IQueryColumnsAst = QueryColumnsAst(),
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 )  : IQueryColumnsApi {
 
 
@@ -52,8 +52,8 @@ class QueryColumnsBuilder(
 
     override fun column(blockColumn: IQueryColumnsBaseApi.() -> Unit): IQueryColumnsApi {
         var ast = QueryColumnsBaseAst();
-        QueryColumnsBaseBuilder(ast, params).apply(blockColumn);
-        this.ast.ColumnName = ast;
+        QueryColumnsBaseBuilder(params ,ast).apply(blockColumn);
+        this.ast.Column = ast;
         return this;
     }
 

@@ -1,9 +1,9 @@
 package  gog.my_project.data_base.query.example.v1.queries
 
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.models.modules.users.UserPhones
-import gog.my_project.data_base.models.modules.users.Users
-import gog.my_project.data_base.query.api.interfaces.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.models.eloquent.modules.users.UserPhones
+import gog.my_project.data_base.models.eloquent.modules.users.Users
+import gog.my_project.data_base.query.api.interfaces.api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
@@ -11,204 +11,58 @@ class A1ExampleV1()
     : IAExampleV1 {
 
 
-    /*override fun query(): IQueryBuilder {
-        return QueryBuilder()
-            .withs{
-                addWith {
-                    withName("users")
-                    withBody {
-                        select {
-                            addColumn {
-                                column {
-                                    column(Users::userId)
-                                }
-                            }
-                            addColumn {
-                                column {
-                                    column(Users::userName)
-                                }
-                            }
-                            addColumn {
-                                column {
-                                    column(Users::userFamily)
-                                }
-                            }
-                            addColumn {
-                                column {
-                                    column(Users::userAge)
-                                }
-                            }
-                            addColumn {
-                                column {
-                                    column(UserPhones::userPhone)
-                                }
-                            }
-                        }
-                        table{
-                            table("user_users")
-                            alias("uu")
-                        }
-                        joins {
-                            addJoin {
-                                innerJoin()
-                                table {
-                                    table("user_phones")
-                                    alias("up")
-                                }
-                                condition {
-                                    logicalOn()
-                                    addCondition {
-                                        sideSelector {
-                                            column(Users::userId)
-                                        }
-                                        operationEqual()
-                                        sideValue {
-                                            column(UserPhones::userId)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        where{
-                            conditions {
-
-                                addCondition {
-                                    logicalAnd()
-                                    sideSelector {
-                                        column(Users::userId)
-                                    }
-                                    operationEqual()
-                                    sideValue(
-                                        "id1" ,
-                                        1
-                                    )
-                                }
-
-                            }
-                        }
-                    }
-                }
-            }
-            .select{
-                addColumn{
-                    column {
-                        columnPrefix("u")
-                        columnName("id")
-                    }
-                }
-                addColumn{
-                    column {
-                        columnPrefix("u")
-                        columnName("name")
-                    }
-                }
-                addColumn{
-                    column {
-                        columnPrefix("u")
-                        columnName("family")
-                    }
-                }
-                addColumn{
-                    column {
-                        columnPrefix("u")
-                        columnName("age")
-                    }
-                }
-                addColumn{
-                    column {
-                        columnPrefix("u")
-                        columnName("phone")
-                    }
-                }
-            }
-            .table{
-                table("users")
-                alias("u")
-            }
-            .limit {
-                setOptionLimit(2)
-            }
-            .offset {
-                setOptionOffset(0)
-            }
-            .group {
-                addColumn{
-                    columnPrefix("u")
-                    columnName("id")
-                }
-                addColumn{
-                    columnPrefix("u")
-                    columnName("name")
-                }
-                addColumn{
-                    columnPrefix("u")
-                    columnName("family")
-                }
-                addColumn{
-                    columnPrefix("u")
-                    columnName("age")
-                }
-                addColumn{
-                    columnPrefix("u")
-                    columnName("phone")
-                }
-            }
-            .order {
-                orderAsc()
-                addColumn{
-                    columnPrefix("u")
-                    columnName("id")
-                }
-            }
-    }*/
-
     override fun query(): IQueryRenderSelectApi {
         return QueryRenderSelectBuilder()
             .select {
                 addColumn {
                     column {
-                        column(Users::class ,Users::userId)
+                        tableColumn("uu" , "id")
                     }
+                    alias("user_id")
                 }
                 addColumn {
                     column {
-                        column(Users::class ,Users::userName)
+                        tableColumn("uu" , "name")
                     }
+                    alias("user_name")
                 }
                 addColumn {
                     column {
-                        column(Users::class ,Users::userFamily)
+                        tableColumn("uu" , "family")
                     }
+                    alias("user_family")
                 }
                 addColumn {
                     column {
-                        column(Users::class ,Users::userAge)
+                        tableColumn("uu" , "age")
                     }
+                    alias("user_age")
                 }
                 addColumn {
                     column {
-                        column(UserPhones::class ,UserPhones::userPhone)
+                        tableColumn("up" , "phone")
                     }
+                    alias("user_phone")
                 }
             }
             .table{
-                table(Users::class)
+                table("user_users" , "uu")
             }
             .joins {
                 addJoin {
                     innerJoin()
                     table {
-                        table(UserPhones::class)
+                        table("user_phones" , "up")
                     }
                     condition {
                         logicalOn()
                         addCondition {
                             sideSelector {
-                                column(Users::class ,Users::userId)
+                                tableColumn("uu" , "id")
                             }
                             operationEqual()
                             sideValue {
-                                column(UserPhones::class ,UserPhones::userId)
+                                tableColumn("up" , "user_id")
                             }
                         }
                     }
@@ -220,7 +74,7 @@ class A1ExampleV1()
                     addCondition {
                         logicalAnd()
                         sideSelector {
-                            column(Users::class ,Users::userId)
+                            tableColumn("uu" , "id")
                         }
                         operationEqual()
                         sideValue(
@@ -258,11 +112,11 @@ class A1ExampleV1()
                         result.result?.let {
                             rs->
                             while (rs!!.next()){
-                                val id =       rs.getInt("id")
-                                val name =     rs.getString("name")
-                                val family =   rs.getString("family")
-                                val age =      rs.getInt("age")
-                                val phone =    rs.getString("phone")
+                                val id =       rs.getInt("user_id")
+                                val name =     rs.getString("user_name")
+                                val family =   rs.getString("user_family")
+                                val age =      rs.getInt("user_age")
+                                val phone =    rs.getString("user_phone")
                                 println("exe: - $id $name $family $age $phone");
                             }
                         }

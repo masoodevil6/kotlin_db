@@ -1,7 +1,5 @@
 package gog.my_project
 
-import gog.my_project.core.sql_dialect.DialectQuery
-import gog.my_project.data_base.base.DatabaseBuilder
 
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or

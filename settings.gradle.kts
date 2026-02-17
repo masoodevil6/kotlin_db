@@ -27,11 +27,11 @@ include(":utils")
 
 include(":tools")
 
-
 include(":data_base")
 include(":data_base:core")
+
 include(":data_base:models")
-include(":data_base:cte")
+include(":data_base:models:eloquent")
 
 include(":data_base:manager")
 include(":data_base:manager:connection")

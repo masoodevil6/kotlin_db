@@ -15,16 +15,20 @@ class MySqlQueryColumnCapability : IQueryColumnCapability {
         dataClass: QueryColumnData?
     ): String? {
         val columnMethod :   String? = ast.ColumnMethod;
-        val columnNameBase : IQueryColumnsBaseAst? = ast.ColumnName;
+        val columnBase : IQueryColumnsBaseAst? = ast.Column;
         val columnAlias :    String? = ast.ColumnAlias;
 
-        val columnName =  ctx.registry.render(columnNameBase , ctx.dialect , QueryColumnBaseData() )
-        if (columnName != null){
+        val column =  ctx.registry.render(
+            columnBase ,
+            ctx.dialect ,
+            QueryColumnBaseData()
+        )
+        if (column != null){
             var queryTemp: String = ""
             if (columnMethod != null) {
-                queryTemp += columnMethod;
+                queryTemp += "($columnMethod)";
             }
-            queryTemp += columnName;
+            queryTemp += column;
             if (columnAlias != null) {
                 queryTemp += " As ${columnAlias} ";
             }

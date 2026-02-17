@@ -1,8 +1,8 @@
 package gog.my_project.data_base.query.builder.ast.conditions_group
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.api.interfaces.conditions_group.IQueryConditionsGroupsApi
-import gog.my_project.data_base.query.api.interfaces.conditions_item.IQueryConditionsApi
+import gog.my_project.data_base.query.api.interfaces.api.conditions_group.IQueryConditionsGroupsApi
+import gog.my_project.data_base.query.api.interfaces.api.conditions_item.IQueryConditionsApi
 import gog.my_project.data_base.query.api.tools.enums.SqlLogical
 import gog.my_project.data_base.query.ast.interfaces.condition_group.IQueryConditionsGroupsAst
 import gog.my_project.data_base.query.ast.schema.conditions_group.QueryConditionsGroupsAst
@@ -10,8 +10,8 @@ import gog.my_project.data_base.query.ast.schema.conditions_item.QueryConditions
 import gog.my_project.data_base.query.builder.ast.conditions_item.QueryConditionsBuilder
 
 class QueryConditionsGroupsBuilder(
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>() ,
     override var ast: IQueryConditionsGroupsAst = QueryConditionsGroupsAst(),
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ): IQueryConditionsGroupsApi {
 
 
@@ -49,7 +49,7 @@ class QueryConditionsGroupsBuilder(
     ): IQueryConditionsGroupsApi
     {
         val ast = QueryConditionsGroupsAst();
-        QueryConditionsGroupsBuilder(ast , params).apply(blockGroup)
+        QueryConditionsGroupsBuilder(params ,ast  ).apply(blockGroup)
         this.ast.conditions.add(ast);
         return this;
     }
@@ -59,7 +59,7 @@ class QueryConditionsGroupsBuilder(
     ): IQueryConditionsGroupsApi
     {
         var ast = QueryConditionsAst();
-        QueryConditionsBuilder(ast, params).apply(blockCondition)
+        QueryConditionsBuilder(params ,ast).apply(blockCondition)
         this.ast.conditions.add(ast);
         return this;
     }

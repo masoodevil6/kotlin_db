@@ -39,7 +39,7 @@ import gog.my_project.data_base.query.renderer.nodes.withs_item.MySqlQueryWithsI
 class MySqlDialect(
 ) : BaseSqlDialect() {
 
-    override val _prefixWiths:  String = "withs";
+    override val _prefixWiths:  String = "with";
     override val _prefixSelect: String = "select";
     override val _prefixTable:  String = "from"
     override val _prefixWhere:  String = "where";

@@ -1,49 +1,49 @@
 package gog.my_project.data_base.query.example.v1.queries
 
-
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.query.api.interfaces.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.api.interfaces.api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.builder.cte.modules.users.CteInfoUser
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 class A6ExampleV1(): IAExampleV1 {
 
     override fun query(): IQueryRenderSelectApi {
-        /*return QueryBuilder()
+        return QueryRenderSelectBuilder()
             .withs{
                 addWith {
-                    with(CteInfoUser(1))
+                    with("cte_info_user" , CteInfoUser(1))
                 }
             }
             .select{
                 addColumn{
                     column {
-                        column(CteInfoUser::class , CteInfoUser::cteUserId)
+                        cteColumn("ciu" , "cte_user_id")
                     }
                 }
                 addColumn{
                     column {
-                        column(CteInfoUser::class , CteInfoUser::cteUserName)
+                        cteColumn("ciu" , "cte_user_name")
                     }
                 }
                 addColumn{
                     column {
-                        column(CteInfoUser::class , CteInfoUser::cteUserFamily)
+                        cteColumn("ciu" , "cte_user_family")
                     }
                 }
                 addColumn{
                     column {
-                        column(CteInfoUser::class , CteInfoUser::cteUserAge)
+                        cteColumn("ciu" , "cte_user_age")
                     }
                 }
                 addColumn{
                     column {
-                        column(CteInfoUser::class , CteInfoUser::userPhone)
+                        cteColumn("ciu" , "cte_user_phone")
                     }
                 }
             }
             .table{
-                table(CteInfoUser::class )
+                cte("cte_info_user" , "ciu")
             }
             .limit {
                 setOptionLimit(2)
@@ -51,30 +51,6 @@ class A6ExampleV1(): IAExampleV1 {
             .offset {
                 setOptionOffset(0)
             }
-            .group {
-                addColumn{
-                    column(CteInfoUser::class , CteInfoUser::cteUserId)
-                }
-                addColumn{
-                    column(CteInfoUser::class , CteInfoUser::cteUserName)
-                }
-                addColumn{
-                    column(CteInfoUser::class , CteInfoUser::cteUserFamily)
-                }
-                addColumn{
-                    column(CteInfoUser::class , CteInfoUser::cteUserAge)
-                }
-                addColumn{
-                    column(CteInfoUser::class , CteInfoUser::userPhone)
-                }
-            }
-            .order {
-                orderAsc()
-                addColumn{
-                    column(CteInfoUser::class , CteInfoUser::cteUserId)
-                }
-            }*/
-        return QueryRenderSelectBuilder();
     }
 
     override fun execute(queryManager : IQueryBuilderExecutor) {
@@ -103,11 +79,11 @@ class A6ExampleV1(): IAExampleV1 {
                         result.result?.let {
                                 rs->
                             while (rs!!.next()){
-                                val id =       rs.getInt("id")
-                                val name =     rs.getString("name")
-                                val family =   rs.getString("family")
-                                val age =      rs.getInt("age")
-                                val phone =    rs.getInt("phone")
+                                val id =       rs.getInt("cte_user_id")
+                                val name =     rs.getString("cte_user_name")
+                                val family =   rs.getString("cte_user_family")
+                                val age =      rs.getInt("cte_user_age")
+                                val phone =    rs.getString("cte_user_phone")
                                 println("exe: - $id $name $family $age $phone ");
                             }
                         }

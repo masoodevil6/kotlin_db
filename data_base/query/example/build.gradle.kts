@@ -15,8 +15,7 @@ dependencies {
     implementation(project(":tools"))
 
     implementation(project(":data_base:core"))
-    implementation(project(":data_base:models"))
-    implementation(project(":data_base:cte"))
+    implementation(project(":data_base:models:eloquent"))
 
     implementation(project(":data_base:manager:execute"))
 

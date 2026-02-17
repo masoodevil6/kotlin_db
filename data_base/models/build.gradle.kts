@@ -10,8 +10,6 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":data_base:core"))
-
     testImplementation(kotlin("test"))
 }
 

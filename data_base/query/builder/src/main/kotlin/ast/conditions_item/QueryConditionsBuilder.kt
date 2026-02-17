@@ -1,9 +1,9 @@
 package gog.my_project.data_base.query.builder.ast.conditions_item
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.api.interfaces.column_base.IQueryColumnsBaseApi
-import gog.my_project.data_base.query.api.interfaces.conditions_item.IQueryConditionsApi
-import gog.my_project.data_base.query.api.interfaces.conditions_item_collection.IQueryConditionsCollectionApi
+import gog.my_project.data_base.query.api.interfaces.api.column_base.IQueryColumnsBaseApi
+import gog.my_project.data_base.query.api.interfaces.api.conditions_item.IQueryConditionsApi
+import gog.my_project.data_base.query.api.interfaces.api.conditions_item_collection.IQueryConditionsCollectionApi
 import gog.my_project.data_base.query.api.tools.enums.SqlConditionOperation
 import gog.my_project.data_base.query.api.tools.enums.SqlLogical
 import gog.my_project.data_base.query.ast.interfaces.condition_item.IQueryConditionsAst
@@ -15,8 +15,8 @@ import gog.my_project.data_base.query.builder.ast.conditions_item_collection.Que
 import kotlin.collections.plusAssign
 
 class QueryConditionsBuilder(
+    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryConditionsAst = QueryConditionsAst(),
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>()
 ): IQueryConditionsApi {
 
     /* ==============================================================
@@ -56,7 +56,7 @@ class QueryConditionsBuilder(
     ): IQueryConditionsApi
     {
         val ast = QueryColumnsBaseAst();
-        QueryColumnsBaseBuilder(ast, params).apply(blockColumn)
+        QueryColumnsBaseBuilder(params , ast).apply(blockColumn)
         this.ast.conditionSideLeft = ast;
         return this;
     }
@@ -144,7 +144,7 @@ class QueryConditionsBuilder(
     ): IQueryConditionsApi
     {
         val ast = QueryColumnsBaseAst();
-        QueryColumnsBaseBuilder(ast , params).apply(blockColumn)
+        QueryColumnsBaseBuilder(params ,ast ).apply(blockColumn)
         this.ast.conditionSideRight = ast;
         return this;
     }
@@ -167,7 +167,7 @@ class QueryConditionsBuilder(
     ): IQueryConditionsApi
     {
         val ast = QueryConditionsCollectionAst();
-        QueryConditionsCollectionBuilder(ast, params, paramName).apply(blockParamsCollection)
+        QueryConditionsCollectionBuilder(params ,ast, paramName).apply(blockParamsCollection)
         this.ast.conditionSideRight = ast
         return this;
     }

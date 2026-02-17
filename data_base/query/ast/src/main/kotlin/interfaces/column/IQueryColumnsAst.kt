@@ -6,7 +6,7 @@ import gog.my_project.data_base.query.ast.interfaces.column_base.IQueryColumnsBa
 interface IQueryColumnsAst : IQueryAst {
 
     var ColumnMethod: String? ;
-    var ColumnName:   IQueryColumnsBaseAst?;
+    var Column:   IQueryColumnsBaseAst?;
     var ColumnAlias:  String?;
 
 }
