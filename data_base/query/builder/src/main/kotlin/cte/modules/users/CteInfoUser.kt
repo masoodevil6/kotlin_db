@@ -5,9 +5,9 @@ import gog.my_project.data_base.core.annotations.ctes.QBCteSelect
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.models.eloquent.modules.users.UserPhones
 import gog.my_project.data_base.models.eloquent.modules.users.Users
-import gog.my_project.data_base.query.api.interfaces.api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.cte.ICte
-import gog.my_project.data_base.query.builder.ast.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 
 @QBCte(
     name = "cte_info_user" ,
@@ -49,8 +49,10 @@ class CteInfoUser(
     val userPhone : Int =  0
 
 
-    override fun cteQuery(params: MutableList<SqlParameter<*>>): IQueryRenderSelectApi {
-        return QueryRenderSelectBuilder(params)
+    override fun cteQuery(params: MutableList<SqlParameter<*>>): gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi {
+        return _root_ide_package_.gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder(
+            params
+        )
             .select {
                 addColumn {
                     column {

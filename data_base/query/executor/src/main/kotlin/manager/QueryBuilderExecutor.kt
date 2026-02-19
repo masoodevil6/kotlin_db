@@ -5,7 +5,7 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.query.api.interfaces.api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base.query.renderer.manager.DialectSelector
 import gog.my_project.tools.scripts.StringTools
@@ -13,7 +13,7 @@ import gog.my_project.tools.scripts.StringTools
 class QueryBuilderExecutor : IQueryBuilderExecutor {
 
     override fun execute(
-        queryBuilder: IQueryRenderSelectApi,
+        queryBuilder: gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi,
         blockExecute: (ExecuteResult) -> Unit,
         blockQueryInfo: ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)?
     ){

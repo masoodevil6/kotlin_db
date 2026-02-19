@@ -1,7 +1,7 @@
 package gog.my_project.data_base.query.dialect.interfaces
 
-import gog.my_project.data_base.query.ast.interfaces.query_render_select.IQueryRenderSelectAst
-import gog.my_project.data_base.query.dialect.data_class.query_render_select.IQueryRenderSelectData
+import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
+import gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData
 import gog.my_project.data_base.query.renderer.interfaces.IRendererRegistry
 
 interface ISqlDialect {
@@ -14,11 +14,14 @@ interface ISqlDialect {
     val _prefixLimit:   String;
     val _prefixOrder:   String;
     val _prefixOffset:  String;
+    val _prefixInsert:  String;
+    val _prefixUpdate:  String;
+    val _prefixDelete:  String;
 
     val _registry: IRendererRegistry;
 
     fun registerRenders();
 
-    fun render(ast: IQueryRenderSelectAst , dataClass: IQueryRenderSelectData? = null) : String?;
+    fun render(ast: IQueryRenderSelectAst, dataClass: gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData? = null) : String?;
 
 }
