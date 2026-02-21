@@ -1,5 +1,7 @@
 package gog.my_project.data_base.query.renderer.dialects
 
+import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
+import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 import gog.my_project.data_base.query.ast.interfaces.insert_interface.columns_insert.IQueryColumnInsertAst
 import gog.my_project.data_base.query.ast.interfaces.insert_interface.query_render_insert.IQueryRenderInsertAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
@@ -19,6 +21,7 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQue
 import gog.my_project.data_base.query.ast.interfaces.select_interface.where.IQueryWhereAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQueryWithsAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
+import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.dialect.manager.BaseSqlDialect
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.column_insert.MySqlQueryColumnInsertCapability
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.query.MySqlQueryRenderInsertCapability
@@ -57,6 +60,7 @@ class MySqlDialect(
 
     override fun registerRenders() {
 
+        /// select
         _registry.register(IQueryColumnsAst::class                , MySqlQueryColumnCapability());
         _registry.register(IQueryColumnsBaseAst::class            , MySqlQueryColumnBaseCapability());
         _registry.register(IQueryConditionsGroupsAst::class       , MySqlQueryConditionGroupCapability());
@@ -75,11 +79,15 @@ class MySqlDialect(
         _registry.register(IQueryWithsAst::class                  , MySqlQueryWithsCapability());
         _registry.register(IQueryWithsItemAst::class              , MySqlQueryWithsItemCapability());
 
+        /// insert
         _registry.register(IQueryRenderInsertAst::class           , MySqlQueryRenderInsertCapability());
         _registry.register(IQueryColumnInsertAst::class           , MySqlQueryColumnInsertCapability());
 
 
 
     }
+
+
+
 
 }

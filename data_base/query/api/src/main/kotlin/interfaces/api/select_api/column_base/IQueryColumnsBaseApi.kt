@@ -7,9 +7,7 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.column_bas
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
 
-interface IQueryColumnsBaseApi : IQueryApi {
-
-    var ast: IQueryColumnsBaseAst;
+interface IQueryColumnsBaseApi : IQueryApi<IQueryColumnsBaseAst> {
 
     //fun <T: IModelBase, R> column(table: KClass<T>, column: KProperty1<T, R>): IQueryColumnsBaseApi;
 

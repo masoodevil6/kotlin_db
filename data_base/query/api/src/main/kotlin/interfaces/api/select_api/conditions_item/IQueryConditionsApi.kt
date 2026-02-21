@@ -8,9 +8,7 @@ import gog.my_project.data_base.query.api.tools.enums.SqlLogical
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item.IQueryConditionsAst
 
 
-interface IQueryConditionsApi : IQueryApi {
-
-    var ast: IQueryConditionsAst;
+interface IQueryConditionsApi : IQueryApi<IQueryConditionsAst> {
 
     fun logical(logical: SqlLogical): IQueryConditionsApi;
     fun logicalAnd(): IQueryConditionsApi;

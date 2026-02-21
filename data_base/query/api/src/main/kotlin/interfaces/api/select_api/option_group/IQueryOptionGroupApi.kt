@@ -5,9 +5,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.
 import gog.my_project.data_base.query.ast.interfaces.select_interface.option_group.IQueryOptionGroupAst
 
 
-interface IQueryOptionGroupApi : IQueryApi {
-
-    var ast: IQueryOptionGroupAst;
+interface IQueryOptionGroupApi : IQueryApi<IQueryOptionGroupAst> {
 
     fun addColumn(blockColumn: IQueryColumnsBaseApi.() -> Unit): IQueryOptionGroupApi
 

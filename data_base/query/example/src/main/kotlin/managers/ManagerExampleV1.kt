@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.managers
 
+import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.example.v1.queries.select.A1ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A2ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A3ExampleSelectV1
@@ -7,13 +8,13 @@ import gog.my_project.data_base.query.example.v1.queries.select.A4ExampleSelectV
 import gog.my_project.data_base.query.example.v1.queries.select.A5ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A6ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A7ExampleSelectV1
-import gog.my_project.data_base.query.example.v1.queries.select.IAExampleSelectV1
+import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 
-class ManagerExampleV1() : IManagerExample<IAExampleSelectV1> {
+class ManagerExampleV1() : IManagerExample {
 
-    override var listExamples: ArrayList<IAExampleSelectV1> = ArrayList()
+    override var listExamples: ArrayList<IExampleV1> = ArrayList()
 
     override fun readyListExamples() {
 

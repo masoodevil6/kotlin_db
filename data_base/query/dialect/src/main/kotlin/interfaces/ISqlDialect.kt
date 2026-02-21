@@ -1,6 +1,9 @@
 package gog.my_project.data_base.query.dialect.interfaces
 
+import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
+import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
+import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData
 import gog.my_project.data_base.query.renderer.interfaces.IRendererRegistry
 
@@ -22,6 +25,6 @@ interface ISqlDialect {
 
     fun registerRenders();
 
-    fun render(ast: IQueryRenderSelectAst, dataClass: gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData? = null) : String?;
+    fun <Ast: IQueryAst> render(ast: Ast) : String?;
 
 }

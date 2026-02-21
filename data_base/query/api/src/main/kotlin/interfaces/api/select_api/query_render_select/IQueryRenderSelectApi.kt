@@ -13,9 +13,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQuery
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 
 
-interface IQueryRenderSelectApi : IQueryApi {
-
-    var ast: IQueryRenderSelectAst;
+interface IQueryRenderSelectApi : IQueryApi<IQueryRenderSelectAst> {
 
     fun withs(blockWiths: IQueryWithsApi.() -> Unit): IQueryRenderSelectApi;
     fun select(blockSelect: IQuerySelectApi.() -> Unit): IQueryRenderSelectApi;
@@ -29,4 +27,5 @@ interface IQueryRenderSelectApi : IQueryApi {
     fun group(blockGroup: IQueryOptionGroupApi.() -> Unit): IQueryRenderSelectApi;
 
     fun order(blockOrder: IQueryOptionOrderApi.() -> Unit): IQueryRenderSelectApi;
+
 }

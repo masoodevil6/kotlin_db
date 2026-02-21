@@ -6,9 +6,7 @@ import gog.my_project.data_base.query.api.interfaces.cte.ICte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQueryTableAst
 import kotlin.reflect.KClass
 
-interface IQueryTableApi : IQueryApi {
-
-    var ast: IQueryTableAst;
+interface IQueryTableApi : IQueryApi<IQueryTableAst> {
 
     //fun <T: IModelBase> table(table: KClass<T>): IQueryTableApi;
     //fun <T: ICte> cte(cte: KClass<T>): IQueryTableApi;

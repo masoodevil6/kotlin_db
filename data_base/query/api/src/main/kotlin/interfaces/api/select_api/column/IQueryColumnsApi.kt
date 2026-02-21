@@ -6,9 +6,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.
 import gog.my_project.data_base.query.api.tools.enums.SqlMethodColumn
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
 
-interface IQueryColumnsApi : IQueryApi {
-
-    var ast: IQueryColumnsAst;
+interface IQueryColumnsApi : IQueryApi<IQueryColumnsAst> {
 
     fun method(method: SqlMethodColumn) : IQueryColumnsApi;
     fun sum() : IQueryColumnsApi;

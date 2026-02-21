@@ -3,10 +3,11 @@ package gog.my_project.data_base.query.example.v1.queries.select
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 
-class A3ExampleSelectV1: IAExampleSelectV1 {
+class A3ExampleSelectV1: IExampleV1 {
 
     override fun query(): IQueryRenderSelectApi {
         return QueryRenderSelectBuilder()

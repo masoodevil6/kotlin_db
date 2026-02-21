@@ -6,9 +6,7 @@ import gog.my_project.data_base.query.api.tools.enums.SqlOrderType
 import gog.my_project.data_base.query.ast.interfaces.select_interface.option_order.IQueryOptionOrderAst
 
 
-interface IQueryOptionOrderApi : IQueryApi {
-
-    var ast: IQueryOptionOrderAst;
+interface IQueryOptionOrderApi : IQueryApi<IQueryOptionOrderAst> {
 
     fun orderType(type: SqlOrderType) : IQueryOptionOrderApi;
     fun orderAsc() : IQueryOptionOrderApi;

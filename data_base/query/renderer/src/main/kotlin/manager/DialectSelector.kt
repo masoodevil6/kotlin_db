@@ -4,7 +4,7 @@ import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.query.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
 
-class DialectSelector {
+class DialectSelector{
 
     private val dialects: Map<DialectQuery , ISqlDialect> = mapOf(
         DialectQuery.MY_SQL to MySqlDialect(),

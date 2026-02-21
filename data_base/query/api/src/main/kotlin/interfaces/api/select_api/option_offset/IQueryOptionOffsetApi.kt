@@ -4,9 +4,7 @@ import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base.query.ast.interfaces.select_interface.option_offset.IQueryOptionOffsetAst
 
 
-interface IQueryOptionOffsetApi : IQueryApi {
-
-    var ast: IQueryOptionOffsetAst;
+interface IQueryOptionOffsetApi : IQueryApi<IQueryOptionOffsetAst> {
 
     fun setOptionOffset(optionOffset: Long) : IQueryOptionOffsetApi;
 
