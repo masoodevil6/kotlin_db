@@ -14,7 +14,7 @@ class QueryColumnInsertBuilder(
         columnName: String,
         columnValue: T
     ): IQueryColumnInsertApi {
-        this.ast.columnName = ":${columnName}";
+        this.ast.columnName = "${columnName}";
         params += SqlParameter.of(columnName , columnValue)
         return this;
     }

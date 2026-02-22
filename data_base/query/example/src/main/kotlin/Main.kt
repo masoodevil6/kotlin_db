@@ -25,7 +25,10 @@ fun main() {
 
     val queryManager = QueryBuilderExecutor();
 
-    val managerV1 = ManagerExampleV1();
+    val managerV1 = ManagerExampleV1(
+        statusRunSelect = false ,
+        statusRunInsert = true
+    );
     managerV1.readyListExamples()
     managerV1.renderExamples(queryManager);
 

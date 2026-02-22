@@ -3,29 +3,38 @@ package gog.my_project.data_base.query.executer.interfaces
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
+import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.ast.interfaces.IQueryAst
-import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.renderer.manager.DialectSelector
 import gog.my_project.tools.scripts.StringTools
+import java.sql.ResultSet
 
 interface IQueryBuilderExecutor  {
 
+    //// select
     fun execute(
         queryBuilder:    IQueryRenderSelectApi,
-        blockExecute:    (ExecuteResult) -> Unit,
+        blockExecute:    (ExecuteResult<ResultSet>) -> Unit,
         blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
     )
 
+    //// insert
+    fun execute(
+        queryBuilder:     IQueryRenderInsertApi,
+        blockExecute:     (ExecuteResult<Long>) -> Unit,
+        blockQueryInfo:   ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
+    )
 
 
-    fun <Ast: IQueryAst,Api :IQueryApi<Ast>> executeOut(
+    fun <Ast: IQueryAst,Api :IQueryApi<Ast> > executeOut(
         queryBuilder:    Api,
-        blockExecute:    (ExecuteResult) -> Unit,
-        blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
+        blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null,
+        blockResult:     (db: IQueryExecute ,builtQuery: BuiltQuery) -> Unit
     ){
         val db = QueryExecute()
 
@@ -42,17 +51,12 @@ interface IQueryBuilderExecutor  {
             blockQueryInfo(queryString , paramsMap)
         }
 
-        db.execute(
+        blockResult(db , BuiltQuery(query, params));
+
+        /*db.execute(
             builtQuery = BuiltQuery(query, params),
             blockExecute = blockExecute
-        )
+        )*/
     }
-
-
-    /*fun execute(
-        queryBuilder:    Api,
-        blockExecute:    (ExecuteResult) -> Unit,
-        blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
-    )*/
 
 }

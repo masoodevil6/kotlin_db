@@ -6,8 +6,8 @@ import gog.my_project.data_base.query.builder.ast.select_builder.query_render_se
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-
-class A3ExampleSelectV1: IExampleV1 {
+class A3ExampleSelectV1:
+    IExampleV1<IQueryRenderSelectApi> {
 
     override fun query(): IQueryRenderSelectApi {
         return QueryRenderSelectBuilder()
@@ -114,7 +114,7 @@ class A3ExampleSelectV1: IExampleV1 {
             blockExecute = {
                 result ->
                 when(result) {
-                    is ExecuteResult.SuccessExecute -> {
+                    is ExecuteResult.Success -> {
                         result.result?.let {
                                 rs->
                             while (rs!!.next()){
@@ -126,11 +126,8 @@ class A3ExampleSelectV1: IExampleV1 {
                             }
                         }
                     }
-                    is ExecuteResult.ErrorExecute -> {
+                    is ExecuteResult.Failure -> {
                         println("error: - ${result.exception.toString()}");
-                    }
-                    is ExecuteResult.Error -> {
-                        println("error: - ${result.error}");
                     }
                     else->{
 

@@ -13,6 +13,7 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
         ctx:        IRenderContext,
         dataClass:  QueryRenderInsertData?
     ): String? {
+        val table = ast.table;
         val columnsList = ast.columns;
         if (columnsList.size > 0) {
             var columnsReferenceStr = "";
@@ -38,7 +39,7 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
                 }
             }
 
-            return " ${ctx.dialect._prefixInsert} ($columnsReferenceStr) values ($columnsValuesStr)";
+            return " ${ctx.dialect._prefixInsert} ${table} ($columnsReferenceStr) values ($columnsValuesStr)";
         }
         return "";
     }
