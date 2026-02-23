@@ -14,7 +14,14 @@ class MySqlQueryColumnInsertCapability : IQueryColumnInsertCapability {
         dataClass: QueryColumnInsertData?
     ): String? {
 
-        return  ast.columnName;
+        val columnName = ast.columnName;
+        val columnTag = ast.columnTag;
+
+        if (dataClass?._getTag == true){
+            return columnTag;
+        }
+
+        return  columnName;
 
     }
 

@@ -10,12 +10,14 @@ class QueryColumnInsertBuilder(
     override var ast: IQueryColumnInsertAst = QueryColumnInsertAst()
 ): IQueryColumnInsertApi {
 
+
     override fun <T> column(
         columnName: String,
         columnValue: T
     ): IQueryColumnInsertApi {
         this.ast.columnName = "${columnName}";
-        params += SqlParameter.of(columnName , columnValue)
+        this.ast.columnTag = "${columnName}";
+        this.ast.columnTag?.let { params += SqlParameter.of(it  , columnValue) }
         return this;
     }
 

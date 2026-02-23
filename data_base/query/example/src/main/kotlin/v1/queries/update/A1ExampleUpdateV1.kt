@@ -1,27 +1,37 @@
-package gog.my_project.data_base.query.example.v1.queries.insert
+package gog.my_project.data_base.query.example.v1.queries.update
 
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
-import gog.my_project.data_base.query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
+import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
+import gog.my_project.data_base.query.builder.ast.update_builder.query_render_update.QueryRenderUpdateBuilder
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-class A1ExampleInsertV1()
-    : IExampleV1<IQueryRenderInsertApi> {
+class A1ExampleUpdateV1: IExampleV1<IQueryRenderUpdateApi> {
 
-    override fun query(): IQueryRenderInsertApi {
-        return QueryRenderInsertBuilder()
+    override fun query(): IQueryRenderUpdateApi {
+        return QueryRenderUpdateBuilder()
             .table{
-                table("user_users" )
+                table("user_users" , "uu")
             }
             .addValue {
-                column(  "name" , "Ali")
+                column("uu" ,"name" , "--changed--")
             }
-            .addValue {
-                column("family" , "Sadegi")
-            }
-            .addValue {
-                column("age" , 50)
+            .where {
+                conditions {
+
+                    addCondition {
+                        logicalAnd()
+                        sideSelector {
+                            tableColumn("uu" , "id")
+                        }
+                        operationEqual()
+                        sideValue(
+                            "id1" ,
+                            5
+                        )
+                    }
+
+                }
             }
     }
 
@@ -32,7 +42,7 @@ class A1ExampleInsertV1()
                     query , paramsMap->
 
                 println("\n=============================================");
-                println("V1-Ex1: Insert Sample ");
+                println("V1-Ex1: Update Sample ");
                 println("---------------------------");
 
                 print("query: ${query} \n");
@@ -46,13 +56,8 @@ class A1ExampleInsertV1()
             },
             blockExecute = { result ->
                 when(result) {
-                    is ExecuteResult.Success -> {
-                        result.result?.let {
-                                rs->
-
-                            println("exe:  $rs ");
-
-                        }
+                    is ExecuteResult.Success<*> -> {
+                        println("exe:  ${result.result} row Updated ");
                     }
                     is ExecuteResult.Failure -> {
                         println("error: - ${result.exception.toString()}");
@@ -64,6 +69,5 @@ class A1ExampleInsertV1()
             }
         )
     }
-
 
 }

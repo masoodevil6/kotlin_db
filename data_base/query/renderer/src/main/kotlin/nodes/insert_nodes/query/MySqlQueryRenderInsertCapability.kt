@@ -3,6 +3,7 @@ package gog.my_project.data_base.query.renderer.nodes.insert_nodes.query
 import gog.my_project.data_base.query.ast.interfaces.insert_interface.query_render_insert.IQueryRenderInsertAst
 import gog.my_project.data_base.query.dialect.data_class.insert_data.column_insert.QueryColumnInsertData
 import gog.my_project.data_base.query.dialect.data_class.insert_data.query_render_insert.QueryRenderInsertData
+import gog.my_project.data_base.query.dialect.data_class.select_data.table.QueryTableData
 import gog.my_project.data_base.query.dialect.nodes.insert_nodes.query_render_insert.IQueryRenderInsertCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
 
@@ -13,8 +14,9 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
         ctx:        IRenderContext,
         dataClass:  QueryRenderInsertData?
     ): String? {
-        val table = ast.table;
+        val queryBuilderTable =  ast.table;
         val columnsList = ast.columns;
+
         if (columnsList.size > 0) {
             var columnsReferenceStr = "";
             var columnsValuesStr = "";
@@ -28,9 +30,16 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
                         QueryColumnInsertData()
                     );
 
+                val columnTag =
+                    ctx.registry.render(
+                        column ,
+                        ctx.dialect ,
+                        QueryColumnInsertData(_getTag = true)
+                    );
+
                 if (columnName != null){
                     columnsReferenceStr +=  " $columnName ";
-                    columnsValuesStr +=  " :$columnName ";
+                    columnsValuesStr +=  " :$columnTag ";
 
                     if (index < columnsList.size - 1){
                         columnsReferenceStr += ","
@@ -39,7 +48,11 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
                 }
             }
 
-            return " ${ctx.dialect._prefixInsert} ${table} ($columnsReferenceStr) values ($columnsValuesStr)";
+            return " ${ctx.dialect._prefixInsert} " +
+                    " ${ctx.registry.render(queryBuilderTable , ctx.dialect  , QueryTableData(_withPrefix = false , _withAlias = false)) } " +
+                    " ($columnsReferenceStr) " +
+                    " values" +
+                    " ($columnsValuesStr)";
         }
         return "";
     }

@@ -5,6 +5,6 @@ import gog.my_project.data_base.query.ast.interfaces.insert_interface.columns_in
 
 interface IQueryColumnInsertApi : IQueryApi<IQueryColumnInsertAst> {
 
-    fun <T> column(columnName: String , columnValue: T) : IQueryColumnInsertApi;
+    fun <T> column(columnName: String , columnValue: T) : IQueryColumnInsertApi
 
 }

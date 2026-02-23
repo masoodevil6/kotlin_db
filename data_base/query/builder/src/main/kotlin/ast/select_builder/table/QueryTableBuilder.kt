@@ -39,12 +39,22 @@ class QueryTableBuilder(
         return this;
     }
 
+    override fun table(table: String): IQueryTableApi {
+        this.ast.table =      table;
+        return this;
+    }
+
     override fun cte(
         cte: String,
         alias: String
     ): IQueryTableApi {
         this.ast.cte =      cte;
         this.ast.cteAlias = alias;
+        return this;
+    }
+
+    override fun cte(cte: String): IQueryTableApi {
+        this.ast.cte =      cte;
         return this;
     }
 

@@ -3,7 +3,7 @@ package gog.my_project.data_base.query.example.managers
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-interface IManagerExample<ApiSelect , ApiInsert> {
+interface IManagerExample<ApiSelect , ApiInsert , ApiUpdate> {
     val statusRunSelect: Boolean;
     val statusRunInsert: Boolean;
     val statusRunUpdate: Boolean;
@@ -11,6 +11,7 @@ interface IManagerExample<ApiSelect , ApiInsert> {
 
     var listExamplesSelect: ArrayList<IExampleV1<ApiSelect>>
     var listExamplesInsert: ArrayList<IExampleV1<ApiInsert>>
+    var listExamplesUpdate: ArrayList<IExampleV1<ApiUpdate>>
 
 
     fun readyListExamples();
@@ -33,7 +34,9 @@ interface IManagerExample<ApiSelect , ApiInsert> {
 
         /// update Queries
         if (this.statusRunUpdate){
-
+            for(exampleUpdate in listExamplesUpdate) {
+                exampleUpdate.execute(queryManager)
+            }
         }
 
         /// delete Queries

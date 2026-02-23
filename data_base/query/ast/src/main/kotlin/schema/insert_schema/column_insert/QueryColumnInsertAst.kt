@@ -4,6 +4,7 @@ import gog.my_project.data_base.query.ast.interfaces.insert_interface.columns_in
 
 class QueryColumnInsertAst() : IQueryColumnInsertAst {
 
-    override var columnName: String? = ""
+    override var columnName:  String? = null;
+    override var columnTag:   String? = null;
 
 }

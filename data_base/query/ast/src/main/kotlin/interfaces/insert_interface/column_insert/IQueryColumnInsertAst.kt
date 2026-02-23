@@ -4,6 +4,7 @@ import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 
 interface IQueryColumnInsertAst : IQueryAst {
 
-    var columnName: String? ;
+    var columnName:   String? ;
+    var columnTag:    String? ;
 
 }

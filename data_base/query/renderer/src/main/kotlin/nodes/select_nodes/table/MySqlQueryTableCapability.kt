@@ -26,7 +26,7 @@ class MySqlQueryTableCapability :
                 queryTemp = " ${ctx.dialect._prefixTable} ";
             }
             queryTemp += " ${table} ";
-            if (tableAlias != "") {
+            if (tableAlias != "" && dataClass?._withAlias == true) {
                 queryTemp += " As ${tableAlias} ";
             }
         }
@@ -35,7 +35,7 @@ class MySqlQueryTableCapability :
                 queryTemp = " FROM ";
             }
             queryTemp += " ${cte} ";
-            if (cteAlias != "") {
+            if (cteAlias != "" && dataClass?._withAlias == true) {
                 queryTemp += " As ${cteAlias} ";
             }
         }

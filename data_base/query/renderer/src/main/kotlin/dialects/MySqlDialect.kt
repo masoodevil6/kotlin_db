@@ -21,6 +21,8 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQue
 import gog.my_project.data_base.query.ast.interfaces.select_interface.where.IQueryWhereAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQueryWithsAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
+import gog.my_project.data_base.query.ast.interfaces.update_interface.column_update.IQueryColumnUpdateAst
+import gog.my_project.data_base.query.ast.interfaces.update_interface.query_render_update.IQueryRenderUpdateAst
 import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.dialect.manager.BaseSqlDialect
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.column_insert.MySqlQueryColumnInsertCapability
@@ -42,6 +44,8 @@ import gog.my_project.data_base.query.renderer.nodes.select_nodes.table.MySqlQue
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.where.MySqlQueryWhereCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.withs.MySqlQueryWithsCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.withs_item.MySqlQueryWithsItemCapability
+import gog.my_project.data_base.query.renderer.nodes.update_nodes.column_update.MySqlQueryColumnUpdateCapability
+import gog.my_project.data_base.query.renderer.nodes.update_nodes.query.MySqlQueryRenderUpdateCapability
 
 class MySqlDialect(
 ) : BaseSqlDialect() {
@@ -83,6 +87,11 @@ class MySqlDialect(
         _registry.register(IQueryRenderInsertAst::class           , MySqlQueryRenderInsertCapability());
         _registry.register(IQueryColumnInsertAst::class           , MySqlQueryColumnInsertCapability());
 
+        /// update
+        _registry.register(IQueryRenderUpdateAst::class           , MySqlQueryRenderUpdateCapability());
+        _registry.register(IQueryColumnUpdateAst::class           , MySqlQueryColumnUpdateCapability());
+
+        /// delete
 
 
     }
