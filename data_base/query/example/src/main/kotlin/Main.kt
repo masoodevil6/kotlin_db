@@ -27,8 +27,9 @@ fun main() {
 
     val managerV1 = ManagerExampleV1(
         statusRunSelect = false ,
-        statusRunInsert = true ,
+        statusRunInsert = false ,
         statusRunUpdate = false ,
+        statusRunDelete = true ,
     );
     managerV1.readyListExamples()
     managerV1.renderExamples(queryManager);

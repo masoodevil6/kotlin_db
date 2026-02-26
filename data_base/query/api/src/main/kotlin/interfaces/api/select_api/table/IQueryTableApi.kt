@@ -16,18 +16,9 @@ interface IQueryTableApi : IQueryApi<IQueryTableAst> {
         alias: String
     ): IQueryTableApi;
 
-    fun table(
-        table: String
-    ): IQueryTableApi;
-
-
     fun cte(
         cte: String ,
         alias: String
-    ): IQueryTableApi;
-
-    fun cte(
-        cte: String
     ): IQueryTableApi;
 
 }

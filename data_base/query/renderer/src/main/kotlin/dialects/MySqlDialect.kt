@@ -2,6 +2,7 @@ package gog.my_project.data_base.query.renderer.dialects
 
 import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base.query.ast.interfaces.IQueryAst
+import gog.my_project.data_base.query.ast.interfaces.delete_interface.query_render_delete.IQueryRenderDeleteAst
 import gog.my_project.data_base.query.ast.interfaces.insert_interface.columns_insert.IQueryColumnInsertAst
 import gog.my_project.data_base.query.ast.interfaces.insert_interface.query_render_insert.IQueryRenderInsertAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
@@ -25,6 +26,7 @@ import gog.my_project.data_base.query.ast.interfaces.update_interface.column_upd
 import gog.my_project.data_base.query.ast.interfaces.update_interface.query_render_update.IQueryRenderUpdateAst
 import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.dialect.manager.BaseSqlDialect
+import gog.my_project.data_base.query.renderer.nodes.delete_nodes.query.MySqlQueryRenderDeleteCapability
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.column_insert.MySqlQueryColumnInsertCapability
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.query.MySqlQueryRenderInsertCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.column.MySqlQueryColumnCapability
@@ -92,7 +94,7 @@ class MySqlDialect(
         _registry.register(IQueryColumnUpdateAst::class           , MySqlQueryColumnUpdateCapability());
 
         /// delete
-
+        _registry.register(IQueryRenderDeleteAst::class           , MySqlQueryRenderDeleteCapability());
 
     }
 

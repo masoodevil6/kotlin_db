@@ -4,6 +4,7 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Statement
 import kotlin.use
 
@@ -22,7 +23,7 @@ class QueryExecute(
             blockExecute =  {
                 conn , query , params , paramsNames , error ->
                 if (error != null) {
-                    ExecuteResult.Failure(error)
+                    blockExecute(ExecuteResult.Failure(error))
                     return@execute
                 }
                 else{
@@ -46,7 +47,7 @@ class QueryExecute(
             blockExecute =  {
                 conn , query , params , paramsNames , error ->
                 if (error != null) {
-                    ExecuteResult.Failure(error)
+                    blockExecute(ExecuteResult.Failure(error))
                     return@execute
                 }
                 else{
@@ -82,7 +83,7 @@ class QueryExecute(
             blockExecute =  {
                     conn , query , params , paramsNames , error ->
                 if (error != null) {
-                    ExecuteResult.Failure(error)
+                    blockExecute(ExecuteResult.Failure(error))
                     return@execute
                 }
                 else{
@@ -99,7 +100,7 @@ class QueryExecute(
 
 
     override fun executeDelete(
-        builtQuery: BuiltQuery,
+        builtQuery:   BuiltQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit
     ) {
 
@@ -108,7 +109,7 @@ class QueryExecute(
             blockExecute =  {
                     conn , query , params , paramsNames , error ->
                 if (error != null) {
-                    ExecuteResult.Failure(error)
+                    blockExecute(ExecuteResult.Failure(error))
                     return@execute
                 }
                 else{

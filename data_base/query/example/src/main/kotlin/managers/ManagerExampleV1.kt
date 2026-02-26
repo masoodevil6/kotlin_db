@@ -1,9 +1,11 @@
 package gog.my_project.data_base.query.example.managers
 
+import gog.my_project.data_base.query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
+import gog.my_project.data_base.query.example.v1.queries.delete.A1ExampleDeleteV1
 import gog.my_project.data_base.query.example.v1.queries.insert.A1ExampleInsertV1
 import gog.my_project.data_base.query.example.v1.queries.select.A1ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A2ExampleSelectV1
@@ -16,15 +18,16 @@ import gog.my_project.data_base.query.example.v1.queries.update.A1ExampleUpdateV
 
 
 class ManagerExampleV1(
-    override val statusRunSelect: Boolean = true ,
-    override val statusRunInsert: Boolean = true ,
-    override val statusRunUpdate: Boolean = true ,
-    override val statusRunDelete: Boolean = true ,
-) : IManagerExample<IQueryRenderSelectApi , IQueryRenderInsertApi , IQueryRenderUpdateApi> {
+    override val statusRunSelect: Boolean = true,
+    override val statusRunInsert: Boolean = true,
+    override val statusRunUpdate: Boolean = true,
+    override val statusRunDelete: Boolean = true,
+) : IManagerExample<IQueryRenderSelectApi , IQueryRenderInsertApi , IQueryRenderUpdateApi , IQueryRenderDeleteApi> {
 
     override var listExamplesSelect: ArrayList<IExampleV1<IQueryRenderSelectApi>> = ArrayList();
     override var listExamplesInsert: ArrayList<IExampleV1<IQueryRenderInsertApi>> = ArrayList();
     override var listExamplesUpdate: ArrayList<IExampleV1<IQueryRenderUpdateApi>> = ArrayList();
+    override var listExamplesDelete: ArrayList<IExampleV1<IQueryRenderDeleteApi>> = ArrayList();
 
 
     override fun readyListExamples() {
@@ -45,6 +48,7 @@ class ManagerExampleV1(
         listExamplesUpdate.add(A1ExampleUpdateV1())   // V1-Ex7: Query Update sample
 
         /// delete Queries
+        listExamplesDelete.add(A1ExampleDeleteV1())   // V1-Ex7: Query Delete sample
 
     }
 

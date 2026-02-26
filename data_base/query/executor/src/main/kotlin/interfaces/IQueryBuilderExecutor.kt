@@ -7,6 +7,7 @@ import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
+import gog.my_project.data_base.query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
@@ -38,6 +39,13 @@ interface IQueryBuilderExecutor  {
         blockQueryInfo:   ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
     )
 
+    //// update
+    fun execute(
+        queryBuilder:     IQueryRenderDeleteApi,
+        blockExecute:     (ExecuteResult<Int>) -> Unit,
+        blockQueryInfo:   ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
+    )
+
 
     fun <Ast: IQueryAst,Api :IQueryApi<Ast> > executeOut(
         queryBuilder:    Api,
@@ -60,11 +68,6 @@ interface IQueryBuilderExecutor  {
         }
 
         blockResult(db , BuiltQuery(query, params));
-
-        /*db.execute(
-            builtQuery = BuiltQuery(query, params),
-            blockExecute = blockExecute
-        )*/
     }
 
 }
