@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleMigrationSettings" migrationVersion="1" />
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <compositeConfiguration>
+          <compositeBuild compositeDefinitionSource="SCRIPT">
+            <builds>
+              <build path="$PROJECT_DIR$/buildSrc" name="buildSrc">
+                <projects>
+                  <project path="$PROJECT_DIR$/buildSrc" />
+                </projects>
+              </build>
+            </builds>
+          </compositeBuild>
+        </compositeConfiguration>
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="gradleHome" value="" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/app" />
+            <option value="$PROJECT_DIR$/buildSrc" />
+            <option value="$PROJECT_DIR$/data_base" />
+            <option value="$PROJECT_DIR$/data_base/core" />
+            <option value="$PROJECT_DIR$/data_base/manager" />
+            <option value="$PROJECT_DIR$/data_base/manager/connection" />
+            <option value="$PROJECT_DIR$/data_base/manager/execute" />
+            <option value="$PROJECT_DIR$/data_base/migration" />
+            <option value="$PROJECT_DIR$/data_base/migration/api" />
+            <option value="$PROJECT_DIR$/data_base/migration/ast" />
+            <option value="$PROJECT_DIR$/data_base/migration/builder" />
+            <option value="$PROJECT_DIR$/data_base/migration/dialect" />
+            <option value="$PROJECT_DIR$/data_base/migration/example" />
+            <option value="$PROJECT_DIR$/data_base/migration/executor" />
+            <option value="$PROJECT_DIR$/data_base/migration/params" />
+            <option value="$PROJECT_DIR$/data_base/migration/renderer" />
+            <option value="$PROJECT_DIR$/data_base/models" />
+            <option value="$PROJECT_DIR$/data_base/models/eloquent" />
+            <option value="$PROJECT_DIR$/data_base/query" />
+            <option value="$PROJECT_DIR$/data_base/query/api" />
+            <option value="$PROJECT_DIR$/data_base/query/ast" />
+            <option value="$PROJECT_DIR$/data_base/query/builder" />
+            <option value="$PROJECT_DIR$/data_base/query/dialect" />
+            <option value="$PROJECT_DIR$/data_base/query/example" />
+            <option value="$PROJECT_DIR$/data_base/query/executor" />
+            <option value="$PROJECT_DIR$/data_base/query/renderer" />
+            <option value="$PROJECT_DIR$/tools" />
+            <option value="$PROJECT_DIR$/utils" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>

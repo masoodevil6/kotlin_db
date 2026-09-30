@@ -1,0 +1,8 @@
+package gog.my_project.data_base.migration.dialect.nodes.create_table.render_migration_create_table
+
+import gog.my_project.data_base.migration.ast.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableAst
+import gog.my_project.data_base.migration.dialect.data_class.create_table.render_migration_create_table.MigrationRenderCreateTableData
+import gog.my_project.data_base.migration.dialect.interfaces.IAstRenderer
+
+interface IMigrationRenderCreateTableCapability: IAstRenderer<IMigrationRenderCreateTableAst, MigrationRenderCreateTableData> {
+}
