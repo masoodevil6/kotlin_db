@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b35">
+  <title>راهنمای پروژه</title>
+  <link rel="stylesheet" href="/vendor/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js?v=workflow-tree-tooltip-fix" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="container app-header-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">H</div>
+        <div><p class="eyebrow">ابزار توسعهٔ محلی</p><h1>راهنمای پروژه</h1></div>
+      </div>
+      <span id="connection" class="badge rounded-pill text-bg-secondary">در حال اتصال…</span>
+    </div>
+  </header>
+  <main class="container py-4 py-lg-5">
+    <section class="intro mb-4 mb-lg-5">
+      <p class="intro-kicker">یک نقطهٔ شروع برای کارهای پروژه</p>
+      <h2>چه کاری می‌خواهید انجام دهید؟</h2>
+      <p>ماژول را از ساختار Gradle انتخاب کنید، تست موردنظر را اجرا کنید و گزارش همان اجرا را ببینید. انتخاب ماژول و تست در نشانی مرورگر نگه داشته می‌شود.</p>
+    </section>
+
+    <section class="card app-card workflow-card">
+      <div class="card-body p-4 p-xl-5">
+        <nav id="workflow-nav" aria-label="مراحل تست" hidden>
+          <ol id="workflow-steps" class="breadcrumb app-breadcrumb">
+            <li class="breadcrumb-item active"><button type="button" class="workflow-step-link" data-step-target="test" aria-current="step"><span class="workflow-step-number">۱</span><span>تست و اجرا</span></button></li>
+            <li class="breadcrumb-item"><button type="button" class="workflow-step-link" data-step-target="results" disabled><span class="workflow-step-number">۲</span><span>گزارش نتیجه</span></button></li>
+          </ol>
+        </nav>
+
+        <section data-step-panel="module">
+          <div class="section-heading">
+            <span class="step-number">۱</span>
+            <div><h2 class="h4 mb-1">انتخاب ماژول</h2><p class="text-secondary mb-0">مسیر را از پروژهٔ اصلی تا زیرماژول دنبال کنید.</p></div>
+          </div>
+          <div id="module-path" class="mt-4"><p class="text-secondary">در حال بارگذاری ماژول‌ها…</p></div>
+          <p id="module-description" class="module-description mb-0"></p>
+          <div class="workflow-actions">
+            <button id="module-next" type="button" class="btn btn-primary" disabled>ادامه به انتخاب اکشن ←</button>
+          </div>
+        </section>
+
+        <section data-step-panel="action" hidden>
+          <div class="section-heading">
+            <span class="step-number step-number-secondary">۲</span>
+            <div><h2 class="h4 mb-1">انتخاب اکشن</h2><p class="text-secondary mb-0">عملیاتی را که می‌خواهید برای این ماژول انجام دهید انتخاب کنید.</p></div>
+          </div>
+          <p id="action-module-summary" class="workflow-summary"></p>
+          <div class="mt-4">
+            <div id="action-choices" class="action-choice-grid" role="radiogroup" aria-label="انتخاب اکشن"></div>
+            <select id="action" class="visually-hidden" tabindex="-1" aria-hidden="true" disabled><option value="">ابتدا ماژول را انتخاب کنید</option></select>
+          </div>
+          <div class="workflow-actions workflow-actions-between">
+            <button id="action-back" type="button" class="btn btn-outline-secondary">→ بازگشت به ماژول</button>
+            <button id="action-next" type="button" class="btn btn-primary" disabled>ادامه به انتخاب تست ←</button>
+          </div>
+        </section>
+
+        <section data-step-panel="test" hidden>
+          <div class="section-heading">
+            <span class="step-number">۱</span>
+            <div><h2 class="h4 mb-1">انتخاب تست و اجرا</h2><p class="text-secondary mb-0">تست موردنظر را انتخاب کنید و ورودی‌های لازم را تکمیل کنید.</p></div>
+          </div>
+          <p id="test-selection-summary" class="workflow-summary"></p>
+          <div class="mt-3">
+            <label for="test" class="form-label">تست ماژول</label>
+            <select id="test" class="form-select" disabled><option value="">ابتدا اکشن را انتخاب کنید</option></select>
+          </div>
+          <p id="test-description" class="text-secondary small mt-2 mb-0"></p>
+          <form id="parameters" class="parameter-grid" autocomplete="on"></form>
+          <div class="workflow-actions workflow-actions-between">
+            <button id="test-back" type="button" class="btn btn-outline-secondary">→ بازگشت به اکشن</button>
+            <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-3">
+              <button id="run" class="btn btn-primary btn-lg px-4" disabled>اجرای تست</button>
+              <p id="result" class="result-message mb-0" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </section>
+
+        <section data-step-panel="results" hidden>
+          <div class="section-heading">
+            <span class="step-number step-number-secondary">۲</span>
+            <div><h2 class="h4 mb-1">گزارش نتیجهٔ تست</h2><p class="text-secondary mb-0">آمار و خطاها از خروجی XML تولیدشده توسط Gradle خوانده شده‌اند.</p></div>
+          </div>
+          <div id="run-summary" class="run-summary mt-4" aria-live="polite"></div>
+          <div class="result-copy-actions">
+            <button id="copy-ai-report" type="button" class="btn btn-primary">کپی گزارش Markdown برای AI</button>
+            <p id="copy-ai-report-status" class="small text-secondary mb-0" role="status" aria-live="polite"></p>
+            <textarea id="ai-report-text" class="form-control ai-report-fallback" aria-label="متن گزارش Markdown برای کپی دستی" hidden readonly></textarea>
+          </div>
+          <section class="card app-card report-panel mt-4" id="report-panel" hidden>
+            <div class="card-body p-3 p-lg-4">
+              <div class="d-flex align-items-center justify-content-between mb-3"><div><p class="intro-kicker mb-1">گزارش HTML همین اجرا</p><h3 class="h5 mb-0">گزارش Gradle</h3></div><span class="badge rounded-pill text-bg-light">Gradle HTML Report</span></div>
+              <iframe id="report" title="گزارش HTML اجرای تست" sandbox="allow-scripts"></iframe>
+            </div>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+  <footer class="app-footer"><div class="container">اجرای تست و نتیجهٔ آن در اختیار Gradle است؛ این ابزار ساختار پروژه را پیدا می‌کند، تست را اجرا می‌کند و گزارش را نمایش می‌دهد.</div></footer>
+</body>
+</html>

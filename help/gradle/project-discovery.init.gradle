@@ -1,0 +1,20 @@
+import groovy.json.JsonOutput
+
+gradle.projectsLoaded { loadedGradle ->
+    String expectedRoot = System.getenv('HELP_DISCOVERY_BUILD_ROOT')
+    String outputPath = System.getenv('HELP_DISCOVERY_OUTPUT')
+    if (!expectedRoot || !outputPath) {
+        throw new GradleException('HELP_DISCOVERY_BUILD_ROOT and HELP_DISCOVERY_OUTPUT are required for Help discovery')
+    }
+    if (loadedGradle.rootProject.projectDir.canonicalFile != new File(expectedRoot).canonicalFile) {
+        return
+    }
+
+    List<Map<String, String>> projects = loadedGradle.rootProject.allprojects.collect { project ->
+        [path: project.path, projectDir: project.projectDir.canonicalPath]
+    }.sort { left, right -> left.path <=> right.path }
+
+    File output = new File(outputPath)
+    output.parentFile.mkdirs()
+    output.setText(JsonOutput.toJson([projects: projects]), 'UTF-8')
+}

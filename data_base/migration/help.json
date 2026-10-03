@@ -1,0 +1,530 @@
+{
+  "schemaVersion": 2,
+  "module": {
+    "title": "Database Migrations",
+    "description": "Schema migration operations and integration checks.",
+    "icon": "database"
+  },
+  "tests": [
+    {
+      "id": "migration-system-integration",
+      "title": "Migration System Integration",
+      "description": "Runs the migration subsystem integration test against MySQL.",
+      "context": {
+        "purpose": "اعتبارسنجی چرخهٔ Migration، ادامه پس از failure و ثبت history در MySQL.",
+        "scenario": "تست migrationهای موفق، اجرای مجدد، failure/resume و اعتبارسنجی تعریف‌های بدون operation یا چند operation را بررسی می‌کند.",
+        "preconditions": [
+          "دسترسی به MySQL و propertyهای اتصال تست لازم است.",
+          "refresh=true همهٔ user tableهای catalog انتخاب‌شده، از جمله system_migration، را پیش از اجرای چرخه حذف می‌کند؛ refresh=false برخورد را بدون تغییر پایگاه‌داده بررسی می‌کند.",
+          "وضعیت پایگاه‌داده پس از تست برای بررسی برنامه‌نویس باقی می‌ماند."
+        ],
+        "expectedWorkflow": [
+          {
+            "id": "migration-system-integration-tree",
+            "label": "چرخهٔ تست Migration",
+            "kind": "group"
+          },
+          {
+            "id": "system-setup",
+            "label": "آماده‌سازی و اتصال",
+            "kind": "group",
+            "parentId": "migration-system-integration-tree"
+          },
+          {
+            "id": "system-migrations",
+            "label": "چرخه‌های اجرای Migration",
+            "kind": "group",
+            "parentId": "migration-system-integration-tree"
+          },
+          {
+            "id": "system-failure-cases",
+            "label": "Failure و اعتبارسنجی",
+            "kind": "group",
+            "parentId": "migration-system-integration-tree"
+          },
+          {
+            "id": "system-finalization",
+            "label": "وضعیت نهایی و منابع",
+            "kind": "group",
+            "parentId": "migration-system-integration-tree"
+          },
+          {
+            "id": "prepare-config",
+            "label": "خواندن و اعتبارسنجی تنظیمات",
+            "kind": "step",
+            "parentId": "system-setup"
+          },
+          {
+            "id": "open-connection",
+            "label": "اتصال به پایگاه‌دادهٔ انتخاب‌شده",
+            "kind": "step",
+            "parentId": "system-setup"
+          },
+          {
+            "id": "refresh-collision",
+            "label": "Refresh یا بررسی برخورد",
+            "kind": "step",
+            "parentId": "system-setup"
+          },
+          {
+            "id": "successful-migrations",
+            "label": "اجرای Migrationهای موفق",
+            "kind": "step",
+            "parentId": "system-migrations"
+          },
+          {
+            "id": "rerun",
+            "label": "اجرای مجدد و بررسی عدم تغییر",
+            "kind": "step",
+            "parentId": "system-migrations"
+          },
+          {
+            "id": "failure-resume",
+            "label": "بررسی failure و resume",
+            "kind": "step",
+            "parentId": "system-failure-cases"
+          },
+          {
+            "id": "operation-validation",
+            "label": "اعتبارسنجی تعداد operationها",
+            "kind": "step",
+            "parentId": "system-failure-cases"
+          },
+          {
+            "id": "final-state",
+            "label": "بررسی state نهایی",
+            "kind": "step",
+            "parentId": "system-finalization"
+          },
+          {
+            "id": "restore-resources",
+            "label": "بستن اتصال و بازگردانی تنظیمات",
+            "kind": "step",
+            "parentId": "system-finalization"
+          }
+        ],
+        "expectedMigrations": [
+          {
+            "id": "create_test_users",
+            "order": 1,
+            "operationType": "CREATE TABLE",
+            "target": "migration_test_users"
+          },
+          {
+            "id": "add_test_users_email",
+            "order": 2,
+            "group": "test_users",
+            "operationType": "ALTER TABLE",
+            "target": "migration_test_users"
+          },
+          {
+            "id": "create_test_posts",
+            "order": 3,
+            "operationType": "CREATE TABLE",
+            "target": "migration_test_posts"
+          },
+          {
+            "id": "create_failure_blocker",
+            "order": 4,
+            "operationType": "CREATE TABLE",
+            "target": "migration_test_existing_table"
+          },
+          {
+            "id": "failure_create_users",
+            "order": 1,
+            "operationType": "CREATE TABLE",
+            "target": "migration_test_failure_users"
+          },
+          {
+            "id": "failure_add_email",
+            "order": 2,
+            "operationType": "ALTER TABLE",
+            "target": "migration_test_failure_users"
+          },
+          {
+            "id": "broken_migration",
+            "order": 3
+          },
+          {
+            "id": "migration_after_failure",
+            "order": 4
+          },
+          {
+            "id": "empty_operation",
+            "order": 1
+          },
+          {
+            "id": "after_empty_operation",
+            "order": 2
+          },
+          {
+            "id": "multiple_operations",
+            "order": 1
+          },
+          {
+            "id": "after_multiple_operations",
+            "order": 2
+          }
+        ],
+        "verificationCategories": [
+          "migration-lifecycle",
+          "history",
+          "schema",
+          "failure-resume"
+        ],
+        "runtime": {
+          "type": "test-runtime-json",
+          "schemaVersion": 2
+        }
+      },
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.migration.integration.MigrationSystemIntegrationTest.runsTheMigrationSubsystemLifecycleAgainstMySql"
+      },
+      "parameters": [
+        {
+          "id": "db-domain",
+          "label": "Database Domain",
+          "description": "نشانی JDBC میزبان MySQL را بدون نام پایگاه داده وارد کنید؛ نام پایگاه داده در فیلد جداگانه تعیین می‌شود.",
+          "type": "text",
+          "required": true,
+          "default": "jdbc:mysql://127.0.0.1",
+          "secret": false,
+          "validation": {
+            "pattern": "^jdbc:mysql://"
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.domain"
+          }
+        },
+        {
+          "id": "db-port",
+          "label": "Database Port",
+          "type": "number",
+          "required": true,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.port"
+          }
+        },
+        {
+          "id": "db-name",
+          "label": "Database Name",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db_test",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.name"
+          }
+        },
+        {
+          "id": "db-username",
+          "label": "Username",
+          "type": "text",
+          "required": true,
+          "default": "root",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.username"
+          }
+        },
+        {
+          "id": "db-password",
+          "label": "Password",
+          "type": "password",
+          "required": true,
+          "allowEmpty": true,
+          "secret": true,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.password"
+          }
+        },
+        {
+          "id": "refresh-database",
+          "label": "Refresh Database Objects",
+          "type": "boolean",
+          "required": true,
+          "default": false,
+          "secret": false,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.refresh"
+          }
+        }
+      ],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    },
+    {
+      "id": "migration-schema-integration",
+      "title": "Migration Schema Integration",
+      "description": "Builds and verifies a relational schema and migration history against MySQL.",
+      "context": {
+        "purpose": "ساخت و بررسی یک schema رابطه‌ای چندجدولی و history متناظر Migrationها در MySQL.",
+        "scenario": "هفت Migration ثبت‌شده به ترتیب فعلی اجرا می‌شوند؛ تست metadata جدول‌ها، ستون‌ها، کلیدها، indexها و foreign keyها را طبق assertionهای موجود بررسی می‌کند.",
+        "preconditions": [
+          "دسترسی به MySQL و propertyهای اتصال تست لازم است.",
+          "refresh=true همهٔ user tableهای catalog انتخاب‌شده، از جمله system_migration، را پیش از تست حذف می‌کند؛ refresh=false برخورد را بدون تغییر پایگاه‌داده بررسی می‌کند.",
+          "تست مستقل است و به اجرای Integration Test دیگری وابسته نیست؛ state پس از تست باقی می‌ماند."
+        ],
+        "expectedWorkflow": [
+          {
+            "id": "migration-schema-integration-tree",
+            "label": "تست schema رابطه‌ای",
+            "kind": "group"
+          },
+          {
+            "id": "schema-setup",
+            "label": "آماده‌سازی و اتصال",
+            "kind": "group",
+            "parentId": "migration-schema-integration-tree"
+          },
+          {
+            "id": "schema-migrations",
+            "label": "ثبت و اجرای Migrationها",
+            "kind": "group",
+            "parentId": "migration-schema-integration-tree"
+          },
+          {
+            "id": "schema-checks",
+            "label": "بررسی schema و history",
+            "kind": "group",
+            "parentId": "migration-schema-integration-tree"
+          },
+          {
+            "id": "schema-finalization",
+            "label": "وضعیت نهایی و منابع",
+            "kind": "group",
+            "parentId": "migration-schema-integration-tree"
+          },
+          {
+            "id": "prepare-config",
+            "label": "خواندن و اعتبارسنجی تنظیمات",
+            "kind": "step",
+            "parentId": "schema-setup"
+          },
+          {
+            "id": "open-connection",
+            "label": "اتصال به پایگاه‌دادهٔ انتخاب‌شده",
+            "kind": "step",
+            "parentId": "schema-setup"
+          },
+          {
+            "id": "refresh-collision",
+            "label": "Refresh یا بررسی برخورد اولیه",
+            "kind": "step",
+            "parentId": "schema-setup"
+          },
+          {
+            "id": "registration",
+            "label": "ثبت هفت Migration به ترتیب تعریف‌شده",
+            "kind": "step",
+            "parentId": "schema-migrations"
+          },
+          {
+            "id": "migration-execution",
+            "label": "اجرای Migrationها",
+            "kind": "step",
+            "parentId": "schema-migrations"
+          },
+          {
+            "id": "schema-verification",
+            "label": "بررسی schema مشاهده‌شده",
+            "kind": "step",
+            "parentId": "schema-checks"
+          },
+          {
+            "id": "history-verification",
+            "label": "بررسی history و batchها",
+            "kind": "step",
+            "parentId": "schema-checks"
+          },
+          {
+            "id": "collision-verification",
+            "label": "بررسی برخورد بدون mutation",
+            "kind": "step",
+            "parentId": "schema-checks"
+          },
+          {
+            "id": "final-state",
+            "label": "ثبت وضعیت نهایی قابل مشاهده",
+            "kind": "step",
+            "parentId": "schema-checks"
+          },
+          {
+            "id": "restore-resources",
+            "label": "بستن اتصال و بازگردانی تنظیمات",
+            "kind": "step",
+            "parentId": "schema-finalization"
+          }
+        ],
+        "expectedMigrations": [
+          {
+            "id": "schema_create_categories",
+            "order": 1,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_categories"
+          },
+          {
+            "id": "schema_create_tenants",
+            "order": 2,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_tenants"
+          },
+          {
+            "id": "schema_create_users",
+            "order": 3,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_users"
+          },
+          {
+            "id": "schema_create_products",
+            "order": 4,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_products"
+          },
+          {
+            "id": "schema_create_addresses",
+            "order": 5,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_addresses"
+          },
+          {
+            "id": "schema_create_orders",
+            "order": 6,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_orders"
+          },
+          {
+            "id": "schema_create_order_items",
+            "order": 7,
+            "operationType": "CREATE TABLE",
+            "target": "migration_schema_order_items"
+          }
+        ],
+        "verificationCategories": [
+          "schema",
+          "history",
+          "foreign-keys",
+          "indexes"
+        ],
+        "runtime": {
+          "type": "test-runtime-json",
+          "schemaVersion": 2
+        }
+      },
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.migration.integration.MigrationSchemaIntegrationTest.createsRelationalSchemaAndRecordsItsMigrationHistoryAgainstMySql"
+      },
+      "parameters": [
+        {
+          "id": "db-domain",
+          "label": "Database Domain",
+          "description": "نشانی JDBC میزبان MySQL را بدون نام پایگاه داده وارد کنید؛ نام پایگاه داده در فیلد جداگانه تعیین می‌شود.",
+          "type": "text",
+          "required": true,
+          "default": "jdbc:mysql://127.0.0.1",
+          "secret": false,
+          "validation": {
+            "pattern": "^jdbc:mysql://"
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.domain"
+          }
+        },
+        {
+          "id": "db-port",
+          "label": "Database Port",
+          "type": "number",
+          "required": true,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.port"
+          }
+        },
+        {
+          "id": "db-name",
+          "label": "Database Name",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db_test",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.name"
+          }
+        },
+        {
+          "id": "db-username",
+          "label": "Username",
+          "type": "text",
+          "required": true,
+          "default": "root",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.username"
+          }
+        },
+        {
+          "id": "db-password",
+          "label": "Password",
+          "type": "password",
+          "required": true,
+          "allowEmpty": true,
+          "secret": true,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.password"
+          }
+        },
+        {
+          "id": "refresh-database",
+          "label": "Refresh Database Objects",
+          "description": "پیش از تست، user tableهای catalog انتخاب‌شده از جمله system_migration حذف می‌شوند؛ پس از تست cleanup خودکار انجام نمی‌شود.",
+          "type": "boolean",
+          "required": true,
+          "default": true,
+          "secret": false,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "migration.test.db.refresh"
+          }
+        }
+      ],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    }
+  ]
+}
