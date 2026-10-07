@@ -320,7 +320,14 @@ body {
 .result-message[data-state="Failed"] { color: #b42335; }
 .result-message[data-state="Passed"] { color: #16835b; }
 .action-output-stream { margin-top: .75rem; border: 1px solid #dbe2ee; border-radius: 10px; overflow: hidden; }
-.action-output-stream summary { cursor: pointer; padding: .65rem .85rem; font-weight: 600; background: #f4f6fa; }
+.action-output-stream summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: .45rem .65rem .45rem .85rem; font-weight: 600; background: #f4f6fa; }
+.action-output-label { min-width: 0; }
+.action-output-controls { display: inline-flex; align-items: center; gap: 8px; }
+.action-output-copy-status { color: #16835b; font-size: .72rem; font-weight: 400; }
+.action-output-copy { display: inline-grid; width: 32px; height: 32px; place-items: center; padding: 5px; border: 1px solid #cbd5e1; border-radius: 7px; color: #34415a; background: #fff; cursor: pointer; }
+.action-output-copy:hover { border-color: #8292ad; background: #f8fafc; }
+.action-output-copy:focus-visible { outline: 2px solid #5076c7; outline-offset: 2px; }
+.action-output-copy svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .action-output-text { max-height: 32rem; overflow: auto; margin: 0; padding: 1rem; color: #e7edf7; background: #111827; direction: ltr; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font: .84rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .app-footer { padding: 22px 0 30px; color: #7a879b; font-size: .85rem; text-align: center; }
 

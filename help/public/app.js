@@ -502,20 +502,68 @@ function createAiHandoffMarkdown(outcome) {
   return lines.join('\n');
 }
 
+async function copyActionOutput(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const fallback = document.createElement('textarea');
+  fallback.value = text;
+  fallback.setAttribute('readonly', '');
+  fallback.style.position = 'fixed';
+  fallback.style.opacity = '0';
+  document.body.append(fallback);
+  fallback.select();
+  const copied = document.execCommand('copy');
+  fallback.remove();
+  if (!copied) throw new Error('Clipboard copy failed');
+}
+
+function createActionOutputStream(name, value = '') {
+  const details = document.createElement('details');
+  details.open = true;
+  details.className = 'action-output-stream';
+  const summary = document.createElement('summary');
+  summary.append(summaryElement('span', 'action-output-label', name));
+
+  const controls = summaryElement('span', 'action-output-controls');
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'action-output-copy';
+  copyButton.title = `کپی ${name}`;
+  copyButton.setAttribute('aria-label', `کپی ${name}`);
+  copyButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>';
+  const copyStatus = summaryElement('span', 'action-output-copy-status');
+  copyStatus.setAttribute('role', 'status');
+  copyStatus.setAttribute('aria-live', 'polite');
+  copyButton.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      await copyActionOutput(pre.textContent);
+      copyStatus.textContent = 'کپی شد';
+    } catch {
+      copyStatus.textContent = 'کپی ناموفق بود';
+    }
+  });
+  controls.append(copyStatus, copyButton);
+  summary.append(controls);
+
+  const pre = summaryElement('pre', 'action-output-text', value);
+  details.append(summary, pre);
+  return { details, pre };
+}
+
 function createLiveActionOutputView(outputContainer) {
   outputContainer.replaceChildren();
   const outputSection = summaryElement('section', 'action-process-output');
   outputSection.append(summaryElement('h4', 'h6 mb-2', 'خروجی زندهٔ فرایند'));
   const streams = {};
   for (const name of ['stdout', 'stderr']) {
-    const details = document.createElement('details');
-    details.open = true;
-    details.className = 'action-output-stream';
-    details.append(summaryElement('summary', '', name));
-    const pre = summaryElement('pre', 'action-output-text', '');
-    details.append(pre);
-    outputSection.append(details);
-    streams[name] = pre;
+    const stream = createActionOutputStream(name);
+    outputSection.append(stream.details);
+    streams[name] = stream.pre;
   }
   outputContainer.append(outputSection);
   return streams;
@@ -600,12 +648,7 @@ function renderRunSummary(outcome, test) {
     if (outcome.outputTruncated) outputSection.append(summaryElement('p', 'small text-warning', 'بخشی از خروجی به علت محدودیت حجم ذخیره نشده است.'));
     for (const [label, value] of [['stdout', outcome.stdout], ['stderr', outcome.stderr]]) {
       if (!value) continue;
-      const stream = document.createElement('details');
-      stream.open = true;
-      stream.className = 'action-output-stream';
-      stream.append(summaryElement('summary', '', label));
-      stream.append(summaryElement('pre', 'action-output-text', value));
-      outputSection.append(stream);
+      outputSection.append(createActionOutputStream(label, value).details);
     }
     if (!outcome.stdout && !outcome.stderr) {
       outputSection.append(summaryElement('p', 'small text-secondary mb-0', 'فرایند هیچ متنی در stdout یا stderr تولید نکرد.'));
