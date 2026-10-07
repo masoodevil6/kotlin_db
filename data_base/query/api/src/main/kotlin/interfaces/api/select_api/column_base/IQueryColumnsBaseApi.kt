@@ -11,6 +11,12 @@ interface IQueryColumnsBaseApi : IQueryApi<IQueryColumnsBaseAst> {
 
     //fun <T: IModelBase, R> column(table: KClass<T>, column: KProperty1<T, R>): IQueryColumnsBaseApi;
 
+    fun <T : IModelBase, R> tableColumn(
+        table: KClass<T>,
+        property: KProperty1<T, R>,
+        tableAlias: String,
+    ): IQueryColumnsBaseApi
+
     //fun <T: ICte, R> cteColumn(cte: KClass<T>, select: KProperty1<T, R>): IQueryColumnsBaseApi;
 
 

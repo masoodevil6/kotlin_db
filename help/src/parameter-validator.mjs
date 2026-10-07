@@ -23,6 +23,9 @@ export function validateParameters(testDefinition, submitted) {
     } else if (parameter.type === 'boolean') {
       if (typeof value !== 'boolean') throw new Error(`parameter '${parameter.id}' must be boolean`);
       value = String(value);
+    } else if (parameter.type === 'select') {
+      if (typeof value !== 'string') throw new Error(`parameter '${parameter.id}' must be a string`);
+      if (!parameter.options?.some((option) => option.value === value)) throw new Error(`parameter '${parameter.id}' is not an allowed option`);
     }
     bindings[parameter.binding.name] = value;
   }

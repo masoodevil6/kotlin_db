@@ -1,69 +1,31 @@
 package gog.my_project.data_base.query.example.v1.queries.insert
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base.query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base.query.executer.result.error
+import gog.my_project.data_base.query.executer.result.success
 
-class A1ExampleInsertV1()
-    : IExampleV1<IQueryRenderInsertApi> {
-
-    override fun query(): IQueryRenderInsertApi {
-        return QueryRenderInsertBuilder()
-            .table{
-                table("user_users"  , "uu")
-            }
-            .addValue {
-                column(  "name" , "Ali")
-            }
-            .addValue {
-                column("family" , "Sadegi")
-            }
-            .addValue {
-                column("age" , 50)
-            }
-    }
+class A1ExampleInsertV1 : IExampleV1<IQueryRenderInsertApi> {
+    override fun query(): IQueryRenderInsertApi = QueryRenderInsertBuilder()
+        .table { table("user_users").alias("uu") }
+        .addValue { column("name", "Ali") }
+        .addValue { column("family", "Sadegi") }
+        .addValue { column("age", 50) }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
-        queryManager.execute(
-            queryBuilder = this.query() ,
-            blockQueryInfo = {
-                    query , paramsMap->
-
-                println("\n=============================================");
-                println("V1-Ex1: Insert Sample ");
-                println("---------------------------");
-
-                print("query: ${query} \n");
-                println("---------------------------");
-                var paramsStr = "";
-                paramsMap.forEach {
-                    paramsStr += "\n ${it.key} = ${it.value} ";
-                }
-                print("params: $paramsStr \n");
-                println("---------------------------");
-            },
-            blockExecute = { result ->
-                when(result) {
-                    is ExecuteResult.Success -> {
-                        result.result?.let {
-                                rs->
-
-                            println("exe:  $rs ");
-
-                        }
-                    }
-                    is ExecuteResult.Failure -> {
-                        println("error: - ${result.exception.toString()}");
-                    }
-                    else->{
-
-                    }
-                }
+        val consumer = queryManager
+            .queryBuilder(query())
+            .sql { (query, params) ->
+                println("\n=============================================\nV1-Ex1: Insert Sample\nquery: $query\nparams: $params")
             }
-        )
+            .execute()
+            .success { generatedKey ->
+                println("generated key: $generatedKey")
+                generatedKey
+            }
+            .error { failure -> println("error: $failure") }
+
     }
-
-
 }

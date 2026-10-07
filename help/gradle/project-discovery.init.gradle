@@ -1,6 +1,6 @@
 import groovy.json.JsonOutput
 
-gradle.projectsLoaded { loadedGradle ->
+gradle.projectsEvaluated { loadedGradle ->
     String expectedRoot = System.getenv('HELP_DISCOVERY_BUILD_ROOT')
     String outputPath = System.getenv('HELP_DISCOVERY_OUTPUT')
     if (!expectedRoot || !outputPath) {
@@ -10,8 +10,13 @@ gradle.projectsLoaded { loadedGradle ->
         return
     }
 
-    List<Map<String, String>> projects = loadedGradle.rootProject.allprojects.collect { project ->
-        [path: project.path, projectDir: project.projectDir.canonicalPath]
+    List<Map<String, Object>> projects = loadedGradle.rootProject.allprojects.collect { project ->
+        [
+            path: project.path,
+            projectDir: project.projectDir.canonicalPath,
+            hasBuildTask: project.tasks.names.contains('build'),
+            hasRunTask: project.tasks.names.contains('run'),
+        ]
     }.sort { left, right -> left.path <=> right.path }
 
     File output = new File(outputPath)

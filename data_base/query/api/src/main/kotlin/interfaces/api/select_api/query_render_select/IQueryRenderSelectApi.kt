@@ -10,6 +10,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.select.IQuer
 import gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.where.IQueryWhereApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQueryWithsApi
+import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 
 
@@ -18,6 +19,9 @@ interface IQueryRenderSelectApi : IQueryApi<IQueryRenderSelectAst> {
     fun withs(blockWiths: IQueryWithsApi.() -> Unit): IQueryRenderSelectApi;
     fun select(blockSelect: IQuerySelectApi.() -> Unit): IQueryRenderSelectApi;
     fun table(blockTable: IQueryTableApi.() -> Unit): IQueryRenderSelectApi;
+    fun from(relation: QueryRelation, alias: String? = null): IQueryRenderSelectApi {
+        throw UnsupportedOperationException("QueryRelation sources are not supported by this IQueryRenderSelectApi implementation")
+    }
     fun joins(blockJoins: IQueryJoinsApi.() -> Unit): IQueryRenderSelectApi;
     fun where(blockGroup: IQueryWhereApi.() -> Unit): IQueryRenderSelectApi;
 

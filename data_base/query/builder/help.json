@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "module": {
+    "title": "سازندهٔ پرس‌وجو",
+    "description": "اجرای آزمون‌های قرارداد و سازگاری ماژول Query Builder.",
+    "icon": "code"
+  },
+  "tests": [
+    {
+      "id": "query-builder-query-relation-contract",
+      "title": "QueryRelationContractTest.kt — آزمون قرارداد Relation",
+      "description": "آزمون‌های قراردادی QueryRelation، CTE، alias و ترکیب Relationها.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.QueryRelationContractTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    },
+    {
+      "id": "query-builder-query-relation-declaration",
+      "title": "QueryRelationDeclarationTest.kt — آزمون تعریف Relation",
+      "description": "اعتبارسنجی base declaration و metadata مالک Concrete Relation.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.QueryRelationDeclarationTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    },
+    {
+      "id": "query-builder-typed-model-reference",
+      "title": "TypedModelReferenceTest.kt — آزمون ارجاع تایپ‌شدهٔ Model",
+      "description": "بررسی resolve شدن referenceهای Model و رفتار alias جدول و ستون.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.TypedModelReferenceTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    },
+    {
+      "id": "query-builder-typed-relation-property",
+      "title": "TypedRelationPropertyTest.kt — آزمون Relation تایپ‌شده",
+      "description": "بررسی alias تایپ‌شده، مالکیت خروجی و مصرف خروجی Relation با qualifier صریح.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.TypedRelationPropertyTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    }
+  ]
+}

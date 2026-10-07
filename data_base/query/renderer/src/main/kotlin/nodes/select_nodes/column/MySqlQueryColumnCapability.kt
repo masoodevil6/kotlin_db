@@ -6,6 +6,7 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.column.Quer
 import gog.my_project.data_base.query.dialect.data_class.select_data.column_base.QueryColumnBaseData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.column.IQueryColumnCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import java.util.Locale
 
 class MySqlQueryColumnCapability :
     IQueryColumnCapability {
@@ -25,11 +26,11 @@ class MySqlQueryColumnCapability :
             QueryColumnBaseData()
         )
         if (column != null){
-            var queryTemp: String = ""
-            if (columnMethod != null) {
-                queryTemp += "($columnMethod)";
+            var queryTemp = if (columnMethod != null) {
+                "${columnMethod.uppercase(Locale.ROOT)}($column)"
+            } else {
+                column
             }
-            queryTemp += column;
             if (columnAlias != null) {
                 queryTemp += " As ${columnAlias} ";
             }

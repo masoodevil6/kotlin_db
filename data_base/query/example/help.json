@@ -1,0 +1,141 @@
+{
+    "schemaVersion": 2,
+    "module": {
+        "title": "نمونه‌های Query Builder",
+        "description": "نمونه‌های V1، V2 و V3 برای ساخت و اجرای Queryهای نمونه. اکشن Run، Main.kt را با تنظیم فعلی آن اجرا می‌کند و به MySQL وصل می‌شود؛ در تنظیم فعلی، فقط Selectها فعال‌اند.",
+        "icon": "code",
+        "actions": [
+            {
+                "title": "اجرای نمونه‌ها",
+                "description": "اجرای Main.kt از طریق Gradle؛ اتصال MySQL و اجرای Selectهای فعال در تنظیم فعلی انجام می‌شود.",
+                "task": "run",
+                "id": "run",
+                "parameters": [
+                    {
+                        "id": "version",
+                        "label": "نسخهٔ اجرا",
+                        "description": "اگر نسخه‌ای انتخاب نشود، V3 به‌صورت پیش‌فرض اجرا می‌شود.",
+                        "type": "select",
+                        "required": false,
+                        "secret": false,
+                        "options": [
+                            {
+                                "value": "v1",
+                                "label": "V1 (Smart Result)"
+                            },
+                            {
+                                "value": "v2",
+                                "label": "V2"
+                            },
+                            {
+                                "value": "v3",
+                                "label": "V3"
+                            }
+                        ],
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.version"
+                        }
+                    },
+                    {
+                        "id": "run-select",
+                        "label": "اجرای SELECT",
+                        "description": "در صورت خالی بودن مقدار، SELECT به‌صورت پیش‌فرض اجرا می‌شود.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": true,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.select"
+                        }
+                    },
+                    {
+                        "id": "run-insert",
+                        "label": "اجرای INSERT",
+                        "description": "برای اجرای INSERT این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.insert"
+                        }
+                    },
+                    {
+                        "id": "run-update",
+                        "label": "اجرای UPDATE",
+                        "description": "برای اجرای UPDATE این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.update"
+                        }
+                    },
+                    {
+                        "id": "run-delete",
+                        "label": "اجرای DELETE",
+                        "description": "برای اجرای DELETE این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.delete"
+                        }
+                    }
+                ]
+            },
+            {
+                "title": "ساخت ماژول",
+                "description": "اجرای Gradle build برای ماژول Query Example.",
+                "task": "build",
+                "id": "build"
+            }
+        ],
+        "projectDependencies": [
+            {
+                "path": ":tools",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:core",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:models:eloquent",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:manager:execute",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:query:api",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:query:ast",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:query:builder",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:query:renderer",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:query:executor",
+                "scope": "implementation"
+            }
+        ]
+    },
+    "tests": []
+}

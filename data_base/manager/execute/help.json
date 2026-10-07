@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 2,
+  "module": {
+    "title": "موتور اجرای پرس‌وجو",
+    "description": "بررسی قراردادهای اجرا و امکان اجرای اختیاری آزمون یکپارچه‌سازی با MySQL.",
+    "icon": "database"
+  },
+  "tests": [
+    {
+      "id": "execute-mysql-live-verification",
+      "title": "راستی‌آزمایی اجرای MySQL",
+      "description": "آزمون یکپارچه‌سازی MySQL شامل سناریوی فقط‌خواندنی اتصال پارامترها و سناریوهای محدود INSERT و DDL روی جدول‌های اختصاصی و موقت. مقدارهای فرم Help به‌صورت Gradle project property فرستاده و توسط task آزمون Execute به JVM system property تبدیل می‌شوند.",
+      "context": {
+        "purpose": "راستی‌آزمایی پارامترهای JDBC، generated key و اجرای DDL از طریق MySQL Connector/J و manager:execute.",
+        "scenario": "آزمون تنظیمات اتصال را از JVM system propertyهایی می‌خواند که از Gradle project propertyها مقدار گرفته‌اند. سناریوی parameter binding فقط‌خواندنی است؛ دو سناریوی دیگر جدول‌های اختصاصی و یکتا می‌سازند، یک INSERT محدود انجام می‌دهند یا اجرای DDL را بررسی می‌کنند و جدول متعلق به همان سناریو را در پایان حذف می‌کنند. سناریوهای تغییردهنده فقط به 127.0.0.1:3306/kotlin_db محدودند.",
+        "preconditions": [
+          "یک پایگاه دادهٔ آزمایشی دورریختنی یا صریحاً تأییدشده انتخاب کنید؛ از پایگاه دادهٔ production استفاده نکنید.",
+          "مقدارهای execute.test.db.host، execute.test.db.name و execute.test.db.username را به‌صورت Gradle project property وارد کنید. task آزمون Execute آن‌ها را به system propertyهای JVM تبدیل می‌کند. property درگاه اختیاری است و مقدار پیش‌فرض آن 3306 است؛ property گذرواژه نیز اختیاری است و در صورت نبود، گذرواژهٔ خالی در نظر گرفته می‌شود.",
+          "اگر میزبان، نام پایگاه داده یا نام کاربری موجود نباشد، آزمون طبق فرض JUnit اجرا را رد می‌کند."
+        ],
+        "expectedWorkflow": [
+          {
+            "id": "execute-mysql-live-workflow",
+            "label": "راستی‌آزمایی زندهٔ Execute با MySQL",
+            "kind": "group"
+          },
+          {
+            "id": "execute-setup",
+            "label": "آماده‌سازی اتصال و مقصد مجاز",
+            "kind": "group",
+            "parentId": "execute-mysql-live-workflow"
+          },
+          {
+            "id": "execute-parameter-binding",
+            "label": "آزمون فقط‌خواندنی پارامترها",
+            "kind": "group",
+            "parentId": "execute-mysql-live-workflow"
+          },
+          {
+            "id": "execute-insert-generated-key",
+            "label": "آزمون INSERT و generated key روی جدول اختصاصی",
+            "kind": "group",
+            "parentId": "execute-mysql-live-workflow"
+          },
+          {
+            "id": "execute-ddl",
+            "label": "آزمون DDL روی جدول اختصاصی",
+            "kind": "group",
+            "parentId": "execute-mysql-live-workflow"
+          },
+          {
+            "id": "execute-finalization",
+            "label": "ثبت نتیجه و بستن منابع",
+            "kind": "group",
+            "parentId": "execute-mysql-live-workflow"
+          },
+          {
+            "id": "read-test-connection-settings",
+            "label": "خواندن propertyها و تأیید میزبان، درگاه و پایگاه‌دادهٔ مجاز",
+            "kind": "step",
+            "parentId": "execute-setup"
+          },
+          {
+            "id": "verify-mysql-connectivity",
+            "label": "اتصال JDBC و ثبت نسخهٔ server، driver و Java",
+            "kind": "step",
+            "parentId": "execute-setup"
+          },
+          {
+            "id": "execute-bound-select",
+            "label": "اجرای SELECT فقط‌خواندنی با مقدارهای پارامتر پشتیبانی‌شده",
+            "kind": "step",
+            "parentId": "execute-parameter-binding"
+          },
+          {
+            "id": "verify-results-and-callback",
+            "label": "بررسی مقدارهای برگشتی، مدیریت null و اجرای دقیقاً یک callback",
+            "kind": "step",
+            "parentId": "execute-parameter-binding"
+          },
+          {
+            "id": "create-insert-test-table",
+            "label": "ساخت جدول یکتای دارای کلید اصلی auto-increment",
+            "kind": "step",
+            "parentId": "execute-insert-generated-key"
+          },
+          {
+            "id": "insert-and-check-generated-key",
+            "label": "اجرای INSERT و بررسی Success، نوع Long، مقدار key و callback",
+            "kind": "step",
+            "parentId": "execute-insert-generated-key"
+          },
+          {
+            "id": "verify-inserted-row",
+            "label": "تأیید اینکه generated key ردیف درج‌شده را پیدا می‌کند",
+            "kind": "step",
+            "parentId": "execute-insert-generated-key"
+          },
+          {
+            "id": "cleanup-insert-test-table",
+            "label": "حذف جدول INSERT در finally و حفظ خطای اصلی در صورت شکست cleanup",
+            "kind": "step",
+            "parentId": "execute-insert-generated-key"
+          },
+          {
+            "id": "create-ddl-test-table",
+            "label": "ساخت جدول DDL از مسیر manager:execute",
+            "kind": "step",
+            "parentId": "execute-ddl"
+          },
+          {
+            "id": "verify-ddl-result",
+            "label": "بررسی ExecuteResult.Success(true) و callback دقیقاً یک‌باره",
+            "kind": "step",
+            "parentId": "execute-ddl"
+          },
+          {
+            "id": "cleanup-ddl-test-table",
+            "label": "حذف جدول DDL در finally و حفظ خطای اصلی در صورت شکست cleanup",
+            "kind": "step",
+            "parentId": "execute-ddl"
+          },
+          {
+            "id": "record-gradle-junit-result",
+            "label": "ثبت نتیجهٔ Gradle و شمارش passed، failed و skipped",
+            "kind": "step",
+            "parentId": "execute-finalization"
+          },
+          {
+            "id": "close-result-set-and-restore-config",
+            "label": "بستن ResultSet و بازگرداندن تنظیمات قبلی پایگاه داده در هر تست",
+            "kind": "step",
+            "parentId": "execute-finalization"
+          }
+        ],
+        "expectedMigrations": [],
+        "verificationCategories": [
+          "اتصال به MySQL",
+          "اتصال پارامترهای JDBC",
+          "رفت‌وبرگشت مقدارهای نوع‌دار",
+          "پارامتر null",
+          "تعداد فراخوانی callback",
+          "چرخهٔ عمر ResultSet",
+          "INSERT و generated key",
+          "اجرای DDL از مسیر manager:execute",
+          "cleanup جدول‌های اختصاصی",
+          "ثبت runtime baseline"
+        ],
+        "runtime": {
+          "type": "test-runtime-json",
+          "schemaVersion": 2
+        }
+      },
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.manager.execute.manager.QueryExecuteMySqlIntegrationTest"
+      },
+      "parameters": [
+        {
+          "id": "db-host",
+          "label": "میزبان پایگاه داده",
+          "type": "text",
+          "required": true,
+          "default": "127.0.0.1",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.host"
+          }
+        },
+        {
+          "id": "db-port",
+          "label": "درگاه پایگاه داده",
+          "type": "number",
+          "required": true,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.port"
+          }
+        },
+        {
+          "id": "db-name",
+          "label": "نام پایگاه داده",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.name"
+          }
+        },
+        {
+          "id": "db-username",
+          "label": "نام کاربری",
+          "type": "text",
+          "required": true,
+          "default": "root",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.username"
+          }
+        },
+        {
+          "id": "db-password",
+          "label": "گذرواژه",
+          "type": "password",
+          "required": false,
+          "allowEmpty": true,
+          "secret": true,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.password"
+          }
+        }
+      ],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    }
+  ]
+}

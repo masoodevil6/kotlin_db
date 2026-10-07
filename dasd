@@ -1,0 +1,45 @@
+[33m97146f5[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m)[m rm plan big
+ plans/test/v2.0-help-test-module.md | Bin [31m3142749891[m -> [32m0[m bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+[33m0b23722[m develop help test
+ data_base/migration/build.gradle.kts               |   30 [32m+[m[31m-[m
+ data_base/migration/help.json                      |  530 [32m++++++++++[m
+ .../integration/MigrationSchemaIntegrationTest.kt  |  865 [32m++++++++++++++++[m
+ .../integration/MigrationSystemIntegrationTest.kt  |  707 [32m+++++++++++++[m
+ .../migration/integration/TestRuntimeRecorder.kt   |  325 [32m++++++[m
+ .../integration/TestRuntimeRecorderTest.kt         |  105 [32m++[m
+ help/README.md                                     |   50 [32m+[m
+ help/font/Vazir-Regular.ttf                        |  Bin [31m0[m -> [32m84856[m bytes
+ help/gradle/project-discovery.init.gradle          |   20 [32m+[m
+ help/public/app.js                                 | 1042 [32m++++++++++++++++++++[m
+ help/public/index.html                             |  110 [32m+++[m
+ help/public/styles.css                             |  337 [32m+++++++[m
+ help/public/vendor/BOOTSTRAP-LICENSE.txt           |   21 [32m+[m
+ help/public/vendor/bootstrap.rtl.min.css           |    5 [32m+[m
+ help/src/gradle-project-discovery.mjs              |   87 [32m++[m
+ help/src/gradle-test-runner.mjs                    |  297 [32m++++++[m
+ help/src/help-file-loader.mjs                      |  213 [32m++++[m
+ help/src/help-registry.mjs                         |   33 [32m+[m
+ help/src/parameter-validator.mjs                   |   30 [32m+[m
+ help/src/path-safety.mjs                           |   54 [32m+[m
+ help/src/report-server.mjs                         |   23 [32m+[m
+ help/src/runner-resolver.mjs                       |   22 [32m+[m
+ help/src/server.mjs                                |  150 [32m+++[m
+ help/test/help.test.mjs                            |  360 [32m+++++++[m
+ hs_err_pid21016.log                                |  222 [32m+++++[m
+ plans/README.md                                    |  351 [32m+++++[m[31m--[m
+ .../v1.21-migration-subsystem-integration-test.md  |  523 [32m++++++++++[m
+ ...1.2-migration-integration-test-configuration.md |  396 [32m++++++++[m
+ .../v1.21.3-test-database-refresh-option.md        |  439 [32m+++++++++[m
+ ...realistic-relational-schema-integration-test.md |  374 [32m+++++++[m
+ .../v1.22.2-database-wide-test-refresh.md          |  105 [32m++[m
+ plans/model/v1.1-model-traceability-plan.md        |  808 [32m+++++++++++++++[m
+ plans/model/v1.1-model-traceability-report.md      |  211 [32m++++[m
+ ...odel-dependency-boundary-traceability-report.md |  226 [32m+++++[m
+ .../v1.2-model-dependency-resolution-report.md     |  177 [32m++++[m
+ ...del-metadata-query-builder-traceability-plan.md |  491 [32m+++++++++[m
+ ...l-metadata-query-builder-traceability-report.md |  430 [32m++++++++[m
+ plans/test/v1.1-graphical-test-tool.md             |  317 [32m++++++[m
+ plans/test/v2.0-help-test-module.md                |  Bin [31m0[m -> [32m3142749891[m bytes
+ plans/test/v3.0-test-context-workflow-runtime.md   |  569 [32m+++++++++++[m
+ 40 files changed, 10969 insertions(+), 86 deletions(-)

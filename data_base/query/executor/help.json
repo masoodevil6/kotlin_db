@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "module": {
+    "title": "اجرای Query",
+    "description": "آزمون‌های قرارداد و مصرف نتیجهٔ Query به‌صورت Smart و سازگار با JDBC.",
+    "icon": "test"
+  },
+  "tests": [
+    {
+      "id": "query-executor-smart-query-result",
+      "title": "SmartQueryResultTest.kt — آزمون مصرف نتیجهٔ Query",
+      "description": "بررسی first/get، دسترسی QueryRow با alias، lifecycle مربوط به ResultSet، خطاها، حفظ پارامترها و رندر SQL.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.executer.manager.SmartQueryResultTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    }
+  ]
+}

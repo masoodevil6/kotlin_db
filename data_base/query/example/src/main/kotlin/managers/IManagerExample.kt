@@ -19,32 +19,35 @@ interface IManagerExample<ApiSelect , ApiInsert , ApiUpdate, ApiDelete> {
 
 
     fun renderExamples(queryManager: IQueryBuilderExecutor) {
+        fun <Api> executeExamples(examples: List<IExampleV1<Api>>) {
+            for (example in examples) {
+                try {
+                    example.execute(queryManager)
+                } catch (failure: Exception) {
+                    val exampleName = example::class.qualifiedName ?: example::class.simpleName ?: "unknown"
+                    println("Example $exampleName failed: ${failure.message}")
+                }
+            }
+        }
+
         /// selects Queries
         if (this.statusRunSelect){
-            for(exampleSelect in listExamplesSelect) {
-                exampleSelect.execute(queryManager)
-            }
+            executeExamples(listExamplesSelect)
         }
 
         /// insert Queries
         if (this.statusRunInsert){
-            for(exampleInsert in listExamplesInsert) {
-                exampleInsert.execute(queryManager)
-            }
+            executeExamples(listExamplesInsert)
         }
 
         /// update Queries
         if (this.statusRunUpdate){
-            for(exampleUpdate in listExamplesUpdate) {
-                exampleUpdate.execute(queryManager)
-            }
+            executeExamples(listExamplesUpdate)
         }
 
         /// delete Queries
         if (this.statusRunDelete){
-            for(exampleDelete in listExamplesDelete) {
-                exampleDelete.execute(queryManager)
-            }
+            executeExamples(listExamplesDelete)
         }
     }
 }

@@ -315,6 +315,13 @@ body {
 .ai-report-fallback { flex: 1 0 100%; min-height: 230px; direction: ltr; text-align: left; white-space: pre; font: .82rem/1.6 Consolas, monospace; }
 
 .report-panel iframe { display: block; width: 100%; min-height: 720px; border: 1px solid #e1e6f0; border-radius: 13px; background: #fff; }
+.action-process-output { margin-top: 1.25rem; }
+.action-output-view { min-width: 0; }
+.result-message[data-state="Failed"] { color: #b42335; }
+.result-message[data-state="Passed"] { color: #16835b; }
+.action-output-stream { margin-top: .75rem; border: 1px solid #dbe2ee; border-radius: 10px; overflow: hidden; }
+.action-output-stream summary { cursor: pointer; padding: .65rem .85rem; font-weight: 600; background: #f4f6fa; }
+.action-output-text { max-height: 32rem; overflow: auto; margin: 0; padding: 1rem; color: #e7edf7; background: #111827; direction: ltr; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font: .84rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .app-footer { padding: 22px 0 30px; color: #7a879b; font-size: .85rem; text-align: center; }
 
 @media (max-width: 767.98px) {

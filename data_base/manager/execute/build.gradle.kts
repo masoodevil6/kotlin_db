@@ -18,6 +18,17 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    listOf(
+        "execute.test.db.host",
+        "execute.test.db.port",
+        "execute.test.db.name",
+        "execute.test.db.username",
+        "execute.test.db.password",
+    ).forEach { propertyName ->
+        providers.gradleProperty(propertyName).orNull?.let { propertyValue ->
+            systemProperty(propertyName, propertyValue)
+        }
+    }
 }
 kotlin {
     jvmToolchain(24)

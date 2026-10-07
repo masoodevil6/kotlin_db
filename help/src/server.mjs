@@ -3,9 +3,10 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverGradleProjects } from './gradle-project-discovery.mjs';
-import { buildRegistry, findRegisteredTest, publicModules } from './help-registry.mjs';
+import { buildRegistry, findRegisteredAction, findRegisteredTest, publicModules } from './help-registry.mjs';
 import { validateParameters } from './parameter-validator.mjs';
 import { executeGradleTest } from './gradle-test-runner.mjs';
+import { executeGradleAction } from './gradle-action-runner.mjs';
 import { serveReportFile } from './report-server.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -65,7 +66,7 @@ function servePublic(response, pathname) {
   return true;
 }
 
-export function createHelpServer({ registry, projects = [...registry.values()], buildRoot: root = buildRoot, runGradleTest = executeGradleTest }) {
+export function createHelpServer({ registry, projects = [...registry.values()], buildRoot: root = buildRoot, runGradleTest = executeGradleTest, runGradleAction = executeGradleAction }) {
   const reportSessions = new Map();
   const server = http.createServer(async (request, response) => {
     try {
@@ -107,6 +108,54 @@ export function createHelpServer({ registry, projects = [...registry.values()], 
           message: result.message,
         });
       }
+      if (request.method === 'POST' && url.pathname === '/api/actions') {
+        const body = await readJson(request);
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Request body must be an object');
+        for (const key of Object.keys(body)) if (!['projectPath', 'actionId', 'parameters'].includes(key)) throw new Error(`Unknown request field '${key}'`);
+        if (typeof body.projectPath !== 'string' || typeof body.actionId !== 'string') throw new Error('projectPath and actionId are required');
+        const selected = findRegisteredAction(registry, body.projectPath, body.actionId);
+        if (!selected) return sendJson(response, 404, { error: 'Unknown Module or Action' });
+        const bindings = validateParameters({ parameters: selected.action.parameters ?? [] }, body.parameters ?? {});
+        const wantsStream = String(request.headers.accept ?? '').includes('text/event-stream');
+        const sendEvent = (event, payload) => {
+          if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+        };
+        if (wantsStream) {
+          response.writeHead(200, {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            'X-Content-Type-Options': 'nosniff',
+          });
+          response.flushHeaders?.();
+          sendEvent('started', { taskPath: selected.action.task === selected.action.id
+            ? (selected.module.projectPath === ':' ? `:${selected.action.task}` : `${selected.module.projectPath}:${selected.action.task}`)
+            : null });
+        }
+        const result = await runGradleAction({
+          buildRoot: root,
+          module: selected.module,
+          action: selected.action,
+          bindings,
+          onOutput: wantsStream ? (stream, data) => sendEvent('output', { stream, data }) : undefined,
+        });
+        const payload = {
+          executionStatus: result.status,
+          exitCode: result.exitCode,
+          taskPath: result.taskPath,
+          processDurationMs: result.processDurationMs,
+          stdout: result.stdout ?? '',
+          stderr: result.stderr ?? '',
+          outputTruncated: result.outputTruncated ?? false,
+          message: result.message,
+        };
+        if (wantsStream) {
+          sendEvent('completed', payload);
+          response.end();
+          return;
+        }
+        return sendJson(response, 200, payload);
+      }
       if (request.method === 'GET' && url.pathname.startsWith('/reports/')) {
         const [, , token, ...fileParts] = url.pathname.split('/');
         const session = reportSessions.get(token);
@@ -121,7 +170,7 @@ export function createHelpServer({ registry, projects = [...registry.values()], 
       if (request.method === 'GET' && servePublic(response, url.pathname)) return;
       sendJson(response, 404, { error: 'Not found' });
     } catch (error) {
-      const status = /too large/i.test(error.message) ? 413 : /Unknown Module or Test/.test(error.message) ? 404 : 400;
+      const status = /too large/i.test(error.message) ? 413 : /Unknown Module or (Test|Action)/.test(error.message) ? 404 : 400;
       sendJson(response, status, { error: error.message });
     }
   });

@@ -460,7 +460,7 @@ class MigrationSystemIntegrationTest {
                     alias("batch")
                 }
             }
-            .table { table("system_migration", "migration_history") }
+            .table { table("system_migration").alias("migration_history") }
             .order {
                 orderAsc()
                 addColumn { tableColumn("migration_history", "id") }

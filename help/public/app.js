@@ -4,7 +4,9 @@ const actionChoices = document.querySelector('#action-choices');
 const testSelect = document.querySelector('#test');
 const moduleDescription = document.querySelector('#module-description');
 const testDescription = document.querySelector('#test-description');
+const testPicker = document.querySelector('#test-picker');
 const parameterForm = document.querySelector('#parameters');
+const runParameterForm = document.querySelector('#run-parameters');
 const runButton = document.querySelector('#run');
 const result = document.querySelector('#result');
 const reportPanel = document.querySelector('#report-panel');
@@ -21,6 +23,9 @@ const moduleNext = document.querySelector('#module-next');
 const actionNext = document.querySelector('#action-next');
 const actionModuleSummary = document.querySelector('#action-module-summary');
 const testSelectionSummary = document.querySelector('#test-selection-summary');
+const moduleUses = document.querySelector('#module-uses');
+const runModuleSummary = document.querySelector('#run-module-summary');
+const buildModuleSummary = document.querySelector('#build-module-summary');
 let modules = [];
 let projectPaths = [];
 let moduleTree = { children: new Map() };
@@ -28,6 +33,7 @@ let selectedPathSegments = [];
 let currentStep = 'module';
 let latestOutcome = null;
 const MODULE_TEST_ACTION = 'module-test';
+const MODULE_TASK_PREFIX = 'module-task:';
 const WORKFLOW_ORDER = ['test', 'results'];
 
 function option(text, value) { const item = document.createElement('option'); item.textContent = text; item.value = value; return item; }
@@ -80,11 +86,25 @@ function selectedModule() {
   return modules.find((item) => item.projectPath === projectPath);
 }
 
+function selectedModuleTaskAction(module = selectedModule()) {
+  const actionId = actionSelect.value.startsWith(MODULE_TASK_PREFIX)
+    ? actionSelect.value.slice(MODULE_TASK_PREFIX.length)
+    : undefined;
+  return module?.actions?.find((action) => action.id === actionId);
+}
+
+function selectedModuleAction(module = selectedModule()) {
+  return actionSelect.value === MODULE_TEST_ACTION
+    ? { title: 'تست ماژول', description: 'اجرای تست انتخاب‌شده برای این ماژول.' }
+    : selectedModuleTaskAction(module);
+}
+
 function canOpenWorkflowStep(step) {
   if (step === 'module') return true;
   if (step === 'action') return Boolean(selectedProjectPath());
-  if (step === 'test') return Boolean(selectedProjectPath()) && actionSelect.value === MODULE_TEST_ACTION;
-  if (step === 'results') return Boolean(latestOutcome);
+  if (step === 'test') return Boolean(selectedProjectPath()) && actionSelect.value === MODULE_TEST_ACTION && Boolean(selectedModule()?.tests.length);
+  if (step === 'run' || step === 'build') return Boolean(selectedProjectPath()) && selectedModuleTaskAction()?.id === step;
+  if (step === 'results') return actionSelect.value === MODULE_TEST_ACTION && Boolean(latestOutcome);
   return false;
 }
 
@@ -92,10 +112,18 @@ function renderWorkflow() {
   const module = selectedModule();
   const projectPath = selectedProjectPath();
   actionModuleSummary.textContent = module ? `${module.module.title} · ${projectPath}` : (projectPath ?? '');
-  testSelectionSummary.textContent = module ? `${module.module.title} · تست ماژول` : '';
+  const selectedAction = selectedModuleAction(module);
+  testSelectionSummary.textContent = module && selectedAction ? `${module.module.title} · ${selectedAction.title}` : '';
 
   const actionFlowActive = currentStep === 'test' || currentStep === 'results';
   workflowNav.hidden = !actionFlowActive;
+  if (module) {
+    runModuleSummary.textContent = `${module.module.title} · ${module.projectPath} · Gradle task: ${module.projectPath === ':' ? ':run' : `${module.projectPath}:run`}`;
+    buildModuleSummary.textContent = `${module.module.title} · ${module.projectPath} · Gradle task: ${module.projectPath === ':' ? ':build' : `${module.projectPath}:build`}`;
+  } else {
+    runModuleSummary.textContent = '';
+    buildModuleSummary.textContent = '';
+  }
   for (const panel of workflowPanels) panel.hidden = panel.dataset.stepPanel !== currentStep;
   for (const button of workflowSteps.querySelectorAll('[data-step-target]')) {
     const step = button.dataset.stepTarget;
@@ -108,7 +136,12 @@ function renderWorkflow() {
       && WORKFLOW_ORDER.indexOf(step) < WORKFLOW_ORDER.indexOf(currentStep));
   }
   moduleNext.disabled = !projectPath;
-  actionNext.disabled = !canOpenWorkflowStep('test');
+  const taskAction = selectedModuleTaskAction(module);
+  const destination = taskAction?.id ?? 'test';
+  actionNext.disabled = !canOpenWorkflowStep(destination);
+  actionNext.textContent = taskAction?.id === 'run'
+    ? 'رفتن به نمای اجرای برنامه ←'
+    : taskAction?.id === 'build' ? 'رفتن به نمای ساخت ماژول ←' : 'ادامه به انتخاب تست ←';
 }
 
 function goToWorkflowStep(step) {
@@ -146,19 +179,23 @@ function restoreSelectionFromUrl() {
   const requestedAction = params.get('action');
   const requestedTest = params.get('test');
   const requestedTestIsValid = module?.tests.some((item) => item.id === requestedTest) ?? false;
-  if ((requestedAction === MODULE_TEST_ACTION && module?.tests.length) || (!requestedAction && requestedTestIsValid)) {
+  const requestedTaskActionIsValid = module?.actions?.some((item) => item.id === requestedAction?.slice(MODULE_TASK_PREFIX.length))
+    && requestedAction?.startsWith(MODULE_TASK_PREFIX);
+  if ((requestedAction === MODULE_TEST_ACTION && module?.tests.length) || requestedTaskActionIsValid || (!requestedAction && requestedTestIsValid)) {
     actionSelect.value = MODULE_TEST_ACTION;
+    if (requestedTaskActionIsValid) actionSelect.value = `${MODULE_TASK_PREFIX}${requestedAction.slice(MODULE_TASK_PREFIX.length)}`;
   }
   renderTests();
   if (actionSelect.value === MODULE_TEST_ACTION && requestedTestIsValid) testSelect.value = requestedTest;
   renderParameters();
 
+  const isTaskActionSelected = Boolean(selectedModuleTaskAction(module));
   const hasInvalidSelection = (requestedPath !== null && !requestedProjectPath)
     || (params.has('action') && actionSelect.value !== requestedAction)
     || (params.has('test') && (actionSelect.value !== MODULE_TEST_ACTION || !requestedTestIsValid));
   currentStep = actionSelect.value === MODULE_TEST_ACTION
     ? (requestedTestIsValid ? 'test' : 'action')
-    : 'module';
+    : isTaskActionSelected ? selectedModuleTaskAction(module).id : 'module';
   renderWorkflow();
   if (hasInvalidSelection) updateSelectionUrl('replace');
 }
@@ -237,46 +274,47 @@ function renderActions() {
   const projectPath = selectedProjectPath();
   const module = selectedModule();
   actionChoices.replaceChildren();
+  const hasActions = Boolean(module && (module.tests.length || module.actions?.length));
   actionSelect.replaceChildren(option(projectPath
-    ? (module?.tests.length ? 'انتخاب اکشن' : 'برای این ماژول اکشنی تعریف نشده است')
+    ? (hasActions ? 'انتخاب اکشن' : 'برای این ماژول اکشنی تعریف نشده است')
     : 'ابتدا ماژول را انتخاب کنید', ''));
-  if (module?.tests.length) actionSelect.append(option('تست ماژول', MODULE_TEST_ACTION));
-  actionSelect.disabled = !module || module.tests.length === 0;
+  if (module?.tests.length) actionSelect.append(option('تست‌های ماژول', MODULE_TEST_ACTION));
+  for (const action of module?.actions ?? []) actionSelect.append(option(action.title, `${MODULE_TASK_PREFIX}${action.id}`));
+  actionSelect.disabled = !hasActions;
   actionSelect.value = '';
 
   if (!projectPath || !module) {
     const emptyState = document.createElement('p');
     emptyState.className = 'action-empty-state';
-    emptyState.textContent = projectPath
-      ? 'برای این ماژول هنوز اکشنی تعریف نشده است.'
-      : 'ابتدا ماژول را انتخاب کنید.';
+    emptyState.textContent = projectPath ? 'برای این ماژول هنوز اکشنی تعریف نشده است.' : 'ابتدا ماژول را انتخاب کنید.';
     actionChoices.append(emptyState);
     return;
   }
 
-  if (module.tests.length) {
+  const definitions = [
+    ...(module.tests.length ? [{ id: MODULE_TEST_ACTION, title: 'تست‌های ماژول', description: `اجرای یکی از ${new Intl.NumberFormat('fa-IR').format(module.tests.length)} تست ثبت‌شده برای این ماژول.`, icon: '✓' }] : []),
+    ...(module.actions ?? []).map((action) => ({ ...action, id: `${MODULE_TASK_PREFIX}${action.id}`, icon: action.id === 'build' ? 'B' : '▶' })),
+  ];
+  for (const action of definitions) {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'action-card';
-    card.dataset.actionValue = MODULE_TEST_ACTION;
+    card.dataset.actionValue = action.id;
     card.setAttribute('role', 'radio');
     card.setAttribute('aria-checked', 'false');
-
     const icon = document.createElement('span');
     icon.className = 'action-card-icon';
     icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = '✓';
-
+    icon.textContent = action.icon;
     const content = document.createElement('span');
     content.className = 'action-card-content';
     const title = document.createElement('span');
     title.className = 'action-card-title';
-    title.textContent = 'تست ماژول';
+    title.textContent = action.title;
     const description = document.createElement('span');
     description.className = 'action-card-description';
-    description.textContent = `اجرای یکی از ${new Intl.NumberFormat('fa-IR').format(module.tests.length)} تست تعریف‌شده برای این ماژول.`;
+    description.textContent = action.description;
     content.append(title, description);
-
     const marker = document.createElement('span');
     marker.className = 'action-card-marker';
     marker.setAttribute('aria-hidden', 'true');
@@ -289,6 +327,17 @@ function renderTests() {
   const projectPath = selectedProjectPath();
   const module = selectedModule();
   const actionSelected = actionSelect.value === MODULE_TEST_ACTION;
+  const dependencies = module?.module.projectDependencies ?? [];
+  moduleUses.replaceChildren();
+  moduleUses.hidden = dependencies.length === 0;
+  if (dependencies.length) {
+    const heading = document.createElement('strong');
+    heading.textContent = 'ماژول‌های پروژه‌ای مورد استفاده: ';
+    const list = document.createElement('span');
+    list.textContent = dependencies.map((item) => `${item.path} (${item.scope})`).join('، ');
+    moduleUses.append(heading, list);
+  }
+
   testSelect.replaceChildren(option(!projectPath
     ? 'ابتدا ماژول را انتخاب کنید'
     : !actionSelected
@@ -297,18 +346,52 @@ function renderTests() {
   for (const test of (actionSelected ? module?.tests ?? [] : [])) testSelect.append(option(test.title, test.id));
   testSelect.disabled = !actionSelected || !module || module.tests.length === 0;
   moduleDescription.textContent = projectPath
-    ? (module ? (module.module.description ?? 'برای این ماژول توضیحی ثبت نشده است.') : 'این Gradle Project در حال حاضر تعریف تستی در Help ندارد.')
+    ? (module ? (module.module.description ?? 'برای این ماژول توضیحی ثبت نشده است.') : 'این Gradle Project در Help ثبت نشده است.')
     : '';
   testDescription.textContent = '';
   parameterForm.replaceChildren();
-  runButton.disabled = true;
+  renderRunActionParameters(module);
+  runButton.textContent = 'اجرای تست';
+  runButton.disabled = !actionSelected || !testSelect.value;
   latestOutcome = null;
   runSummary.replaceChildren();
   reportPanel.hidden = true;
   reportFrame.removeAttribute('src');
 }
 
-function faNumber(value) {
+function renderRunActionParameters(module) {
+  runParameterForm.replaceChildren();
+  const runAction = module?.actions?.find((action) => action.id === 'run');
+  for (const parameter of runAction?.parameters ?? []) {
+    const field = document.createElement('div');
+    field.className = parameter.type === 'boolean' ? 'parameter form-check' : 'parameter-field';
+    const label = document.createElement('label');
+    label.htmlFor = `run-param-${parameter.id}`;
+    label.textContent = parameter.label;
+    let input;
+    if (parameter.type === 'boolean') {
+      label.className = 'form-check-label';
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.className = 'form-check-input';
+      input.checked = parameter.default ?? false;
+      field.append(input, label);
+    } else {
+      label.className = 'form-label';
+      input = document.createElement('select');
+      input.className = 'form-select';
+      input.required = parameter.required;
+      input.append(option('', ''));
+      for (const item of parameter.options ?? []) input.append(option(item.label, item.value));
+      if (parameter.default !== undefined) input.value = parameter.default;
+      field.append(label, input);
+    }
+    input.id = `run-param-${parameter.id}`;
+    input.name = parameter.id;
+    if (parameter.description) field.append(summaryElement('p', 'form-text mb-0', parameter.description));
+    runParameterForm.append(field);
+  }
+}function faNumber(value) {
   return new Intl.NumberFormat('fa-IR').format(value ?? 0);
 }
 
@@ -344,18 +427,24 @@ function redactSecretValues(value, secrets) {
 function createAiHandoffMarkdown(outcome) {
   const data = outcome.testResults;
   const lines = [
-    '# گزارش اجرای تست',
+    outcome.actionInfo ? '# گزارش اجرای اکشن Gradle' : '# گزارش اجرای تست',
     '',
     `- زمان شروع: ${outcome.startedAt ?? 'نامشخص'}`,
     `- زمان گزارش: ${outcome.completedAt ?? new Date().toISOString()}`,
     `- وضعیت: ${outcome.executionStatus === 'Passed' ? 'موفق' : 'ناموفق'}`,
     `- ماژول: ${outcome.moduleInfo?.title ?? 'نامشخص'} (${outcome.moduleInfo?.projectPath ?? 'نامشخص'})`,
-    `- تست: ${outcome.testInfo?.title ?? 'نامشخص'} (${outcome.testInfo?.id ?? 'نامشخص'})`,
+    `- ${outcome.actionInfo ? 'اکشن' : 'تست'}: ${outcome.actionInfo?.title ?? outcome.testInfo?.title ?? 'نامشخص'} (${outcome.actionInfo?.id ?? outcome.testInfo?.id ?? 'نامشخص'})`,
   ];
 
   if (outcome.taskPath) lines.push(`- Gradle task: \`${markdownInline(outcome.taskPath)}\``);
   if (outcome.testFilter) lines.push(`- فیلتر Gradle: \`${markdownInline(outcome.testFilter)}\``);
   if (outcome.exitCode !== undefined && outcome.exitCode !== null) lines.push(`- کد خروج Gradle: ${outcome.exitCode}`);
+  if (outcome.actionInfo && (outcome.stdout || outcome.stderr)) {
+    lines.push('', '## خروجی واقعی فرایند');
+    if (outcome.stdout) lines.push('', '### stdout', '```text', outcome.stdout, '```');
+    if (outcome.stderr) lines.push('', '### stderr', '```text', outcome.stderr, '```');
+    if (outcome.outputTruncated) lines.push('', 'خروجی برای محدود کردن حجم بریده شده است.');
+  }
 
   lines.push('', '## داده‌های ورودی');
   for (const parameter of outcome.inputParameters ?? []) {
@@ -413,6 +502,32 @@ function createAiHandoffMarkdown(outcome) {
   return lines.join('\n');
 }
 
+function createLiveActionOutputView(outputContainer) {
+  outputContainer.replaceChildren();
+  const outputSection = summaryElement('section', 'action-process-output');
+  outputSection.append(summaryElement('h4', 'h6 mb-2', 'خروجی زندهٔ فرایند'));
+  const streams = {};
+  for (const name of ['stdout', 'stderr']) {
+    const details = document.createElement('details');
+    details.open = true;
+    details.className = 'action-output-stream';
+    details.append(summaryElement('summary', '', name));
+    const pre = summaryElement('pre', 'action-output-text', '');
+    details.append(pre);
+    outputSection.append(details);
+    streams[name] = pre;
+  }
+  outputContainer.append(outputSection);
+  return streams;
+}
+
+function appendLiveActionOutput(streams, stream, data) {
+  const target = streams[stream];
+  if (!target || !data) return;
+  target.append(document.createTextNode(data));
+  target.scrollTop = target.scrollHeight;
+}
+
 function renderRunSummary(outcome, test) {
   runSummary.replaceChildren();
   const status = outcome.executionStatus ?? 'Failed';
@@ -421,7 +536,7 @@ function renderRunSummary(outcome, test) {
   const overview = summaryElement('div', 'run-overview');
   const statusBadge = summaryElement('span', `run-status-badge ${status === 'Passed' ? 'is-passed' : 'is-failed'}`,
     status === 'Passed' ? 'موفق' : 'ناموفق');
-  const title = summaryElement('h3', 'h5 mb-1', test?.title ?? 'اجرای تست');
+  const title = summaryElement('h3', 'h5 mb-1', outcome.actionInfo?.title ?? test?.title ?? 'اجرای تست');
   const subtitle = summaryElement('p', 'mb-0 text-secondary', status === 'Passed'
     ? 'Gradle اجرای task را با موفقیت به پایان رساند.'
     : (outcome.message ?? 'Gradle اجرای task را با خطا به پایان رساند.'));
@@ -463,7 +578,10 @@ function renderRunSummary(outcome, test) {
       runSummary.append(summaryElement('p', 'run-data-source', 'Gradle فایل نتیجه تولید کرد، اما مورد تستی در آن ثبت نشده است.'));
     }
   } else {
-    runSummary.append(summaryElement('p', 'run-data-source', 'Gradle برای این اجرا فایل نتیجهٔ JUnit XML تولید نکرد؛ ممکن است task پیش از شروع تست‌ها متوقف شده باشد.'));
+    const message = outcome.actionInfo
+      ? 'این اکشن Gradle گزارش JUnit تولید نمی‌کند؛ وضعیت بالا نتیجهٔ خود task است.'
+      : 'Gradle برای این اجرا فایل نتیجهٔ JUnit XML تولید نکرد؛ ممکن است task پیش از شروع تست‌ها متوقف شده باشد.';
+    runSummary.append(summaryElement('p', 'run-data-source', message));
   }
 
   const execution = summaryElement('dl', 'run-execution-details');
@@ -476,6 +594,24 @@ function renderRunSummary(outcome, test) {
     execution.append(summaryElement('dt', '', label), summaryElement('dd', '', value));
   }
   if (details.length) runSummary.append(execution);
+  if (outcome.actionInfo) {
+    const outputSection = summaryElement('section', 'action-process-output');
+    outputSection.append(summaryElement('h4', 'h6 mb-2', 'خروجی واقعی فرایند'));
+    if (outcome.outputTruncated) outputSection.append(summaryElement('p', 'small text-warning', 'بخشی از خروجی به علت محدودیت حجم ذخیره نشده است.'));
+    for (const [label, value] of [['stdout', outcome.stdout], ['stderr', outcome.stderr]]) {
+      if (!value) continue;
+      const stream = document.createElement('details');
+      stream.open = true;
+      stream.className = 'action-output-stream';
+      stream.append(summaryElement('summary', '', label));
+      stream.append(summaryElement('pre', 'action-output-text', value));
+      outputSection.append(stream);
+    }
+    if (!outcome.stdout && !outcome.stderr) {
+      outputSection.append(summaryElement('p', 'small text-secondary mb-0', 'فرایند هیچ متنی در stdout یا stderr تولید نکرد.'));
+    }
+    runSummary.append(outputSection);
+  }
   const context = outcome.context ?? test?.context;
   if (context) runSummary.append(renderContextSection(context));
   runSummary.append(renderWorkflowSection(outcome.runtimeStatus, outcome.runtime, context, outcome.runtimeValidationError));
@@ -825,6 +961,9 @@ function renderExpectedActualSection(context, runtime) {
 
 function renderParameters() {
   const module = selectedModule();
+  testPicker.hidden = false;
+  parameterForm.hidden = false;
+  runButton.textContent = 'اجرای تست';
   const test = module?.tests.find((item) => item.id === testSelect.value);
   parameterForm.replaceChildren();
   testDescription.textContent = test?.description ?? '';
@@ -903,6 +1042,12 @@ function renderParameters() {
 }
 
 actionSelect.addEventListener('change', () => {
+  currentStep = 'action';
+  latestOutcome = null;
+  document.querySelector('#run-output').replaceChildren();
+  document.querySelector('#build-output').replaceChildren();
+  document.querySelector('#run-status').textContent = '';
+  document.querySelector('#build-status').textContent = '';
   for (const card of actionChoices.querySelectorAll('[data-action-value]')) {
     const selected = card.dataset.actionValue === actionSelect.value;
     card.classList.toggle('selected', selected);
@@ -922,9 +1067,16 @@ actionChoices.addEventListener('click', (event) => {
 });
 
 moduleNext.addEventListener('click', () => goToWorkflowStep('action'));
-actionNext.addEventListener('click', () => goToWorkflowStep('test'));
+actionNext.addEventListener('click', () => {
+  const taskAction = selectedModuleTaskAction();
+  goToWorkflowStep(taskAction?.id ?? 'test');
+});
 document.querySelector('#action-back').addEventListener('click', () => goToWorkflowStep('module'));
 document.querySelector('#test-back').addEventListener('click', () => goToWorkflowStep('action'));
+document.querySelector('#run-back').addEventListener('click', () => goToWorkflowStep('action'));
+document.querySelector('#build-back').addEventListener('click', () => goToWorkflowStep('action'));
+document.querySelector('#run-app').addEventListener('click', () => runModuleAction('run'));
+document.querySelector('#build-module').addEventListener('click', () => runModuleAction('build'));
 workflowSteps.addEventListener('click', (event) => {
   const button = event.target.closest('[data-step-target]');
   if (button && !button.disabled) goToWorkflowStep(button.dataset.stepTarget);
@@ -945,6 +1097,105 @@ testSelect.addEventListener('change', () => {
 });
 window.addEventListener('popstate', restoreSelectionFromUrl);
 parameterForm.addEventListener('submit', (event) => event.preventDefault());
+
+async function runModuleAction(actionId) {
+  const module = selectedModule();
+  const action = module?.actions?.find((item) => item.id === actionId);
+  if (!module || !action) return;
+
+  if (actionId === 'run' && !runParameterForm.reportValidity()) return;
+  const parameters = Object.fromEntries([...(action.parameters ?? [])]
+    .map((parameter) => {
+      const input = runParameterForm.elements.namedItem(parameter.id);
+      return [parameter.id, parameter.type === 'boolean' ? input.checked : input.value];
+    })
+    .filter(([parameterId, value]) => {
+      const parameter = action.parameters.find((item) => item.id === parameterId);
+      return parameter.type === 'boolean' || value !== '';
+    }));
+  currentStep = actionId;
+  renderWorkflow();
+  const button = document.querySelector(actionId === 'run' ? '#run-app' : '#build-module');
+  const status = document.querySelector(actionId === 'run' ? '#run-status' : '#build-status');
+  const outputContainer = document.querySelector(actionId === 'run' ? '#run-output' : '#build-output');
+  const outputStreams = createLiveActionOutputView(outputContainer);
+  const liveOutput = { stdout: '', stderr: '' };
+  const taskPath = module.projectPath === ':' ? `:${action.task}` : `${module.projectPath}:${action.task}`;
+
+  button.disabled = true;
+  status.removeAttribute('data-state');
+  status.textContent = actionId === 'run' ? 'برنامه در حال اجراست…' : 'ساخت ماژول در حال اجراست…';
+  try {
+    const response = await fetch('/api/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ projectPath: module.projectPath, actionId, parameters }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error ?? 'Gradle action request failed');
+    }
+
+    let outcome;
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('text/event-stream') && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      const consumeEvent = (block) => {
+        let eventName = 'message';
+        const dataLines = [];
+        for (const line of block.split(/\r?\n/)) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+        }
+        if (!dataLines.length) return;
+        const payload = JSON.parse(dataLines.join('\n'));
+        if (eventName === 'output') {
+          if (Object.hasOwn(liveOutput, payload.stream)) liveOutput[payload.stream] += payload.data;
+          appendLiveActionOutput(outputStreams, payload.stream, payload.data);
+        } else if (eventName === 'completed') outcome = payload;
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        let boundary;
+        while ((boundary = pending.indexOf('\n\n')) >= 0) {
+          consumeEvent(pending.slice(0, boundary));
+          pending = pending.slice(boundary + 2);
+        }
+        if (done) break;
+      }
+      if (pending.trim()) consumeEvent(pending);
+    } else {
+      outcome = await response.json();
+      for (const stream of ['stdout', 'stderr']) {
+        liveOutput[stream] = outcome[stream] ?? '';
+        appendLiveActionOutput(outputStreams, stream, liveOutput[stream]);
+      }
+    }
+    if (!outcome) throw new Error('Gradle stream ended before the final result arrived');
+    const succeeded = outcome.executionStatus === 'Passed';
+    status.dataset.state = outcome.executionStatus;
+    status.textContent = `${succeeded ? 'اجرا موفق بود' : 'اجرا ناموفق بود'} · ${taskPath} · exit ${outcome.exitCode ?? 'ناموجود'} · ${formatDuration(outcome.processDurationMs)}`;
+    if (outcome.outputTruncated) {
+      outputContainer.append(summaryElement('p', 'small text-warning mt-2', 'بخشی از خروجی به علت محدودیت حجم ذخیره نشده است.'));
+    }
+    if (!liveOutput.stdout && !liveOutput.stderr) {
+      outputContainer.append(summaryElement('p', 'small text-secondary mt-2', 'فرایند هیچ متنی در stdout یا stderr تولید نکرد.'));
+    }
+  } catch (error) {
+    status.dataset.state = 'Failed';
+    status.textContent = `اجرای ${taskPath} ناموفق بود: ${error.message}`;
+    if (!liveOutput.stdout && !liveOutput.stderr) {
+      outputContainer.append(summaryElement('p', 'small text-danger mt-2', error.message));
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
 runButton.addEventListener('click', async () => {
   const module = selectedModule();
   const test = module?.tests.find((item) => item.id === testSelect.value);

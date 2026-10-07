@@ -34,7 +34,9 @@ class MySqlQueryCapability :
         val queryBuilderOptionGroup =  ast.optionGroup;
         val queryBuilderOptionOrder =  ast.optionOrder;
 
-        return  " ${ctx.registry.render(queryBuilderWiths        , ctx.dialect  , QueryWithsData(_withPrefix = true))       } " +
+        val renderedWiths = ctx.registry.render(queryBuilderWiths, ctx.dialect, QueryWithsData(_withPrefix = true))
+
+        return  " ${renderedWiths.orEmpty()} " +
                 " ${ctx.registry.render(queryBuilderSelect       , ctx.dialect  , QuerySelectData(_withPrefix = true))       } " +
                 " ${ctx.registry.render(queryBuilderTable        , ctx.dialect  , QueryTableData(_withPrefix = true))       } " +
                 " ${ctx.registry.render(queryBuilderJoins        , ctx.dialect  , QueryJoinsData())                           } " +

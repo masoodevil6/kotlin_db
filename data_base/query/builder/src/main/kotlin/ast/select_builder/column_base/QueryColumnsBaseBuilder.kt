@@ -1,5 +1,8 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.column_base
 
+import gog.my_project.data_base.core.annotations.models.QBColumn
+import gog.my_project.data_base.core.annotations.models.QBTable
+import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column_base.IQueryColumnsBaseAst
@@ -12,6 +15,28 @@ class QueryColumnsBaseBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryColumnsBaseAst = QueryColumnsBaseAst(),
 ) : IQueryColumnsBaseApi {
+
+    override fun <T : IModelBase, R> tableColumn(
+        table: KClass<T>,
+        property: KProperty1<T, R>,
+        tableAlias: String,
+    ): IQueryColumnsBaseApi {
+        val tableMetadata = table.findAnnotation<QBTable>()
+            ?: throw IllegalArgumentException("${table.qualifiedName} must be annotated with @QBTable")
+        require(tableMetadata.name.isNotEmpty()) {
+            "@QBTable on ${table.qualifiedName} must declare a non-empty table name"
+        }
+
+        val columnMetadata = property.findAnnotation<QBColumn>()
+            ?: throw IllegalArgumentException("${property.name} on ${table.qualifiedName} must be annotated with @QBColumn")
+        require(columnMetadata.name.isNotEmpty()) {
+            "@QBColumn on ${table.qualifiedName}.${property.name} must declare a non-empty column name"
+        }
+
+        ast.tableAlias = tableAlias
+        ast.column = columnMetadata.name
+        return this
+    }
 
 
 

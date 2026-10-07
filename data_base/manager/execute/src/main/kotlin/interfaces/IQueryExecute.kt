@@ -1,140 +1,133 @@
 package gog.my_project.data_base.manager.execute.interfaces
 
-
+import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import java.sql.Connection
-import java.sql.Date
 import java.sql.PreparedStatement
 import java.sql.ResultSet
-import java.sql.SQLException
-import java.sql.Time
-import java.sql.Timestamp
-import java.sql.Types
 import kotlin.use
 
 interface IQueryExecute {
-
     /** Reads and parses server identity at the existing database manager boundary. */
     fun getDatabaseServerInfo(blockExecute: (ExecuteResult<DatabaseServerInfo>) -> Unit) {
         executeSelect(BuiltQuery("SELECT VERSION()", mutableListOf())) { result ->
-            when (result) {
-                is ExecuteResult.Failure -> blockExecute(result)
+            val parsedResult: ExecuteResult<DatabaseServerInfo> = when (result) {
+                is ExecuteResult.Failure -> result
                 is ExecuteResult.Success -> {
                     try {
                         val rawVersion = result.result?.use { rows ->
                             if (rows.next()) rows.getString(1) else null
                         }
                         if (rawVersion == null) {
-                            blockExecute(ExecuteResult.Failure(IllegalStateException("Database did not return its server version")))
+                            ExecuteResult.Failure(
+                                IllegalStateException("Database did not return its server version"),
+                            )
                         } else {
-                            blockExecute(ExecuteResult.Success(DatabaseServerInfo.parse(rawVersion)))
+                            ExecuteResult.Success(DatabaseServerInfo.parse(rawVersion))
                         }
                     } catch (error: Throwable) {
-                        blockExecute(ExecuteResult.Failure(error))
+                        ExecuteResult.Failure(error)
                     }
                 }
             }
+// Consumer callbacks are deliberately outside the catch above.
+            blockExecute(parsedResult)
         }
     }
-
-
-    /// -----------------------------------------------------
-    /// Crud level
-    /// -----------------------------------------------------
 
     fun executeSelect(
-        builtQuery:      BuiltQuery,
-        blockExecute:    (ExecuteResult<ResultSet>) -> Unit
-    );
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<ResultSet>) -> Unit,
+    )
 
     fun executeUpdate(
-        builtQuery:      BuiltQuery,
-        blockExecute:    (ExecuteResult<Int>) -> Unit
-    );
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    )
 
     fun executeInsert(
-        builtQuery:      BuiltQuery,
-        blockExecute:    (ExecuteResult<Long>) -> Unit
-    );
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Long>) -> Unit,
+    )
 
     fun executeDelete(
-        builtQuery:      BuiltQuery,
-        blockExecute:    (ExecuteResult<Int>) -> Unit
-    );
-
-
-
-
-    /// -----------------------------------------------------
-    /// Schema level
-    /// -----------------------------------------------------
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    )
 
     fun executeTable(
-        builtQuery:      BuiltQuery,
-        blockExecute:    (ExecuteResult<Boolean>) -> Unit
-    );
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+    )
 
-
-
-
-    /// -----------------------------------------------------
-    /// TOOLS
-    /// -----------------------------------------------------
+    /** Acquires the connection and invokes the operation once; operation code owns JDBC error delivery. */
     fun execute(
-        builtQuery:     BuiltQuery,
-        blockExecute:   (conn: Connection, query: String?, params: MutableList<SqlParameter<*>>, paramsName: List<String> , error: Throwable?) -> Unit
+        builtQuery: BuiltQuery,
+        blockExecute: (
+            conn: Connection,
+            query: String?,
+            params: MutableList<SqlParameter<*>>,
+            paramsName: List<String>,
+            error: Throwable?,
+        ) -> Unit,
     ) {
-        val query =        builtQuery.getReadyQuery();
-        val params =       builtQuery.params;
-        val paramsNames =  builtQuery.getListParamNames();
-        val connection =   DatabaseConnection().build();
+        val query = builtQuery.getReadyQuery()
+        val params = builtQuery.params
+        // This returns occurrence order and validates mismatches before a connection is opened.
+        // A null SQL input retains its legacy post-connection failure path.
+        val paramsNames = builtQuery.getListParamNames()
 
-        connection.use {conn->
-            if (query != null) {
-                try {
-                    blockExecute(conn, query , params , paramsNames , null)
-                }
-                catch (ex: SQLException){
-                    blockExecute(conn, query , params , paramsNames , ex)
-                }
-            }
-            else{
-                blockExecute(conn, query , params , paramsNames , Throwable("Error executing query "))
+        val connection = DatabaseConnection().build()
+        connection.use { conn ->
+            if (query == null) {
+                blockExecute(
+                    conn,
+                    null,
+                    params,
+                    paramsNames,
+                    IllegalArgumentException("BuiltQuery query must not be null"),
+                )
+            } else {
+                // Do not wrap this invocation in a SQLException catch: user callback exceptions
+                // must not be mistaken for JDBC failures and cause callback re-entry.
+                blockExecute(conn, query, params, paramsNames, null)
             }
         }
     }
 
+    /** Maps textual placeholder occurrences to JDBC indexes and delegates value binding. */
+    fun readyParamsInQuery(
+        ps: PreparedStatement?,
+        params: MutableList<SqlParameter<*>>,
+        paramsNames: List<String>,
+    ): PreparedStatement? {
+        if (ps == null) return null
 
-
-    fun readyParamsInQuery(ps : PreparedStatement?, params :MutableList<SqlParameter<*>>, paramsNames: List<String>) : PreparedStatement?{
-        if (ps != null){
-            for ((index , paramName) in paramsNames.withIndex()) {
-                for (paramData in params) {
-                    if (paramName == paramData.name) {
-                        when (paramData.sqlType) {
-                            Types.NULL ->       ps.setNull(index+1  , java.sql.Types.NULL)
-                            Types.INTEGER ->    ps.setInt(index+1, paramData.value as Int)
-                            Types.BIGINT ->     ps.setInt(index+1, paramData.value as Int)
-                            Types.DOUBLE ->     ps.setDouble(index+1, paramData.value as Double)
-                            Types.FLOAT ->      ps.setFloat(index+1, paramData.value as Float)
-                            Types.BOOLEAN ->    ps.setBoolean(index+1, paramData.value as Boolean)
-                            Types.VARCHAR ->    ps.setString(index+1, paramData.value as String?)
-                            Types.DATE ->       ps.setDate(index+1, paramData.value as Date?)
-                            Types.TIME ->       ps.setTime(index+1, paramData.value as Time?)
-                            Types.TIMESTAMP ->  ps.setTimestamp(index+1, paramData.value as Timestamp?)
-                            else ->             ps.setObject(index+1, paramData.value);
-                        }
-
-                    }
+        val parametersByName = linkedMapOf<String, SqlParameter<*>>()
+        for (parameter in params) {
+            val existing = parametersByName[parameter.name]
+            if (existing == null) {
+                parametersByName[parameter.name] = parameter
+            } else {
+                require(existing.value == parameter.value) {
+                    "Conflicting values supplied for parameter '${parameter.name}'"
+                }
+                require(existing.sqlType == parameter.sqlType) {
+                    "Conflicting SQL types supplied for parameter '${parameter.name}'"
                 }
             }
         }
 
-        return ps;
+        for ((index, parameterName) in paramsNames.withIndex()) {
+            val parameter = parametersByName[parameterName]
+                ?: throw IllegalArgumentException("Placeholder ':$parameterName' has no matching parameter")
+            parameter.bind(ps, index + 1)
+        }
+
+        return ps
     }
 
 }

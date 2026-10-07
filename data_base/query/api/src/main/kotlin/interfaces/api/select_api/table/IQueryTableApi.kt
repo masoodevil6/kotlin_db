@@ -8,17 +8,13 @@ import kotlin.reflect.KClass
 
 interface IQueryTableApi : IQueryApi<IQueryTableAst> {
 
-    //fun <T: IModelBase> table(table: KClass<T>): IQueryTableApi;
+    fun <T : IModelBase> table(table: KClass<T>): IQueryTableApi;
     //fun <T: ICte> cte(cte: KClass<T>): IQueryTableApi;
 
-    fun table(
-        table: String ,
-        alias: String
-    ): IQueryTableApi;
+    fun table(table: String): IQueryTableApi;
 
-    fun cte(
-        cte: String ,
-        alias: String
-    ): IQueryTableApi;
+    fun cte(cte: String): IQueryTableApi;
+
+    fun alias(alias: String): IQueryTableApi;
 
 }

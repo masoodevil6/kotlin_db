@@ -3,8 +3,6 @@ package gog.my_project.data_base.query.builder.cte.modules.users
 import gog.my_project.data_base.core.annotations.ctes.QBCte
 import gog.my_project.data_base.core.annotations.ctes.QBCteSelect
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.models.eloquent.modules.users.UserPhones
-import gog.my_project.data_base.models.eloquent.modules.users.Users
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.cte.ICte
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
@@ -86,13 +84,13 @@ class CteInfoUser(
                 }
             }
             .table{
-                table("user_users" , "uu")
+                table("user_users" ).alias("uu")
             }
             .joins {
                 addJoin {
                     innerJoin()
                     table {
-                        table("user_phones" , "up")
+                        table("user_phones" ).alias("up")
                     }
                     condition {
                         logicalOn()

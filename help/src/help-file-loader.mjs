@@ -18,15 +18,18 @@ function nonBlank(value, where) {
   return value;
 }
 
-function loadParameter(raw, index, testId) {
-  const where = `test '${testId}' parameter[${index}]`;
+function loadParameter(raw, index, ownerLabel, allowSelect = false) {
+  const where = `${ownerLabel} parameter[${index}]`;
   object(raw, where);
-  exactFields(raw, new Set(['id', 'label', 'description', 'type', 'required', 'allowEmpty', 'default', 'secret', 'minimum', 'maximum', 'validation', 'binding']), where);
+  exactFields(raw, new Set(['id', 'label', 'description', 'type', 'required', 'allowEmpty', 'default', 'secret', 'minimum', 'maximum', 'validation', 'options', 'binding']), where);
   const id = nonBlank(raw.id, `${where}.id`);
   if (/[\u0000-\u001f\u007f]/.test(id)) fail(`${where}.id`, 'must not contain control characters');
   const label = nonBlank(raw.label, `${where}.label`);
   const description = raw.description === undefined ? undefined : nonBlank(raw.description, `${where}.description`);
-  if (!['text', 'password', 'number', 'boolean'].includes(raw.type)) fail(`${where}.type`, 'unsupported parameter type');
+  const supportedTypes = allowSelect
+    ? ['text', 'password', 'number', 'boolean', 'select']
+    : ['text', 'password', 'number', 'boolean'];
+  if (!supportedTypes.includes(raw.type)) fail(`${where}.type`, 'unsupported parameter type');
   if (typeof raw.required !== 'boolean' || typeof raw.secret !== 'boolean') fail(where, 'required and secret must be booleans');
   if (raw.type === 'password' && raw.secret !== true) fail(where, 'password parameters must be marked secret');
   if (raw.type !== 'password' && raw.secret) fail(where, 'only password parameters may be secret');
@@ -43,6 +46,23 @@ function loadParameter(raw, index, testId) {
     if (raw[field] !== undefined && (!Number.isSafeInteger(raw[field]) || raw.type !== 'number')) fail(`${where}.${field}`, 'must be an integer bound for a number parameter');
   }
   if (raw.minimum !== undefined && raw.maximum !== undefined && raw.minimum > raw.maximum) fail(where, 'minimum must not exceed maximum');
+
+  let options;
+  if (raw.type === 'select') {
+    if (!Array.isArray(raw.options) || raw.options.length === 0) fail(`${where}.options`, 'must be a non-empty array for select parameters');
+    options = raw.options.map((option, optionIndex) => {
+      const optionWhere = `${where}.options[${optionIndex}]`;
+      object(option, optionWhere);
+      exactFields(option, new Set(['value', 'label']), optionWhere);
+      const value = nonBlank(option.value, `${optionWhere}.value`);
+      if (/[\u0000-\u001f\u007f]/.test(value)) fail(`${optionWhere}.value`, 'must not contain control characters');
+      return { value, label: nonBlank(option.label, `${optionWhere}.label`) };
+    });
+    if (new Set(options.map(({ value }) => value)).size !== options.length) fail(`${where}.options`, 'contains duplicate values');
+    if (raw.default !== undefined && !options.some(({ value }) => value === raw.default)) fail(`${where}.default`, 'must match one of the select option values');
+  } else if (raw.options !== undefined) {
+    fail(`${where}.options`, 'is supported only for select parameters');
+  }
 
   let validation;
   if (raw.validation !== undefined) {
@@ -66,7 +86,7 @@ function loadParameter(raw, index, testId) {
   exactFields(raw.binding, new Set(['type', 'name']), `${where}.binding`);
   if (raw.binding.type !== 'gradle-project-property') fail(`${where}.binding.type`, 'only gradle-project-property is supported');
   if (typeof raw.binding.name !== 'string' || !PROPERTY_PATTERN.test(raw.binding.name)) fail(`${where}.binding.name`, 'is not a valid Gradle project property name');
-  return { id, label, description, type: raw.type, required: raw.required, allowEmpty: raw.allowEmpty ?? false, default: raw.default, secret: raw.secret, minimum: raw.minimum, maximum: raw.maximum, validation, binding: { type: raw.binding.type, name: raw.binding.name } };
+  return { id, label, description, type: raw.type, required: raw.required, allowEmpty: raw.allowEmpty ?? false, default: raw.default, secret: raw.secret, minimum: raw.minimum, maximum: raw.maximum, validation, options, binding: { type: raw.binding.type, name: raw.binding.name } };
 }
 
 function loadContext(raw, where) {
@@ -161,7 +181,7 @@ function loadTest(raw, index, projectPath, schemaVersion) {
   const testFilter = nonBlank(raw.runner.testFilter, `${where}.runner.testFilter`);
   if (testFilter.length > 512 || /[\u0000-\u001f]/.test(testFilter)) fail(`${where}.runner.testFilter`, 'contains unsupported characters');
   if (!Array.isArray(raw.parameters)) fail(`${where}.parameters`, 'must be an array');
-  const parameters = raw.parameters.map((parameter, parameterIndex) => loadParameter(parameter, parameterIndex, id));
+  const parameters = raw.parameters.map((parameter, parameterIndex) => loadParameter(parameter, parameterIndex, `test '${id}'`));
   const parameterIds = new Set();
   const bindings = new Set();
   for (const parameter of parameters) {
@@ -189,10 +209,39 @@ export function loadHelpDefinition(project, icons = ICONS) {
   exactFields(raw, ROOT_FIELDS, `${project.projectPath}/help.json`);
   if (![1, 2].includes(raw.schemaVersion)) fail(`${project.projectPath}/help.json.schemaVersion`, 'only schema versions 1 and 2 are supported');
   object(raw.module, `${project.projectPath}/help.json.module`);
-  exactFields(raw.module, new Set(['title', 'description', 'icon']), `${project.projectPath}/help.json.module`);
+  exactFields(raw.module, new Set(['title', 'description', 'icon', 'actions', 'projectDependencies']), `${project.projectPath}/help.json.module`);
   const title = nonBlank(raw.module.title, `${project.projectPath}/help.json.module.title`);
   if (raw.module.description !== undefined && typeof raw.module.description !== 'string') fail(`${project.projectPath}/help.json.module.description`, 'must be a string');
   if (raw.module.icon !== undefined && (!icons.has(raw.module.icon))) fail(`${project.projectPath}/help.json.module.icon`, 'unknown icon identifier');
+  if (raw.module.actions !== undefined && !Array.isArray(raw.module.actions)) fail(`${project.projectPath}/help.json.module.actions`, 'must be an array');
+  const actions = (raw.module.actions ?? []).map((action, index) => {
+    const where = `${project.projectPath}/help.json.module.actions[${index}]`;
+    object(action, where);
+    exactFields(action, new Set(['id', 'title', 'description', 'task', 'parameters']), where);
+    const id = nonBlank(action.id, `${where}.id`);
+    if (!['build', 'run'].includes(id)) fail(`${where}.id`, "only 'build' and 'run' actions are supported");
+    if (action.task !== id) fail(`${where}.task`, 'must match the allow-listed action id');
+    const rawParameters = action.parameters ?? [];
+    if (!Array.isArray(rawParameters)) fail(`${where}.parameters`, 'must be an array');
+    if (id !== 'run' && rawParameters.length > 0) fail(`${where}.parameters`, 'parameters are supported only for the run action');
+    const parameters = rawParameters.map((parameter, parameterIndex) => loadParameter(parameter, parameterIndex, `action '${id}'`, id === 'run'));
+    if (parameters.some((parameter) => !['select', 'boolean'].includes(parameter.type))) fail(`${where}.parameters`, 'run action supports select and boolean parameters only');
+    if (new Set(parameters.map(({ id: parameterId }) => parameterId)).size !== parameters.length) fail(`${where}.parameters`, 'contains duplicate parameter ids');
+    if (new Set(parameters.map(({ binding }) => binding.name)).size !== parameters.length) fail(`${where}.parameters`, 'contains duplicate parameter bindings');
+    return { id, title: nonBlank(action.title, `${where}.title`), description: nonBlank(action.description, `${where}.description`), task: action.task, parameters };
+  });
+  if (new Set(actions.map((action) => action.id)).size !== actions.length) fail(`${project.projectPath}/help.json.module.actions`, 'contains duplicate action ids');
+  if (raw.module.projectDependencies !== undefined && !Array.isArray(raw.module.projectDependencies)) fail(`${project.projectPath}/help.json.module.projectDependencies`, 'must be an array');
+  const projectDependencies = (raw.module.projectDependencies ?? []).map((dependency, index) => {
+    const where = `${project.projectPath}/help.json.module.projectDependencies[${index}]`;
+    object(dependency, where);
+    exactFields(dependency, new Set(['path', 'scope']), where);
+    const dependencyPath = nonBlank(dependency.path, `${where}.path`);
+    if (!/^:[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)*$/.test(dependencyPath)) fail(`${where}.path`, 'must be a Gradle project path');
+    if (!['implementation', 'testImplementation'].includes(dependency.scope)) fail(`${where}.scope`, "must be 'implementation' or 'testImplementation'");
+    return { path: dependencyPath, scope: dependency.scope };
+  });
+  if (new Set(projectDependencies.map(({ path }) => path)).size !== projectDependencies.length) fail(`${project.projectPath}/help.json.module.projectDependencies`, 'contains duplicate project paths');
   if (raw.tests !== undefined && !Array.isArray(raw.tests)) fail(`${project.projectPath}/help.json.tests`, 'must be an array');
   const tests = (raw.tests ?? []).map((test, index) => loadTest(test, index, project.projectPath, raw.schemaVersion));
   const testIds = new Set();
@@ -204,7 +253,7 @@ export function loadHelpDefinition(project, icons = ICONS) {
     projectPath: project.projectPath,
     schemaVersion: raw.schemaVersion,
     helpProjectRoot: projectRoot,
-    module: { title, description: raw.module.description, icon: raw.module.icon },
+    module: { title, description: raw.module.description, icon: raw.module.icon, actions, projectDependencies },
     hasTestsCapability: raw.tests !== undefined,
     tests,
   };

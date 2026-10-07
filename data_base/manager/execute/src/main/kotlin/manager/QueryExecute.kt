@@ -8,155 +8,170 @@ import java.sql.SQLException
 import java.sql.Statement
 import kotlin.use
 
-class QueryExecute(
-
-) : IQueryExecute {
-
-
-    /// -----------------------------------------------------
-    /// Crud level
-    /// -----------------------------------------------------
+class QueryExecute : IQueryExecute {
     override fun executeSelect(
         builtQuery: BuiltQuery,
-        blockExecute: (ExecuteResult<ResultSet>) -> Unit
+        blockExecute: (ExecuteResult<ResultSet>) -> Unit,
     ) {
-        this.execute(
-            builtQuery = builtQuery ,
-            blockExecute =  {
-                conn , query , params , paramsNames , error ->
-                if (error != null) {
-                    blockExecute(ExecuteResult.Failure(error))
-                    return@execute
-                }
-                else{
-                    conn.prepareStatement(query).use { stmt ->
-                        val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-                        val resultExecute = ps?.executeQuery();
-                        blockExecute(ExecuteResult.Success(resultExecute));
-                    }
-                }
+        execute(builtQuery) { conn, query, params, paramsNames, error ->
+            if (error != null) {
+                blockExecute(ExecuteResult.Failure(error))
+                return@execute
             }
-        )
-    }
 
+            val statement = try {
+                conn.prepareStatement(requireNotNull(query))
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@execute
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<ResultSet> = try {
+                    val prepared = requireNotNull(readyParamsInQuery(stmt, params, paramsNames))
+                    ExecuteResult.Success(prepared.executeQuery())
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
+                }
+                // The ResultSet is live here. Consumer exceptions are outside the JDBC catch.
+                blockExecute(result)
+            }
+        }
+    }
 
     override fun executeInsert(
         builtQuery: BuiltQuery,
-        blockExecute: (ExecuteResult<Long>) -> Unit
+        blockExecute: (ExecuteResult<Long>) -> Unit,
     ) {
-        this.execute(
-            builtQuery = builtQuery ,
-            blockExecute =  {
-                conn , query , params , paramsNames , error ->
-                if (error != null) {
-                    blockExecute(ExecuteResult.Failure(error))
-                    return@execute
-                }
-                else{
-                    conn.prepareStatement(query , Statement.RETURN_GENERATED_KEYS).use { stmt ->
-                        val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-                        val effectedRows = ps?.executeUpdate();
-                        if (effectedRows != null && effectedRows > 0) {
-                            ps.generatedKeys.use { keys ->
-                                if (keys.next()){
-                                    val newId = keys.getLong(1);
-                                    blockExecute(ExecuteResult.Success(newId));
-                                }
-                                else{
-                                    ExecuteResult.Failure(Throwable("No generated key returned"))
-                                }
+        execute(builtQuery) { conn, query, params, paramsNames, error ->
+            if (error != null) {
+                blockExecute(ExecuteResult.Failure(error))
+                return@execute
+            }
+
+            val statement = try {
+                conn.prepareStatement(requireNotNull(query), Statement.RETURN_GENERATED_KEYS)
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@execute
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<Long> = try {
+                    val prepared = requireNotNull(readyParamsInQuery(stmt, params, paramsNames))
+                    val affectedRows: Int? = prepared.executeUpdate()
+                    when {
+                        affectedRows == null -> ExecuteResult.Failure(
+                            IllegalStateException("INSERT did not report an affected-row count"),
+                        )
+                        affectedRows <= 0 -> ExecuteResult.Failure(
+                            IllegalStateException("INSERT did not affect any rows"),
+                        )
+                        else -> {
+                            val generatedKey = prepared.generatedKeys.use { keys ->
+                                if (keys.next()) keys.getLong(1) else null
+                            }
+                            if (generatedKey == null) {
+                                ExecuteResult.Failure(IllegalStateException("No generated key returned"))
+                            } else {
+                                ExecuteResult.Success(generatedKey)
                             }
                         }
                     }
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
                 }
-
+                // Generated keys have been closed before the one terminal callback.
+                blockExecute(result)
             }
-        )
+        }
     }
-
 
     override fun executeUpdate(
         builtQuery: BuiltQuery,
-        blockExecute: (ExecuteResult<Int>) -> Unit
+        blockExecute: (ExecuteResult<Int>) -> Unit,
     ) {
-
-        this.execute(
-            builtQuery = builtQuery ,
-            blockExecute =  {
-                    conn , query , params , paramsNames , error ->
-                if (error != null) {
-                    blockExecute(ExecuteResult.Failure(error))
-                    return@execute
-                }
-                else{
-                    conn.prepareStatement(query ).use { stmt ->
-                        val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-                        val effectedRows = ps?.executeUpdate();
-                        blockExecute(ExecuteResult.Success(effectedRows));
-                    }
-                }
+        execute(builtQuery) { conn, query, params, paramsNames, error ->
+            if (error != null) {
+                blockExecute(ExecuteResult.Failure(error))
+                return@execute
             }
-        )
 
+            val statement = try {
+                conn.prepareStatement(requireNotNull(query))
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@execute
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<Int> = try {
+                    val prepared = requireNotNull(readyParamsInQuery(stmt, params, paramsNames))
+                    ExecuteResult.Success(prepared.executeUpdate())
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
+                }
+                blockExecute(result)
+            }
+        }
     }
-
 
     override fun executeDelete(
-        builtQuery:   BuiltQuery,
-        blockExecute: (ExecuteResult<Int>) -> Unit
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
     ) {
-
-        this.execute(
-            builtQuery = builtQuery ,
-            blockExecute =  {
-                    conn , query , params , paramsNames , error ->
-                if (error != null) {
-                    blockExecute(ExecuteResult.Failure(error))
-                    return@execute
-                }
-                else{
-                    conn.prepareStatement(query ).use { stmt ->
-                        val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-                        val effectedRows = ps?.executeUpdate();
-                        blockExecute(ExecuteResult.Success(effectedRows));
-                    }
-                }
+        execute(builtQuery) { conn, query, params, paramsNames, error ->
+            if (error != null) {
+                blockExecute(ExecuteResult.Failure(error))
+                return@execute
             }
-        )
 
+            val statement = try {
+                conn.prepareStatement(requireNotNull(query))
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@execute
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<Int> = try {
+                    val prepared = requireNotNull(readyParamsInQuery(stmt, params, paramsNames))
+                    ExecuteResult.Success(prepared.executeUpdate())
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
+                }
+                blockExecute(result)
+            }
+        }
     }
 
-
-
-
-    /// -----------------------------------------------------
-    /// Schema level
-    /// -----------------------------------------------------
-    // create table | alter table | drop table
     override fun executeTable(
         builtQuery: BuiltQuery,
-        blockExecute: (ExecuteResult<Boolean>) -> Unit
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
     ) {
-
-        this.execute(
-            builtQuery = builtQuery ,
-            blockExecute =  {
-                    conn , query , params , paramsNames , error ->
-                if (error != null) {
-                    blockExecute(ExecuteResult.Failure(error))
-                    return@execute
-                }
-                else{
-                    conn.prepareStatement(query ).use { stmt ->
-                        val ps = this.readyParamsInQuery(stmt , params , paramsNames);
-                        ps?.execute();
-                        // Statement.execute() returns false for successful DDL because it produced no ResultSet.
-                        blockExecute(ExecuteResult.Success(true));
-                    }
-                }
+        execute(builtQuery) { conn, query, params, paramsNames, error ->
+            if (error != null) {
+                blockExecute(ExecuteResult.Failure(error))
+                return@execute
             }
-        )
 
+            val statement = try {
+                conn.prepareStatement(requireNotNull(query))
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@execute
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<Boolean> = try {
+                    val prepared = requireNotNull(readyParamsInQuery(stmt, params, paramsNames))
+                    prepared.execute() // The JDBC boolean is intentionally not exposed.
+                    ExecuteResult.Success(true)
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
+                }
+                blockExecute(result)
+            }
+        }
     }
-
 }

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadHelpDefinition } from '../src/help-file-loader.mjs';
-import { buildRegistry, publicModules } from '../src/help-registry.mjs';
+import { buildRegistry, findRegisteredAction, publicModules } from '../src/help-registry.mjs';
 import { validateParameters } from '../src/parameter-validator.mjs';
 import { resolveGradleTestRun } from '../src/runner-resolver.mjs';
 import { executionOutcome, prepareReportDirectory, executeGradleTest, isFreshReportAvailable } from '../src/gradle-test-runner.mjs';
@@ -118,19 +118,54 @@ test('rejects missing, unreadable and escaping help definitions', (t) => {
   assert.throws(() => resolveContainedPath(projectDir, path.resolve(projectDir, 'absolute')), /Absolute paths/);
 });
 
-test('registry omits opted-out projects and keeps duplicate Test IDs scoped to Project', (t) => {
+test('registry exposes build/run actions for projects without help.json and keeps test IDs project-scoped', (t) => {
   const root = fixture(t);
   const one = path.join(root, 'one'); const two = path.join(root, 'two'); const noHelp = path.join(root, 'no-help');
   for (const directory of [one, two, noHelp]) fs.mkdirSync(directory);
   writeDefinition(one, definition()); writeDefinition(two, definition());
   const registry = buildRegistry([
-    { projectPath: ':one', projectDir: one },
-    { projectPath: ':two', projectDir: two },
-    { projectPath: ':opt-out', projectDir: noHelp },
+    { projectPath: ':one', projectDir: one, hasBuildTask: true, hasRunTask: true },
+    { projectPath: ':two', projectDir: two, hasBuildTask: true, hasRunTask: false },
+    { projectPath: ':opt-out', projectDir: noHelp, hasBuildTask: true, hasRunTask: false },
   ]);
-  assert.deepEqual([...registry.keys()], [':one', ':two']);
-  assert.equal(publicModules(registry).length, 2);
+  assert.deepEqual([...registry.keys()], [':one', ':two', ':opt-out']);
+  const publishedModules = publicModules(registry);
+  assert.equal(publishedModules.length, 3);
+  assert.deepEqual(publishedModules.find(({ projectPath }) => projectPath === ':opt-out').actions.map(({ id }) => id), ['build']);
+  assert.deepEqual(registry.get(':opt-out').module.actions.map(({ id }) => id), ['build']);
+  assert.deepEqual(registry.get(':one').module.actions.map(({ id }) => id), ['build', 'run']);
+  assert.equal(registry.get(':opt-out').tests.length, 0);
+  assert.equal(findRegisteredAction(registry, ':opt-out', 'build').action.task, 'build');
+  assert.equal(findRegisteredAction(registry, ':opt-out', 'run'), null);
   assert.throws(() => buildRegistry([{ projectPath: ':same', projectDir: one }, { projectPath: ':same', projectDir: two }]), /Duplicate Gradle Project path/);
+});
+
+test('HTTP action endpoint runs the generated build action for a project without help.json', async (t) => {
+  const projectDir = fixture(t);
+  const registry = buildRegistry([
+    { projectPath: ':without-help', projectDir, hasBuildTask: true, hasRunTask: false },
+  ]);
+  let executedAction;
+  const server = createHelpServer({
+    registry,
+    runGradleAction: async (input) => {
+      executedAction = input;
+      return { status: 'Passed', exitCode: 0, taskPath: ':without-help:build' };
+    },
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  t.after(() => { server.closeAllConnections(); server.close(); });
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectPath: ':without-help', actionId: 'build' }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.executionStatus, 'Passed');
+  assert.equal(executedAction.module.projectPath, ':without-help');
+  assert.equal(executedAction.action.task, 'build');
 });
 
 test('parameters validate by declared type and preserve submitted strings exactly', (t) => {

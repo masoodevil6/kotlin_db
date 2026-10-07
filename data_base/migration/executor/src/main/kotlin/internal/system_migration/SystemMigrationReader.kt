@@ -16,7 +16,7 @@ internal class SystemMigrationReader(
             addColumn { column { tableAttribute("migration") } }
             addColumn { column { tableAttribute("batch") } }
         }
-        queryBuilder.table { table(SystemMigrationTable.NAME, "") }
+        queryBuilder.table { table(SystemMigrationTable.NAME).alias("") }
         queryBuilder.order {
             addColumn { tableAttribute("id") }
             orderAsc()
