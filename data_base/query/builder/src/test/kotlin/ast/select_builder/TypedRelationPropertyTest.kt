@@ -63,6 +63,8 @@ class TypedRelationPropertyTest {
         assertEquals("user_stats", relation.name)
         assertEquals(UserStatsDeclaration::class, (relation as BuiltQueryRelation).declarationOwner)
         assertEquals("age", output.ColumnAlias)
+        assertEquals(UserStatsDeclaration::age, output.PropertyReference)
+        assertEquals(gog.my_project.data_base.query.ast.enums.DataType.INT, output.ExecutionType)
         assertTrue(MySqlDialect().render(relation.definition.ast)!!.contains("As age"))
     }
 
@@ -75,10 +77,14 @@ class TypedRelationPropertyTest {
             }
 
         val source = query.ast.select!!.columns.single().Column!!
+        val output = query.ast.select!!.columns.single()
         assertEquals("user_stats", query.ast.table!!.cte)
         assertEquals("user_stats", query.ast.table!!.cteAlias)
         assertEquals("user_stats", source.cteAlias)
         assertEquals("age", source.select)
+        assertEquals("age", output.ColumnAlias)
+        assertEquals(gog.my_project.data_base.query.ast.enums.DataType.INT, output.ExecutionType)
+        assertEquals(UserStatsDeclaration::age, output.PropertyReference)
     }
 
     @Test

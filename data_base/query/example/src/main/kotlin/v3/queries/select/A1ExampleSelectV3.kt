@@ -2,8 +2,6 @@ package gog.my_project.data_base.query.example.v3.queries.select
 
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
-import gog.my_project.data_base.query.builder.ast.select_builder.requireResultOutputAliases
-import gog.my_project.data_base.query.ast.enums.DataType
 
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
@@ -18,17 +16,15 @@ class A1ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
             "details",
         )
         .select {
-            addColumn { relationColumn(UserPhoneRelationV3::id, "details"); alias(UserPhoneRelationV3::id); execute(DataType.LONG) }
-            addColumn { relationColumn(UserPhoneRelationV3::name, "details"); alias(UserPhoneRelationV3::name); execute(DataType.STRING) }
-            addColumn { relationColumn(UserPhoneRelationV3::family, "details"); alias(UserPhoneRelationV3::family); execute(DataType.STRING) }
-            addColumn { relationColumn(UserPhoneRelationV3::age, "details"); alias(UserPhoneRelationV3::age); execute(DataType.INT) }
-            addColumn { relationColumn(UserPhoneRelationV3::phone, "details"); alias(UserPhoneRelationV3::phone); execute(DataType.STRING) }
+            addColumn { relationColumn(UserPhoneRelationV3::id, "details") }
+            addColumn { relationColumn(UserPhoneRelationV3::name, "details") }
+            addColumn { relationColumn(UserPhoneRelationV3::family, "details") }
+            addColumn { relationColumn(UserPhoneRelationV3::age, "details") }
+            addColumn { relationColumn(UserPhoneRelationV3::phone, "details") }
         }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         val query = query()
-        val aliases = query.requireResultOutputAliases()
-
         queryManager
             .queryBuilder(query)
             .sql { (queryText, params) ->
@@ -37,7 +33,13 @@ class A1ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
             .execute()
             .success { rows ->
                 rows.forEach { row ->
-                    println(aliases.joinToString(prefix = "row: ") { alias -> "$alias=${row[alias]}" })
+                    println(
+                        "row: id=${row.getValue(UserPhoneRelationV3::id)}, " +
+                            "name=${row.getValue(UserPhoneRelationV3::name)}, " +
+                            "family=${row.getValue(UserPhoneRelationV3::family)}, " +
+                            "age=${row.getValue(UserPhoneRelationV3::age)}, " +
+                            "phone=${row.getValue(UserPhoneRelationV3::phone)}",
+                    )
                 }
                 rows
             }

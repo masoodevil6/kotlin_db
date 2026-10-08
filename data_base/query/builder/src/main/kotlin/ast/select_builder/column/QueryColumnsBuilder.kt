@@ -40,6 +40,7 @@ class QueryColumnsBuilder internal constructor(
 
     private var explicitAliasWasSet = false
     internal val hasExplicitAlias: Boolean get() = explicitAliasWasSet
+    private var explicitExecutionTypeWasSet = ast.ExecutionType != null
 
 
     /* ==============================================================
@@ -48,6 +49,7 @@ class QueryColumnsBuilder internal constructor(
 
     override fun method(method: SqlMethodColumn): IQueryColumnsApi {
         this.ast.ColumnMethod = method.value;
+        clearPropertyReferenceAndInferredExecutionType()
         return this;
     }
 
@@ -73,6 +75,7 @@ class QueryColumnsBuilder internal constructor(
 
     override fun execute(dataType: DataType): IQueryColumnsApi {
         ast.ExecutionType = dataType
+        explicitExecutionTypeWasSet = true
         return this
     }
 
@@ -89,6 +92,8 @@ class QueryColumnsBuilder internal constructor(
             ast
         ).apply(blockColumn);
         this.ast.Column = ast;
+        this.ast.PropertyReference = null
+        clearInferredExecutionType()
         if (!explicitAliasWasSet) {
             this.ast.ColumnAlias = null
         }
@@ -118,16 +123,48 @@ class QueryColumnsBuilder internal constructor(
         modelAliasContext.registerColumn(table, baseAst)
         this.ast.Column = baseAst
 
+        if (ast.ColumnMethod == null) {
+            ast.PropertyReference = property
+            inferExecutionType(property)
+        } else {
+            ast.PropertyReference = null
+            clearInferredExecutionType()
+        }
+
         if (!explicitAliasWasSet) {
-            this.ast.ColumnAlias = columnMetadata.alias.takeIf { it.isNotEmpty() }
+            this.ast.ColumnAlias = columnMetadata.alias.takeIf { it.isNotEmpty() } ?: property.name
         }
         return this
+    }
+
+    private fun inferExecutionType(property: KProperty1<*, *>) {
+        if (explicitExecutionTypeWasSet) return
+
+        val propertyType = property.returnType.classifier as? KClass<*>
+        ast.ExecutionType = when (propertyType) {
+            Int::class -> DataType.INT
+            Long::class -> DataType.LONG
+            String::class -> DataType.STRING
+            else -> null
+        }
+    }
+
+    private fun clearInferredExecutionType() {
+        if (!explicitExecutionTypeWasSet) {
+            ast.ExecutionType = null
+        }
+    }
+
+    private fun clearPropertyReferenceAndInferredExecutionType() {
+        ast.PropertyReference = null
+        clearInferredExecutionType()
     }
 
     override fun relationColumn(
         relation: QueryRelation,
         sqlOutputName: String,
     ): IQueryColumnsApi {
+        clearPropertyReferenceAndInferredExecutionType()
         val (alias, sqlName) = relationSourceContext.resolve(relation, sqlOutputName)
         ast.Column = QueryColumnsBaseAst().apply {
             cteAlias = alias
@@ -143,6 +180,7 @@ class QueryColumnsBuilder internal constructor(
         property: KProperty1<T, R>,
         qualifier: String?,
     ): IQueryColumnsApi {
+        val isPropertyBacked = ast.ColumnMethod == null
         val ownerType = typedPropertyOwner(property)
         val sqlOutputName = property.name
         val canonicalRelationName = if (IQueryRelation::class.java.isAssignableFrom(ownerType.java)) {
@@ -162,8 +200,14 @@ class QueryColumnsBuilder internal constructor(
             cteAlias = qualifier ?: resolvedRelationName
             select = sqlOutputName
         }
+        ast.PropertyReference = property.takeIf { isPropertyBacked }
+        if (isPropertyBacked) {
+            inferExecutionType(property)
+        } else {
+            clearInferredExecutionType()
+        }
         if (!explicitAliasWasSet) {
-            ast.ColumnAlias = null
+            ast.ColumnAlias = property.name.takeIf { isPropertyBacked }
         }
         return this
     }
@@ -202,6 +246,13 @@ class QueryColumnsBuilder internal constructor(
         }
         explicitAliasWasSet = true
         ast.ColumnAlias = outputName
+        val isPropertyBacked = ast.ColumnMethod == null
+        ast.PropertyReference = property.takeIf { isPropertyBacked }
+        if (isPropertyBacked) {
+            inferExecutionType(property)
+        } else {
+            clearInferredExecutionType()
+        }
         return this
     }
 

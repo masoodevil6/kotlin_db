@@ -26,3 +26,17 @@ fun <T> ExecuteResult<T>.error(
     }
     return this
 }
+
+
+operator fun <T> ExecuteResult<List<T>>.get(index: Int): T {
+    return when (this) {
+        is ExecuteResult.Success -> {
+            result?.get(index)
+                ?: throw IllegalStateException("Successful result contains no data")
+        }
+
+        is ExecuteResult.Failure -> {
+            throw exception
+        }
+    }
+}

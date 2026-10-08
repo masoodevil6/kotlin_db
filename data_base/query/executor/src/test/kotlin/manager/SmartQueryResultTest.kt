@@ -1,5 +1,8 @@
 package gog.my_project.data_base.query.executer.manager
 
+import gog.my_project.data_base.core.annotations.models.QBColumn
+import gog.my_project.data_base.core.annotations.models.QBTable
+import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
@@ -7,9 +10,12 @@ import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base.query.ast.enums.DataType
+import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.builder.relations.queryRelation as buildQueryRelationDefinition
+import gog.my_project.data_base.query.api.interfaces.relations.IQueryRelation
+import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base.query.executer.result.QueryRow
-import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
 import java.sql.ResultSet
@@ -22,6 +28,48 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+
+@QBTable(name = "materialized_users")
+private class MaterializedUser : IModelBase {
+    @QBColumn(name = "id", alias = "user_id")
+    val id: Int = 0
+
+    @QBColumn(name = "name", alias = "user_name")
+    val name: String = ""
+}
+
+@QBTable(name = "other_users")
+private class OtherMaterializedUser : IModelBase {
+    @QBColumn(name = "id", alias = "other_user_id")
+    val id: Int = 0
+}
+
+@QBTable(name = "unsupported_users")
+private class UnsupportedMaterializedUser : IModelBase {
+    @QBColumn(name = "enabled", alias = "enabled")
+    val enabled: Boolean = false
+}
+
+private class MaterializedRelation : IQueryRelation<Unit> {
+    override val relationName = "materialized_relation"
+
+    val fullName: String?
+        get() = error("Typed Relation output getter must not be invoked")
+
+    override fun queryRelation(params: Unit): QueryRelation = buildQueryRelationDefinition(
+        name = relationName,
+        declarationOwner = MaterializedRelation::class,
+    ) {
+        table { table("source_users").alias("source") }
+        select {
+            addColumn {
+                column { tableColumn("source", "full_name") }
+                alias(MaterializedRelation::fullName)
+            }
+        }
+    }
+}
 
 class SmartQueryResultTest {
 
@@ -238,6 +286,138 @@ class SmartQueryResultTest {
         })
 
         kotlin.test.assertFailsWith<IllegalArgumentException> { row!!["id"] }
+    }
+
+    @Test
+    fun `model property access resolves through final select output alias without casting`() {
+        val script = resultSet(listOf("userOutId"), listOf(listOf(7)))
+        val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
+        val query = QueryRenderSelectBuilder().select {
+            addColumn {
+                column(MaterializedUser::class, MaterializedUser::id)
+                alias("userOutId")
+                execute(DataType.LONG)
+            }
+        }
+        var row: QueryRow? = null
+
+        executor.first(query, blockExecute = {
+            row = assertIs<ExecuteResult.Success<QueryRow>>(it).result
+        })
+
+        assertEquals(7L, row!!.getValue(MaterializedUser::id))
+        assertIs<Long>(row!!.getValue(MaterializedUser::id))
+        assertEquals(7L, row!!.getValue("userOutId"))
+        assertEquals(7L, row!!["userOutId"])
+        assertFailsWith<IllegalArgumentException> { row!!.getValue("user_id") }
+        assertTrue(script.closed)
+    }
+
+    @Test
+    fun `relation property access resolves through final alias without invoking getter`() {
+        val script = resultSet(
+            labels = listOf("display_name"),
+            rows = listOf(listOf(null)),
+        )
+        val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
+        val relation = MaterializedRelation().queryRelation(Unit)
+        val query = QueryRenderSelectBuilder().from(relation).select {
+            addColumn {
+                relationColumn(MaterializedRelation::fullName)
+                alias("display_name")
+            }
+        }
+        var row: QueryRow? = null
+
+        executor.first(query, blockExecute = {
+            row = assertIs<ExecuteResult.Success<QueryRow>>(it).result
+        })
+
+        assertNull(row!!.getValue(MaterializedRelation::fullName))
+        assertNull(row!!.getValue(MaterializedRelation::fullName, "display_name"))
+        assertNull(row!!["display_name"])
+        assertTrue(script.closed)
+    }
+
+    @Test
+    fun `duplicate model property requires a valid output alias hint`() {
+        val script = resultSet(
+            labels = listOf("userId", "userOutId", "user_name"),
+            rows = listOf(listOf(7, 8, "Ada")),
+        )
+        val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
+        val query = QueryRenderSelectBuilder().select {
+            addColumn {
+                column(MaterializedUser::class, MaterializedUser::id)
+                alias("userId")
+            }
+            addColumn {
+                column(MaterializedUser::class, MaterializedUser::id)
+                alias("userOutId")
+            }
+            addColumn { column(MaterializedUser::class, MaterializedUser::name) }
+        }
+        var row: QueryRow? = null
+
+        executor.first(query, blockExecute = {
+            row = assertIs<ExecuteResult.Success<QueryRow>>(it).result
+        })
+
+        assertFailsWith<IllegalArgumentException> { row!!.getValue(MaterializedUser::id) }
+        assertEquals(7, row!!.getValue(MaterializedUser::id, "userId"))
+        assertEquals(8, row!!.getValue(MaterializedUser::id, "userOutId"))
+        assertFailsWith<IllegalArgumentException> { row!!.getValue(MaterializedUser::id, " ") }
+        assertFailsWith<IllegalArgumentException> { row!!.getValue(MaterializedUser::id, "missing") }
+        assertFailsWith<IllegalArgumentException> { row!!.getValue(MaterializedUser::id, "user_name") }
+        assertFailsWith<IllegalArgumentException> { row!!.getValue(OtherMaterializedUser::id) }
+    }
+
+    @Test
+    fun `property resolution uses owner identity instead of property name`() {
+        val script = resultSet(
+            labels = listOf("user_id", "other_user_id"),
+            rows = listOf(listOf(7, 9)),
+        )
+        val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
+        val query = QueryRenderSelectBuilder().select {
+            addColumn { column(MaterializedUser::class, MaterializedUser::id) }
+            addColumn { column(OtherMaterializedUser::class, OtherMaterializedUser::id) }
+        }
+        var row: QueryRow? = null
+
+        executor.first(query, blockExecute = {
+            row = assertIs<ExecuteResult.Success<QueryRow>>(it).result
+        })
+
+        assertEquals(7, row!!.getValue(MaterializedUser::id))
+        assertEquals(9, row!!.getValue(OtherMaterializedUser::id))
+    }
+
+    @Test
+    fun `unsupported model type fails before JDBC unless explicitly typed`() {
+        val script = resultSet(listOf("enabled"), listOf(listOf(true)))
+        val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
+        val unsupportedQuery = QueryRenderSelectBuilder().select {
+            addColumn { column(UnsupportedMaterializedUser::class, UnsupportedMaterializedUser::enabled) }
+        }
+        var unsupportedResult: ExecuteResult<QueryRow>? = null
+
+        executor.first(unsupportedQuery, blockExecute = { unsupportedResult = it })
+
+        val failure = assertIs<ExecuteResult.Failure>(unsupportedResult)
+        assertIs<IllegalArgumentException>(failure.exception)
+        assertEquals(0, executor.selectExecutions)
+
+        val explicitlyTypedQuery = QueryRenderSelectBuilder().select {
+            addColumn {
+                column(UnsupportedMaterializedUser::class, UnsupportedMaterializedUser::enabled)
+                execute(DataType.INT)
+            }
+        }
+        executor.first(explicitlyTypedQuery, blockExecute = { result ->
+            assertIs<ExecuteResult.Success<QueryRow>>(result)
+        })
+        assertEquals(1, executor.selectExecutions)
     }
 
     @Test

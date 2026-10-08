@@ -250,5 +250,9 @@ private fun materializeQueryRow(
         }
         label to value
     }
-    return QueryRow(values)
+    val propertyAliases = outputColumns.mapNotNull { outputColumn ->
+        val property = outputColumn.PropertyReference ?: return@mapNotNull null
+        property to requireNotNull(outputColumn.ColumnAlias)
+    }
+    return QueryRow(values, propertyAliases)
 }

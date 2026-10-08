@@ -39,7 +39,7 @@ class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             .execute()
             .success { rows ->
                 rows.forEach { row ->
-                    println(aliases.joinToString(prefix = "row: ") { alias -> "$alias=${row[alias]}" })
+                    println(aliases.joinToString(prefix = "row: ") { alias -> "$alias=${row.getValue(alias)}" })
                 }
                 rows
             }
