@@ -7,7 +7,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.
 import gog.my_project.data_base.query.api.tools.enums.SqlMethodColumn
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
 import gog.my_project.data_base.query.ast.enums.DataType
-import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
 
@@ -27,23 +27,23 @@ interface IQueryColumnsApi : IQueryApi<IQueryColumnsAst> {
 
     fun <T : IModelBase, R> column(table: KClass<T>, property: KProperty1<T, R>): IQueryColumnsApi;
 
-    fun relationColumn(
-        relation: QueryRelation,
+    fun cteOutput(
+        relation: Cte,
         sqlOutputName: String,
     ): IQueryColumnsApi {
-        throw UnsupportedOperationException("QueryRelation fields are not supported by this IQueryColumnsApi implementation")
+        throw UnsupportedOperationException("Cte fields are not supported by this IQueryColumnsApi implementation")
     }
 
-    /** Names a QueryRelation output using the owning declaration property's name. */
-    fun <T, R> relationColumn(property: KProperty1<T, R>, qualifier: String? = null): IQueryColumnsApi {
-        throw UnsupportedOperationException("Typed QueryRelation fields are not supported by this IQueryColumnsApi implementation")
+    /** Names a Cte output using the owning declaration property's name. */
+    fun <T, R> cteOutput(property: KProperty1<T, R>, qualifier: String? = null): IQueryColumnsApi {
+        throw UnsupportedOperationException("Typed Cte fields are not supported by this IQueryColumnsApi implementation")
     }
 
     fun alias(alias: String): IQueryColumnsApi;
 
-    /** Declares a QueryRelation output using the owning declaration property's name. */
+    /** Declares a Cte output using the owning declaration property's name. */
     fun <T, R> alias(property: KProperty1<T, R>): IQueryColumnsApi {
-        throw UnsupportedOperationException("Typed QueryRelation aliases are not supported by this IQueryColumnsApi implementation")
+        throw UnsupportedOperationException("Typed Cte aliases are not supported by this IQueryColumnsApi implementation")
     }
 
 }

@@ -1,12 +1,11 @@
 ``` kotlin
-lass UserDisplayRelation :
-QueryRelationDeclaration<UserDisplayRelation.Filters>() {
+@QBQuery(name = "user_display")
+class UserDisplayRelation :
+QueryDeclaration<UserDisplayRelation.Filters>() {
 
     data class Filters(
         val userId: Int? = null,
     )
-
-    override val relationName = "user_display"
 
     val id: Int
         get() = error("Declaration only")
@@ -72,6 +71,8 @@ from(relation)
 val result = query.execute()
 ```
 ----
+
+
 
 
 
@@ -354,7 +355,7 @@ Typed Result
 در vision نهایی:
 
 class UserDisplayRelation :
-QueryRelationDeclaration<Filters>() {
+QueryDeclaration<Filters>() {
 
     val id: Int
         get() = error("declaration only")
@@ -754,3 +755,391 @@ Query خودش API مصرف دارد. sql(), first(), get() عملیات سطح 
 
 این دیگر یک Vision مشخص است، نه مجموعه‌ای از تکه‌های API که هر کدام از یک گوشه افتاده‌اند.
 
+
+
+
+
+
+
+```kotlin
+package gog.my_project.data_base.query.example.v3.queries.relations
+
+import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
+import gog.my_project.data_base.query.builder.relations.QueryDeclaration
+import gog.my_project.data_base.query.example.v3.queries.models.UserModelV3
+import gog.my_project.data_base.core.annotations.queries.QBQuery
+import gog.my_project.data_base.core.annotations.queries.QBQuerySelect
+
+@QBQuery(
+    name = "v3_user_display",
+    alias = "uud"
+)
+class UserDisplayQueryV3 :
+    QueryDeclaration<UserDisplayQueryV3.RelationFilters>() {
+
+    data class RelationFilters(
+        val userId: Int? = null,
+        val minAge: Int? = null,
+    )
+
+    @QBQuerySelect(
+        name = "id",
+        alias = "id"
+    )
+    val id: Int
+        get() = error("Typed output property must not be read")
+
+    @QBQuerySelect(
+        name = "full_name",
+        alias = "full_name"
+    )
+    val fullName: String?
+        get() = error("Typed output property must not be read")
+
+    @QBQuerySelect(
+        name = "age",
+        alias = "age"
+    )
+    val age: Int?
+        get() = error("Typed output property must not be read")
+
+    override fun queryRelation(
+        params: RelationFilters
+    ): QueryRelation = buildQueryRelation {
+        select {
+            addColumn {
+                column(UserModelV3::class, UserModelV3::id)
+                    .alias(UserDisplayQueryV3::id)
+            }
+
+            addColumn {
+                column {
+                    tableAttribute("concat( uu.name , '-' , uu.family )")
+                }.alias(UserDisplayQueryV3::fullName)
+            }
+
+            addColumn {
+                column(UserModelV3::class, UserModelV3::age)
+                    .alias(UserDisplayQueryV3::age)
+            }
+        }
+
+        table {
+            table(UserModelV3::class)
+        }
+
+        if (params.userId != null || params.minAge != null) {
+            where {
+                conditions {
+                    params.userId?._let_ { userId ->
+                        addCondition {
+                            logicalAnd()
+                            sideSelector {
+                                tableColumn(
+                                    UserModelV3::class,
+                                    UserModelV3::id,
+                                    "uu"
+                                )
+                            }
+                            operationEqual()
+                            sideValue("relation_user_id", userId)
+                        }
+                    }
+
+                    params.minAge?._let_ { minAge ->
+                        addCondition {
+                            logicalAnd()
+                            sideSelector {
+                                tableColumn(
+                                    UserModelV3::class,
+                                    UserModelV3::age,
+                                    "uu"
+                                )
+                            }
+                            operationGreaterThanOrEqual()
+                            sideValue("relation_min_age", minAge)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+
+```kotlin
+
+package gog.my_project.data_base.query.example.v3.queries.select
+
+import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.example.v3.queries.UserDisplayQueryV3
+import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base.query.executer.result.error
+import gog.my_project.data_base.query.executer.result.success
+
+class A7ExampleSelectV3 {
+
+    fun query() = QueryRenderSelectBuilder()
+        .from(
+            UserDisplayQueryV3().queryRelation(
+                UserDisplayQueryV3.RelationFilters(
+                    userId = 10,
+                    minAge = 18
+                )
+            )
+        )
+        .select {
+            addColumn {
+                relationColumn(UserDisplayQueryV3::id)
+            }
+
+            addColumn {
+                relationColumn(UserDisplayQueryV3::fullName)
+            }
+
+            addColumn {
+                relationColumn(UserDisplayQueryV3::age)
+            }
+        }
+
+    fun execute(queryManager: IQueryBuilderExecutor) {
+        val query = query()
+
+        queryManager
+            .queryBuilder(query)
+            .sql { (queryText, params) ->
+                println("query: $queryText")
+                println("params: $params")
+            }
+            .execute()
+            .success { rows ->
+                rows.forEach { row ->
+                    println(
+                        "id=${row.getValue(UserDisplayQueryV3::id)}, " +
+                        "fullName=${row.getValue(UserDisplayQueryV3::fullName)}, " +
+                        "age=${row.getValue(UserDisplayQueryV3::age)}"
+                    )
+                }
+                rows
+            }
+            .error { failure ->
+                println("error: $failure")
+            }
+    }
+}
+
+```
+
+```kotlin
+addColumn {
+    column {
+        tableColumn("details", UserPhoneQueryV3::id)
+    }
+    alias("user_id")
+    execute(DataType.LONG)
+}
+```
+
+```
+tableAlias = "details"
+columnName = "id"
+columnAlias = "id"
+columnDataType = DataType.INT
+```
+
+```
+tableAlias = "details"
+columnName = "id"
+columnAlias = "user_id"
+columnDataType = DataType.LONG
+```
+
+
+
+
+
+
+
+
+## توضیح قواعد اولویت‌بندی نام‌گذاری در Model و Query
+
+هدف این است که نام کلاس، نام Property، نام منطقی و alias در SQL به‌عنوان مفاهیم مستقل در نظر گرفته شوند و ترتیب اولویت آن‌ها هنگام ساخت Metadata مشخص باشد.
+
+این قواعد باید در چهار بخش بررسی و یکپارچه شوند:
+
+### ۱. Metadata اولیه کلاس Model
+
+در سطح کلاس Model، باید مشخص شود نام جدول و alias آن از کجا به دست می‌آیند.
+
+برای مثال:
+
+```kotlin
+@QBTable(
+    name = "user_users",
+    alias = "uu"
+)
+class UserModelV3
+```
+
+در این مثال، نام کلاس Kotlin برابر `UserModelV3`، نام جدول برابر `user_users` و alias جدول برابر `uu` است.
+
+نام کلاس، نام جدول و alias جدول نباید یک مقدار واحد تلقی شوند. اگر نام یا alias به‌صورت صریح در Annotation تعریف شده باشد، باید طبق قرارداد metadata اولویت‌بندی شود. در صورت تنظیم‌نشدن مقدار، fallback باید مطابق قواعد فعلی `QBTable` تعیین شود.
+
+اگر DSL امکان override کردن نام یا alias جدول را فراهم می‌کند، باید مشخص شود این override در چه سطحی اعمال می‌شود و آیا فقط همان ارجاع در Query را تغییر می‌دهد یا تعریف اصلی Model را.
+
+### ۲. Metadata اولیه Propertyهای Model
+
+در سطح Propertyهای Model نیز باید نام Property در Kotlin از نام ستون و alias آن جدا باشد.
+
+برای مثال:
+
+```kotlin
+@QBColumn(
+    name = "user_id",
+    alias = "id",
+    primaryKey = true
+)
+val id: Int
+```
+
+در این مثال:
+
+```text
+propertyName = id
+columnName   = user_id
+columnAlias  = id
+primaryKey   = true
+```
+
+نام Property در Kotlin هویت فنی آن است. نام ستون و alias از Metadata مربوط به Property به دست می‌آیند و ممکن است با نام Property یکسان نباشند.
+
+اگر DSL مقدار alias را تغییر دهد، باید فقط alias مؤثر تغییر کند؛ نام ستون منبع و سایر ویژگی‌های Property نباید به‌صورت ضمنی تغییر کنند.
+
+ترتیب اولویت مقادیر صریح Annotation، مقادیر پیش‌فرض و overrideهای DSL باید از پیاده‌سازی فعلی `QBColumn` استخراج شود و مبنای قواعد مشترک قرار گیرد.
+
+### ۳. Metadata اولیه کلاس Query
+
+در سطح کلاس Query، همین جداسازی باید برای هویت Query، نام منطقی آن و alias آن رعایت شود.
+
+برای مثال:
+
+```kotlin
+@QBQuery(
+    name = "v3_user_display",
+    alias = "uud"
+)
+class UserDisplayQueryV3
+```
+
+در این مثال:
+
+```text
+className = UserDisplayQueryV3
+queryName = v3_user_display
+queryAlias = uud
+```
+
+نام کلاس Kotlin هویت فنی کلاس است؛ `QBQuery.name` نام منطقی Query را مشخص می‌کند و `QBQuery.alias` alias پیش‌فرض آن را تعیین می‌کند.
+
+هنگام استفاده از Query به‌عنوان منبع یک Query دیگر، اگر DSL امکان تعیین alias جدید را داشته باشد، باید alias صریح همان استفاده بر alias پیش‌فرض Query اولویت داشته باشد؛ بدون آنکه نام منطقی Query تغییر کند.
+
+قواعد پیش‌فرض و fallback در `QBQuery` باید با قواعد `QBTable` هماهنگ باشند، مگر اینکه تفاوت مشخصی در قرارداد وجود داشته باشد.
+
+### ۴. Metadata اولیه Propertyهای Query
+
+در Propertyهای Query باید سه مفهوم مستقل وجود داشته باشد:
+
+- نام Property در Kotlin
+- نام منطقی خروجی
+- alias منتشرشده در SQL
+
+برای مثال:
+
+```kotlin
+@QBQuerySelect(
+    name = "full_name",
+    alias = "full_name"
+)
+val fullName: String?
+    get() = error("Typed output property must not be read")
+```
+
+در این حالت:
+
+```text
+propertyName = fullName
+logicalName  = full_name
+columnAlias  = full_name
+```
+
+اگر در DSL از این عبارت استفاده شود:
+
+```kotlin
+.alias("display_name")
+```
+
+نتیجه باید چنین باشد:
+
+```text
+propertyName = fullName
+logicalName  = full_name
+columnAlias  = display_name
+```
+
+در این مثال، override فقط alias خروجی SQL را تغییر می‌دهد. نام منطقی و هویت Property ثابت می‌مانند.
+
+برای `QBQuerySelect.name` و `QBQuerySelect.alias` نیز باید قواعد fallback مشخص باشند. اگر نام منطقی صریح تنظیم نشده باشد، رفتار جایگزین باید از قرارداد نهایی metadata پیروی کند. اگر قرارداد استفاده از نام Property به‌عنوان پیش‌فرض را تعیین می‌کند، این رفتار باید صریح و قابل آزمون باشد.
+
+همچنین `QueryRow.getValue(KProperty)` باید همچنان با استفاده از هویت Property و نگاشت موجود به SQL alias کار کند. برای استخراج Metadata نباید Getter مربوط به Property فراخوانی شود.
+
+### قواعد مشترک مورد انتظار
+
+در هر چهار بخش، موارد زیر باید رعایت شوند:
+
+1. نام کلاس یا Property در Kotlin با نام منطقی یا alias یکی فرض نشود.
+2. اولویت مقادیر صریح Annotation، مقادیر پیش‌فرض و overrideهای DSL مشخص و مستند باشد.
+3. override هر مقدار فقط همان مقدار را تغییر دهد، مگر آنکه قرارداد موجود خلاف آن را صریحاً تعریف کرده باشد.
+4. قواعد fallback در `QBQuery` و `QBQuerySelect` تا حد امکان با قواعد موجود `QBTable` و `QBColumn` یکسان باشد.
+5. مقدار تنظیم‌نشده از مقدار صریح خالی قابل تشخیص باشد، در صورتی که قرارداد metadata این تمایز را پشتیبانی می‌کند.
+6. نام ستون منبع، alias خروجی و نوع داده مستقل از یکدیگر resolve شوند.
+7. اعتبارسنجی alias و یکتایی نام منطقی خروجی‌های Query در محدوده صحیح حفظ شود.
+8. تغییرات به حداقل لازم محدود بمانند و تا زمانی که نیاز مشخصی اثبات نشده، ساختار AST، Executor، `QueryRow`، Materializer و امضاهای API عمومی تغییر نکنند.
+
+**نکته مهم:** ترتیب دقیق اولویت‌ها و fallbackها نباید بر اساس حدس تعیین شود. ابتدا باید قرارداد و پیاده‌سازی فعلی `QBTable` و `QBColumn` بررسی شود؛ سپس قواعد متناظر برای `QBQuery` و `QBQuerySelect` تعریف و تفاوت‌های ضروری مستند شوند.
+
+فعلاً هدف، تکمیل Plan و مشخص‌کردن قواعد است، نه اجرای تغییرات کد.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+فایل فعلی	نام پیشنهادی	محل پیشنهادی	دلیل
+api/interfaces/relations/IQueryRelation.kt	ICte.kt	query:api	قرارداد عمومی یک CTE
+api/interfaces/relations/QueryRelation.kt	Cte.kt	query:api	مدل CTE شامل نام، تعریف و وابستگی‌ها
+api/interfaces/relations/QueryDefinition.kt	فعلاً QueryDefinition.kt	query:api	تعریف SELECT و پارامترها؛ نام آن لزوماً مختص CTE نیست
+builder/relations/QueryDeclaration.kt	CteDeclaration.kt	query:builder	تعریف قابل‌استفاده برای اعلام یک CTE
+builder/relations/QueryRelationBuilder.kt	CteBuilder.kt یا CteDefinitionBuilder.kt	query:builder	ساخت و اعتبارسنجی تعریف CTE
+builder/.../QueryRenderSelectBuilder.kt	بدون تغییر نام فایل	query:builder	سازنده عمومی SELECT است؛ فقط بخش‌های مربوط به Relation باید به CTE تغییر نام دهند
+builder/.../QuerySourceContext.kt	بدون تغییر نام فایل	query:builder	مدیریت context منابع و aliasها؛ نباید بدون دلیل CTE-specific شود
+builder/.../QueryTableBuilder.kt	بدون تغییر نام فایل	query:builder	API عمومی افزودن منبع به SELECT؛ نام متدها باید جداگانه بررسی شود
+builder/.../QueryColumnsBuilder.kt	بدون تغییر نام فایل	query:builder	مسئولیت عمومی ستون‌ها
+builder/.../QuerySelectBuilder.kt	بدون تغییر نام فایل	query:builder	مسئولیت عمومی ساخت SELECT
+builder/.../QueryBuilderMetadata.kt	بدون تغییر نام فایل	query:builder	متادیتای عمومی Builder، مگر اینکه بررسی کد نشان دهد بخشی مختص Relation است
+مثال‌های v3/queries/relations/	v3/queries/ctes/	query:example	همسان‌سازی نام‌گذاری مثال‌ها با مفهوم جدید

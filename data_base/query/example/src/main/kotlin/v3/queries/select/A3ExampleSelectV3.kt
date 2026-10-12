@@ -6,17 +6,22 @@ import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.example.v3.queries.IExampleV3
-import gog.my_project.data_base.query.example.v3.queries.relations.UserStatsRelationV3
+import gog.my_project.data_base.query.example.v3.queries.relations.UserStatsQueryV3
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 class A3ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
-    override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
-        .from(UserStatsRelationV3().queryRelation(UserStatsRelationV3.RelationFilters()), "users")
+    override fun query(): IQueryRenderSelectApi = configureQuery(QueryRenderSelectBuilder())
+
+    private fun configureQuery(query: IQueryRenderSelectApi): IQueryRenderSelectApi = query
+        .from {
+            cte(UserStatsQueryV3(UserStatsQueryV3.RelationFilters()))
+            alias("users")
+        }
         .select {
-            addColumn { relationColumn(UserStatsRelationV3::id, "users") }
-            addColumn { relationColumn(UserStatsRelationV3::name, "users") }
-            addColumn { relationColumn(UserStatsRelationV3::family, "users") }
-            addColumn { relationColumn(UserStatsRelationV3::age, "users") }
+            addColumn { cteOutput(UserStatsQueryV3::id, "users") }
+            addColumn { cteOutput(UserStatsQueryV3::name, "users") }
+            addColumn { cteOutput(UserStatsQueryV3::family, "users") }
+            addColumn { cteOutput(UserStatsQueryV3::age, "users") }
         }
         .where {
             conditions {
@@ -30,9 +35,8 @@ class A3ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
         }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
-        val query = query()
         queryManager
-            .queryBuilder(query)
+            .queryBuilder { operations -> operations.querySelect { query -> configureQuery(query) } }
             .sql { (queryText, params) ->
                 println("\n=============================================\nV3-Ex3: Relation-backed select with WhereLike\nquery: $queryText\nparams: $params")
             }
@@ -40,10 +44,10 @@ class A3ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
             .success { rows ->
                 rows.forEach { row ->
                     println(
-                        "row: id=${row.getValue(UserStatsRelationV3::id)}, " +
-                            "name=${row.getValue(UserStatsRelationV3::name)}, " +
-                            "family=${row.getValue(UserStatsRelationV3::family)}, " +
-                            "age=${row.getValue(UserStatsRelationV3::age)}",
+                        "row: id=${row.getValue(UserStatsQueryV3::id)}, " +
+                            "name=${row.getValue(UserStatsQueryV3::name)}, " +
+                            "family=${row.getValue(UserStatsQueryV3::family)}, " +
+                            "age=${row.getValue(UserStatsQueryV3::age)}",
                     )
                 }
                 rows

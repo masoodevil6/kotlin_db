@@ -38,7 +38,7 @@ class QueryConsumerTest {
                             alias("user_id")
                         }
                     }
-                    .table { table("users").alias("u") }
+                    .from { table("users").alias("u") }
                     .where { }
             }
         }
@@ -150,7 +150,7 @@ class QueryConsumerTest {
                                 alias("user_id")
                             }
                         }
-                        .table { table("users").alias("u") }
+                        .from { table("users").alias("u") }
                         .where { }
                 }
             }

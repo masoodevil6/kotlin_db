@@ -47,8 +47,8 @@ class CteInfoUser(
     val userPhone : Int =  0
 
 
-    override fun cteQuery(params: MutableList<SqlParameter<*>>): gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi {
-        return _root_ide_package_.gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder(
+    override fun cteQuery(params: MutableList<SqlParameter<*>>): IQueryRenderSelectApi {
+        return QueryRenderSelectBuilder(
             params
         )
             .select {
@@ -83,7 +83,7 @@ class CteInfoUser(
                     alias("cte_user_phone")
                 }
             }
-            .table{
+            .from{
                 table("user_users" ).alias("uu")
             }
             .joins {

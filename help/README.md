@@ -48,3 +48,17 @@ node src/server.mjs
 انتخاب ماژول، اکشن و تست در query نشانی مرورگر نگه داشته می‌شود؛ برای نمونه `?module=%3Adata_base%3Amigration&action=module-test&test=migration-system-integration`. با بازکردن یا تازه‌سازی این نشانی همان انتخاب‌ها بازیابی می‌شوند. فقط شناسهٔ ماژول، اکشن و تست وارد URL می‌شوند؛ مقادیر فرم و رمز عبور وارد آن نمی‌شوند.
 
 اولین Definition واقعی در `data_base/migration/help.json` قرار دارد. فرم تست Migration با پیش‌فرض‌های مثال همین مخزن پر می‌شود: `jdbc:mysql://127.0.0.1`، درگاه `3306`، پایگاه دادهٔ `kotlin_db` و کاربر `root`. اگر تنظیمات MySQL شما متفاوت است، مقدارها را تغییر دهید. رمز عبور به‌صورت پیش‌فرض خالی است. مرورگر آخرین مقدار فیلدهای غیرمحرمانه را برای همان Test در فضای محلی خود به خاطر می‌سپارد؛ رمز عبور ذخیره نمی‌شود و پس از اجرا از فرم پاک می‌شود. در صورت تمایل می‌توانید از Password Manager مرورگر استفاده کنید.
+
+
+
+
+
+
+
+```powershell
+.\gradlew.bat :data_base:migration:example:compileKotlin.
+
+$env:JAVA_HOME = 'C:\Users\Gog\.jdks\corretto-24.0.2'
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+.\gradlew.bat :data_base:migration:example:compileKotlin
+```

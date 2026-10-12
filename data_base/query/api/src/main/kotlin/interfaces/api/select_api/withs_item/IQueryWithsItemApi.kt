@@ -3,6 +3,7 @@ package gog.my_project.data_base.query.api.interfaces.api.select_api.withs_item
 import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.cte.ICte
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
 
 interface IQueryWithsItemApi : IQueryApi<IQueryWithsItemAst> {
@@ -13,6 +14,19 @@ interface IQueryWithsItemApi : IQueryApi<IQueryWithsItemAst> {
         withName: String,
         withClass : ICte
     ): IQueryWithsItemApi;
+
+
+
+
+    fun with(cte: Cte): IQueryWithsItemApi;
+
+    fun with(
+        withName: String,
+        cte: Cte
+    ): IQueryWithsItemApi;
+
+
+
 
     fun with(
         withName: String,

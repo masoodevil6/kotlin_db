@@ -6,33 +6,34 @@ import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.example.v3.queries.IExampleV3
-import gog.my_project.data_base.query.example.v3.queries.relations.UserStatsRelationV3
+import gog.my_project.data_base.query.example.v3.queries.relations.UserStatsQueryV3
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 class A5ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
-    override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
-        .from(UserStatsRelationV3().queryRelation(UserStatsRelationV3.RelationFilters()))
+    override fun query(): IQueryRenderSelectApi = configureQuery(QueryRenderSelectBuilder())
+
+    private fun configureQuery(query: IQueryRenderSelectApi): IQueryRenderSelectApi = query
+        .from { cte(UserStatsQueryV3(UserStatsQueryV3.RelationFilters())) }
         .select {
-            addColumn { relationColumn(UserStatsRelationV3::id) }
-            addColumn { relationColumn(UserStatsRelationV3::name) }
-            addColumn { relationColumn(UserStatsRelationV3::family) }
-            addColumn { relationColumn(UserStatsRelationV3::age) }
+            addColumn { cteOutput(UserStatsQueryV3::id) }
+            addColumn { cteOutput(UserStatsQueryV3::name) }
+            addColumn { cteOutput(UserStatsQueryV3::family) }
+            addColumn { cteOutput(UserStatsQueryV3::age) }
         }
         .where {
             conditions {
                 addCondition {
                     logicalAnd()
                     sideSelector { tableColumn("v3_user_stats", "age") }
-                    operationIs()
+                    operationGreaterThan()
                     sideValue("user_age", 1)
                 }
             }
         }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
-        val query = query()
         queryManager
-            .queryBuilder(query)
+            .queryBuilder { operations -> operations.querySelect { query -> configureQuery(query) } }
             .sql { (queryText, params) ->
                 println("\n=============================================\nV3-Ex5: Relation-backed version of the original IS condition\nquery: $queryText\nparams: $params")
             }
@@ -40,10 +41,10 @@ class A5ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
             .success { rows ->
                 rows.forEach { row ->
                     println(
-                        "row: id=${row.getValue(UserStatsRelationV3::id)}, " +
-                            "name=${row.getValue(UserStatsRelationV3::name)}, " +
-                            "family=${row.getValue(UserStatsRelationV3::family)}, " +
-                            "age=${row.getValue(UserStatsRelationV3::age)}",
+                        "row: id=${row.getValue(UserStatsQueryV3::id)}, " +
+                            "name=${row.getValue(UserStatsQueryV3::name)}, " +
+                            "family=${row.getValue(UserStatsQueryV3::family)}, " +
+                            "age=${row.getValue(UserStatsQueryV3::age)}",
                     )
                 }
                 rows

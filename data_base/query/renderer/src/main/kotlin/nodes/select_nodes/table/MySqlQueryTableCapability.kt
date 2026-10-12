@@ -2,6 +2,7 @@ package gog.my_project.data_base.query.renderer.nodes.select_nodes.table
 
 import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQueryTableAst
 import gog.my_project.data_base.query.dialect.data_class.select_data.table.QueryTableData
+import gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.table.IQueryTableCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
 
@@ -19,6 +20,19 @@ class MySqlQueryTableCapability :
 
         val cte:   String? = ast.cte;
         val cteAlias:   String? = ast.cteAlias
+
+        ast.derivedQuery?.let { nestedQuery ->
+            require(table == null && cte == null) {
+                "A table source cannot combine a derived SELECT with a table or CTE"
+            }
+            val nestedSql = ctx.registry.render(nestedQuery, ctx.dialect, IQueryRenderSelectData())
+                ?: error("Could not render nested SELECT source")
+            require(!tableAlias.isNullOrBlank()) {
+                "A nested SELECT source requires a non-empty alias"
+            }
+            val prefix = if (dataClass?._withPrefix == true) "${ctx.dialect._prefixTable} " else ""
+            return " $prefix ( $nestedSql ) As $tableAlias "
+        }
 
         var queryTemp: String = "";
         if (table != null) {

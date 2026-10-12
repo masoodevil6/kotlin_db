@@ -23,7 +23,7 @@ class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             addColumn { column { cteColumn("ciu", "cte_user_age") }; alias("cte_user_age"); execute(DataType.INT) }
             addColumn { column { cteColumn("ciu", "cte_user_phone") }; alias("cte_user_phone"); execute(DataType.STRING) }
         }
-        .table { cte("cte_info_user").alias("ciu") }
+        .from { cte("cte_info_user").alias("ciu") }
         .limit { setOptionLimit(2) }
         .offset { setOptionOffset(0) }
 

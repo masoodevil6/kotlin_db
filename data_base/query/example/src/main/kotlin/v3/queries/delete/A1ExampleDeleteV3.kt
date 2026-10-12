@@ -9,7 +9,9 @@ import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleDeleteV3 : IExampleV3<IQueryRenderDeleteApi> {
-    override fun query(): IQueryRenderDeleteApi = QueryRenderDeleteBuilder()
+    override fun query(): IQueryRenderDeleteApi = configureQuery(QueryRenderDeleteBuilder())
+
+    private fun configureQuery(query: IQueryRenderDeleteApi): IQueryRenderDeleteApi = query
         .addTarget("uu")
         .table { table(UserModelV3::class) }
         .where {
@@ -25,8 +27,8 @@ class A1ExampleDeleteV3 : IExampleV3<IQueryRenderDeleteApi> {
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         queryManager
-            .queryBuilder(query())
-            .sql { builtQuery -> println("V3-Delete query: ${builtQuery.query}; params: ${builtQuery.params}") }
+            .queryBuilder { operations -> operations.queryDelete { configureQuery(this) } }
+            .sql { (queryText, params) -> println("V3-Delete query: $queryText; params: $params") }
             .execute()
             .success { affectedRows ->
                 println("V3-Delete: $affectedRows row(s) deleted")

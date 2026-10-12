@@ -6,7 +6,8 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.builder.relations.queryRelation
+import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.fromCteInternal
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
 import java.sql.DriverManager
 import java.util.UUID
@@ -24,7 +25,7 @@ class QueryRelationMySqlIntegrationTest {
         val database = System.getProperty("execute.test.db.name")
         val username = System.getProperty("execute.test.db.username")
         assumeTrue(!host.isNullOrBlank() && !database.isNullOrBlank() && !username.isNullOrBlank()) {
-            "Set execute.test.db.host, execute.test.db.name, and execute.test.db.username Gradle project properties to enable QueryRelation MySQL integration"
+            "Set execute.test.db.host, execute.test.db.name, and execute.test.db.username Gradle project properties to enable Cte MySQL integration"
         }
 
         val port = System.getProperty("execute.test.db.port")?.toIntOrNull() ?: 3306
@@ -60,8 +61,8 @@ class QueryRelationMySqlIntegrationTest {
                 assertEquals(1, statement.executeUpdate())
             }
 
-            val relationA = queryRelation("live_relation_a") {
-                table { table(tableName).alias("source_row") }
+            val relationA = cte("live_relation_a") {
+                from { table(tableName).alias("source_row") }
                 select {
                     addColumn {
                         column { tableColumn("source_row", "id") }
@@ -79,11 +80,11 @@ class QueryRelationMySqlIntegrationTest {
                     }
                 }
             }
-            val relationB = queryRelation("live_relation_b") {
-                from(relationA)
+            val relationB = cte("live_relation_b") {
+                fromCteInternal(relationA)
                 select {
                     addColumn {
-                        relationColumn(relationA, "a_id")
+                        cteOutput(relationA, "a_id")
                         alias("b_id")
                     }
                 }
@@ -98,11 +99,11 @@ class QueryRelationMySqlIntegrationTest {
                     }
                 }
             }
-            val relationC = queryRelation("live_relation_c") {
-                from(relationB)
+            val relationC = cte("live_relation_c") {
+                fromCteInternal(relationB)
                 select {
                     addColumn {
-                        relationColumn(relationB, "b_id")
+                        cteOutput(relationB, "b_id")
                         alias("id")
                     }
                 }
@@ -118,8 +119,8 @@ class QueryRelationMySqlIntegrationTest {
                 }
             }
             val query = QueryRenderSelectBuilder()
-                .from(relationC, "consumer_c")
-                .select { addColumn { relationColumn(relationC, "id") } }
+                .fromCteInternal(relationC, "consumer_c")
+                .select { addColumn { cteOutput(relationC, "id") } }
                 .where {
                     conditions {
                         addCondition {

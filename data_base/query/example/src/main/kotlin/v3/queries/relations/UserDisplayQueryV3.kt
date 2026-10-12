@@ -1,31 +1,47 @@
 package gog.my_project.data_base.query.example.v3.queries.relations
 
-import gog.my_project.data_base.query.api.interfaces.relations.IQueryRelation
-import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
-import gog.my_project.data_base.query.builder.relations.buildQueryRelation
+import gog.my_project.data_base.core.annotations.models.QBQuery
+import gog.my_project.data_base.core.annotations.models.QBQuerySelect
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteDeclaration
 import gog.my_project.data_base.query.example.v3.queries.models.UserModelV3
 
-class UserStatsRelationV3 : IQueryRelation<UserStatsRelationV3.RelationFilters> {
+
+
+
+@QBQuery(name = "user_display_query_v3", alias = "v3_user_display")
+class UserDisplayQueryV3(
+    params: RelationFilters,
+) : CteDeclaration<UserDisplayQueryV3.RelationFilters>(params) {
+
     data class RelationFilters(
         val userId: Int? = null,
         val minAge: Int? = null,
     )
 
-    override val relationName = "v3_user_stats"
-
+    @QBQuerySelect(name = "id", alias = "id")
     val id: Int get() = error("Typed output property must not be read")
-    val name: String? get() = error("Typed output property must not be read")
-    val family: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "full_name", alias = "fullName")
+    val fullName: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "age", alias = "age")
     val age: Int? get() = error("Typed output property must not be read")
 
-    override fun queryRelation(params: RelationFilters): QueryRelation = buildQueryRelation {
+    override fun createCte(params: RelationFilters): Cte = buildCte {
         select {
-            addColumn { column(UserModelV3::class, UserModelV3::id).alias(UserStatsRelationV3::id) }
-            addColumn { column(UserModelV3::class, UserModelV3::name).alias(UserStatsRelationV3::name) }
-            addColumn { column(UserModelV3::class, UserModelV3::family).alias(UserStatsRelationV3::family) }
-            addColumn { column(UserModelV3::class, UserModelV3::age).alias(UserStatsRelationV3::age) }
+            addColumn {
+                column(UserModelV3::class, UserModelV3::id)
+                    .alias(UserDisplayQueryV3::id)
+            }
+            addColumn {
+                column { tableAttribute("concat( uu.name , '-' , uu.family )") }
+                    .alias(UserDisplayQueryV3::fullName)
+            }
+            addColumn {
+                column(UserModelV3::class, UserModelV3::age)
+                    .alias(UserDisplayQueryV3::age)
+            }
         }
-        table { table(UserModelV3::class) }
+        from { model(UserModelV3::class) }
         if (params.userId != null || params.minAge != null) {
             where {
                 conditions {

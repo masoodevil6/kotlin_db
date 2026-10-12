@@ -9,8 +9,11 @@
 - [3. Query Builder](#3-query-builder)
   - [V1 — نام خام جدول و ستون](#v1--نام-خام-جدول-و-ستون)
   - [V2 — Model-backed Query](#v2--model-backed-query)
-  - [V3 — Relation-backed SELECT و Model-backed Mutation](#v3--relation-backed-select-و-model-backed-mutation)
+    - [V3 — CTE-backed SELECT و Model-backed Mutation](#v3--cte-backed-select-و-model-backed-mutation)
   - [مقایسهٔ نسخه‌ها](#خلاصه-تفاوت-نسخهها)
+  - [Rules](#rules)
+    - [Model](#rules-model)
+    - [Query](#rules-query)
 
 ## 1. Connection
 
@@ -18,7 +21,7 @@
 
 ## 3. Query Builder
 
-این بخش نمونه‌های واقعی Query Builder را در سه نسخه شرح می‌دهد. هر نسخه، SELECT و عملیات CRUD خود را با کد نمونه، SQL مورد انتظار و پارامترها نشان می‌دهد. INSERT، UPDATE و DELETE داده را تغییر می‌دهند؛ آن‌ها را فقط روی دیتابیس توسعه یا آزمایشی اجرا کنید.
+این بخش نمونه‌های واقعی Query Builder را در سه نسخه شرح می‌دهد. هر نسخه، SELECT و عملیات CRUD خود را با کد نمونه، SQL مورد انتظار و پارامترها نشان می‌دهد. قواعد Metadata نیز در [Rules](#rules) آمده‌اند و به دو بخش مستقل **Model** و **Query** تقسیم شده‌اند. INSERT، UPDATE و DELETE داده را تغییر می‌دهند؛ آن‌ها را فقط روی دیتابیس توسعه یا آزمایشی اجرا کنید.
 
 ---
 
@@ -52,7 +55,7 @@ val query = QueryRenderSelectBuilder()
             execute(DataType.STRING)
         }
     }
-    .table { table("user_users").alias("uu") }
+    .from { table("user_users").alias("uu") }
     .joins {
         addJoin {
             innerJoin()
@@ -274,7 +277,7 @@ val query = QueryRenderSelectBuilder()
         addColumn { column(UserModelV2::class, UserModelV2::age) }
         addColumn { column(UserPhoneModelV2::class, UserPhoneModelV2::phone) }
     }
-    .table { table(UserModelV2::class) }
+    .from { model(UserModelV2::class) }
     .joins {
         addJoin {
             innerJoin()
@@ -411,136 +414,257 @@ SQL ساختاری: DELETE uu FROM user_users AS uu WHERE (uu.id = ...). پار�
 
 ---
 
-### V3 — Relation-backed SELECT و Model-backed Mutation
+### V3 — CTE-backed SELECT و Model-backed Mutation
 
-در V3، SELECTها می‌توانند از Concrete Relation و CTE استفاده کنند. Relation propertyها annotation alias ندارند؛ نام property، SQL output name پیش‌فرض است. INSERT، UPDATE و DELETE با UserModelV3 ساخته می‌شوند.
+در V3، SELECTها از declarationهای Query استفاده می‌کنند که به CTE و sourceهای ترکیبی تبدیل می‌شوند. نام پیش‌فرض CTEهای declaration-based از `QBQuery.name` می‌آید؛ `QBQuery.alias` alias پیش‌فرض occurrence است. در API فعلی، declaration با `cte(declaration)` داخل بلوک `from { ... }` انتخاب می‌شود و `alias("...")` همان source occurrence را نام‌گذاری می‌کند. `cte(name)` نیز برای انتخاب CTE بر اساس نام باقی می‌ماند. هر خروجی با `QBQuerySelect` نام منطقی و SQL alias خودش را مشخص می‌کند. INSERT، UPDATE و DELETE همچنان با `UserModelV3` ساخته می‌شوند.
 
-#### Relationهای V3
+#### قرارداد فعلی SELECT FROM
 
-V3 چهار Relation نمونه دارد. Relation یک query definition با نام CTE، فیلترهای ورودی و propertyهای خروجی typed فراهم می‌کند. این propertyها فقط identity خروجی هستند و getter آن‌ها عمداً خطا می‌دهد؛ مقدار واقعی از SELECT و QueryRow می‌آید.
-
-| Relation | نام Relation / CTE | ورودی‌ها | خروجی‌ها |
-|---|---|---|---|
-| UserStatsRelationV3 | v3_user_stats | userId و minAge اختیاری | id: Int، name: String?، family: String?، age: Int? |
-| UserPhoneRelationV3 | v3_user_phone_details | userId اختیاری | id، name، family، age و phone: String? |
-| UserPageRelationV3 | v3_user_page | limit پیش‌فرض 2 و offset پیش‌فرض 0 | id، name، family و age؛ از UserStats عبور داده می‌شوند |
-| UserDisplayRelationV3 | v3_user_display | userId و minAge اختیاری | id: Int، fullName: String?، age: Int? |
-
-نمونهٔ declaration در UserStatsRelationV3:
+ورودی عمومی منبع SELECT یکپارچه است: `.from { ... }`. داخل این بلوک، source از طریق `IQueryTableApi` انتخاب می‌شود:
 
 ~~~kotlin
-class UserStatsRelationV3 :
-    IQueryRelation<UserStatsRelationV3.RelationFilters> {
+// جدول با نام خام
+from {
+    table("user_users")
+    alias("uu")
+}
+
+// منبع Model
+from {
+    model(UserModelV3::class)
+}
+
+// Query declaration با پارامترهای متصل‌شده به نمونه
+from {
+    cte(UserDisplayQueryV3(UserDisplayQueryV3.RelationFilters(userId = 5)))
+    alias("details")
+}
+~~~
+
+`cte(String)` و `alias(String)` نیز روی همان receiver در دسترس‌اند. اگر برای Query alias صریح ندهیم، alias metadata تعریف Query به‌عنوان alias پیش‌فرض occurrence استفاده می‌شود؛ alias داخل بلوک فقط همان occurrence را override می‌کند.
+
+برای SELECT تو‌در‌تو، `table` یک lambda با receiver از نوع `IQueryRenderSelectApi` می‌گیرد و یک derived table می‌سازد؛ آن را به CTE تبدیل نمی‌کند:
+
+~~~kotlin
+from {
+    table {
+        select {
+            addColumn {
+                column { tableColumn("uu", "id") }
+                alias("id")
+                execute(DataType.INT)
+            }
+        }
+        from {
+            table("user_users")
+            alias("uu")
+        }
+    }
+    alias("q")
+}
+~~~
+
+این مثال sourceای به شکل `(SELECT uu.id AS id FROM user_users AS uu) AS q` می‌سازد. پارامترهای SELECT داخلی به ترتیب placeholderهای SQL نهایی حفظ می‌شوند. `table(KClass)` همچنان برای مسیرهای مشترک CRUD/JOIN باقی است؛ در sourceهای Model در SELECT از `model(KClass)` استفاده می‌شود. CTE declaration در `from { ... }` با `cte(declaration)` انتخاب می‌شود و Builder آن را به مسیر composition موجود می‌سپارد.
+
+#### Queryهای V3
+
+V3 چهار Query declaration نمونه دارد. هر declaration نام runtime، alias پیش‌فرض source، فیلترهای ورودی و propertyهای خروجی typed را مشخص می‌کند. Propertyهای خروجی فقط metadata و identity هستند؛ getter آن‌ها عمداً خطا می‌دهد و مقدار واقعی از SELECT materialize می‌شود.
+
+| Query | `QBQuery.name` / نام CTE | `QBQuery.alias` پیش‌فرض | ورودی‌ها | خروجی‌های typed |
+|---|---|---|---|---|
+| `UserStatsQueryV3` | `user_stats_query_v3` | `v3_user_stats` | `userId` و `minAge` اختیاری | `id`, `name`, `family`, `age` |
+| `UserPhoneQueryV3` | `user_phone_query_v3` | `v3_user_phone_details` | `userId` اختیاری | `id`, `name`, `family`, `age`, `phone` |
+| `UserPageQueryV3` | `user_page_query_v3` | `v3_user_page` | `limit` پیش‌فرض 2 و `offset` پیش‌فرض 0 | `id`, `name`, `family`, `age`; از UserStats عبور داده می‌شوند |
+| `UserDisplayQueryV3` | `user_display_query_v3` | `v3_user_display` | `userId` و `minAge` اختیاری | `id`, `fullName`, `age` |
+
+برای هر property خروجی، `QBQuerySelect.name` نام منطقی و `QBQuerySelect.alias` نام SQL منتشرشده است:
+
+| Query property | نام منطقی | SQL alias |
+|---|---|---|
+| `UserStatsQueryV3::id/name/family/age` | همان نام property | همان نام property |
+| `UserPhoneQueryV3::id` | `id` | `user_id` |
+| `UserPhoneQueryV3::name` | `name` | `user_name` |
+| `UserPhoneQueryV3::family` | `family` | `user_family` |
+| `UserPhoneQueryV3::age` | `age` | `user_age` |
+| `UserPhoneQueryV3::phone` | `phone` | `user_phone` |
+| `UserPageQueryV3::id/name/family/age` | همان نام property | همان نام property |
+| `UserDisplayQueryV3::id` | `id` | `id` |
+| `UserDisplayQueryV3::fullName` | `full_name` | `fullName` |
+| `UserDisplayQueryV3::age` | `age` | `age` |
+
+همهٔ propertyهای خروجی چهار Query در source با `QBQuerySelect` مشخص شده‌اند. نمونهٔ `UserStatsQueryV3` بالا declaration کامل را نشان می‌دهد؛ این قطعه، metadata کامل سه Query دیگر را خلاصه می‌کند:
+
+~~~kotlin
+@QBQuery(name = "user_phone_query_v3", alias = "v3_user_phone_details")
+class UserPhoneQueryV3 {
+    @QBQuerySelect(name = "id", alias = "user_id")
+    val id: Int get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "name", alias = "user_name")
+    val name: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "family", alias = "user_family")
+    val family: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "age", alias = "user_age")
+    val age: Int? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "phone", alias = "user_phone")
+    val phone: String? get() = error("Typed output property must not be read")
+}
+
+@QBQuery(name = "user_page_query_v3", alias = "v3_user_page")
+class UserPageQueryV3 {
+    @QBQuerySelect(name = "id", alias = "id")
+    val id: Int get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "name", alias = "name")
+    val name: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "family", alias = "family")
+    val family: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "age", alias = "age")
+    val age: Int? get() = error("Typed output property must not be read")
+}
+
+@QBQuery(name = "user_display_query_v3", alias = "v3_user_display")
+class UserDisplayQueryV3 {
+    @QBQuerySelect(name = "id", alias = "id")
+    val id: Int get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "full_name", alias = "fullName")
+    val fullName: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "age", alias = "age")
+    val age: Int? get() = error("Typed output property must not be read")
+}
+~~~
+
+نمونهٔ declaration در UserStatsQueryV3:
+
+~~~kotlin
+import gog.my_project.data_base.core.annotations.models.QBQuery
+import gog.my_project.data_base.core.annotations.models.QBQuerySelect
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
+import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.buildCte
+import gog.my_project.data_base.query.example.v3.queries.models.UserModelV3
+
+@QBQuery(name = "user_stats_query_v3", alias = "v3_user_stats")
+class UserStatsQueryV3(
+    override val params: RelationFilters,
+) : ICteDeclaration<UserStatsQueryV3.RelationFilters> {
 
     data class RelationFilters(
         val userId: Int? = null,
         val minAge: Int? = null,
     )
 
-    override val relationName = "v3_user_stats"
+    @QBQuerySelect(name = "id", alias = "id")
+    val id: Int get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "name", alias = "name")
+    val name: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "family", alias = "family")
+    val family: String? get() = error("Typed output property must not be read")
+    @QBQuerySelect(name = "age", alias = "age")
+    val age: Int? get() = error("Typed output property must not be read")
 
-    val id: Int
-        get() = error("Typed output property must not be read")
-
-    val name: String?
-        get() = error("Typed output property must not be read")
-
-    override fun queryRelation(params: RelationFilters): QueryRelation =
-        buildQueryRelation {
+    override fun createCte(params: RelationFilters): Cte =
+        buildCte {
             select {
-                addColumn {
-                    column(UserModelV3::class, UserModelV3::id)
-                        .alias(UserStatsRelationV3::id)
-                }
-                addColumn {
-                    column(UserModelV3::class, UserModelV3::name)
-                        .alias(UserStatsRelationV3::name)
-                }
+                addColumn { column(UserModelV3::class, UserModelV3::id).alias(UserStatsQueryV3::id) }
+                addColumn { column(UserModelV3::class, UserModelV3::name).alias(UserStatsQueryV3::name) }
+                addColumn { column(UserModelV3::class, UserModelV3::family).alias(UserStatsQueryV3::family) }
+                addColumn { column(UserModelV3::class, UserModelV3::age).alias(UserStatsQueryV3::age) }
             }
-            table { table(UserModelV3::class) }
+            from { model(UserModelV3::class) }
         }
 }
 ~~~
 
-در declaration، alias(Relation::property) خروجی SELECT را به property typed وصل می‌کند؛ property خودِ دیتابیس یا مقدار ستون نیست. Consumer از relationColumn(Relation::property) استفاده می‌کند و نتیجه را با row.getValue(Relation::property) می‌خواند. Relationهای V3 فعلی annotation alias ندارند.
+در کد V3، سه declaration مستقیماً `ICteDeclaration<...>` را پیاده می‌کنند و `UserDisplayQueryV3` از کلاس پایهٔ اختیاری `CteDeclaration<...>` استفاده می‌کند. `alias(Query::property)` خروجی SELECT را به property typed متصل می‌کند، `cteOutput(Query::property, qualifier)` آن خروجی را از CTE فعال می‌خواند و `row.getValue(Query::property)` مقدار materialize‌شده را برمی‌گرداند. Getter propertyهای خروجی اجرا نمی‌شوند.
 
-از نظر declaration، UserStatsRelationV3، UserPhoneRelationV3 و UserPageRelationV3 مستقیماً IQueryRelation<RelationFilters> را پیاده می‌کنند. UserDisplayRelationV3 از QueryRelationDeclaration<RelationFilters> ارث‌بری می‌کند. این تفاوت فقط روش ساخت declaration را نشان می‌دهد؛ هر چهار مورد در مصرف به QueryRelation تبدیل می‌شوند.
+`QBQuerySelect.name` نام منطقی خروجی است و `QBQuerySelect.alias` نام منتشرشدهٔ SQL است. برای نمونه، در `UserPhoneQueryV3`، `id` نام منطقی دارد ولی با alias `user_id` منتشر می‌شود؛ reference typed هم از metadata همین alias استفاده می‌کند.
 
 جزئیات خروجی‌ها:
 
 ~~~text
-UserStatsRelationV3
+UserStatsQueryV3
     table source: UserModelV3
-    outputs: id, name, family, age
+    outputs: id, name, family, age (logical name = SQL alias)
 
-UserPhoneRelationV3
+UserPhoneQueryV3
     table source: UserModelV3
     INNER JOIN: UserPhoneModelV3
-    outputs: id, name, family, age, phone
+    outputs: id→user_id, name→user_name, family→user_family,
+             age→user_age, phone→user_phone (logical name → SQL alias)
 
-UserPageRelationV3
-    source: UserStatsRelationV3
-    outputs: id, name, family, age
-    applies limit and offset from RelationFilters
+UserPageQueryV3
+    source: UserStatsQueryV3
+    outputs: id, name, family, age (logical name = SQL alias)
+    applies limit and offset from Query filters
 
-UserDisplayRelationV3
+UserDisplayQueryV3
     table source: UserModelV3
     outputs: id, fullName, age
-    fullName expression: concat(name, '-', family)
+    fullName: logical name full_name, published SQL alias fullName
+    expression: concat(name, '-', family)
 ~~~
 
-Relationها از طریق QueryRelation ساخته و به source معرفی می‌شوند:
+هر چهار declaration با `QBQuery.name` نام پیش‌فرض CTE خود را می‌گیرند. برای استفاده در SELECT، declaration به `cte(declaration)` داخل `from { ... }` داده می‌شود؛ Builder از پارامترهای متصل‌شده استفاده می‌کند، `createCte(params)` را برای ساخت تعریف CTE فراخوانی می‌کند و نتیجه را به مسیر composition داخلی می‌سپارد. کلاس پایهٔ `CteDeclaration<P>` اختیاری است؛ پیاده‌سازی مستقیم `ICteDeclaration<P>` نیز پشتیبانی می‌شود.
 
 ~~~kotlin
-val stats = UserStatsRelationV3().queryRelation(
-    UserStatsRelationV3.RelationFilters(userId = 5),
-)
-
-val query = QueryRenderSelectBuilder()
-    .from(stats)
-    .select {
-        addColumn { relationColumn(UserStatsRelationV3::id) }
-        addColumn { relationColumn(UserStatsRelationV3::name) }
+queryManager
+    .queryBuilder { operations ->
+        operations.querySelect { query ->
+            query
+                .from {
+                    cte(UserStatsQueryV3(UserStatsQueryV3.RelationFilters(userId = 5)))
+                    alias("stats")
+                }
+                .select {
+                    addColumn { cteOutput(UserStatsQueryV3::id, "stats") }
+                    addColumn { cteOutput(UserStatsQueryV3::name, "stats") }
+                }
+        }
     }
+    .sql { (queryText, params) -> println(queryText + "\n" + params) }
+    .execute()
 ~~~
 
-در صورت دادن source alias، qualifier در مصرف خروجی هم صریح است؛ مثل details در نمونهٔ SELECT این بخش. نام Relation/CTE با alias مربوط به occurrence یکی نیست.
+در این نمونه alias صریح `stats` در بلوک `from` برای source occurrence تنظیم شده و همان qualifier به `cteOutput` داده شده است. در نمونهٔ بعدی، `details` همین نقش را برای UserPhone دارد. نام CTE از `QBQuery.name` می‌آید و با alias occurrence یکی نیست.
 
-وابستگی Relation چندلایه در UserPageRelationV3 به این شکل است:
+وابستگی Query چندلایه در UserPageQueryV3 به این شکل است:
 
 ~~~text
-UserStatsRelationV3
-    → UserPageRelationV3
+UserStatsQueryV3
+    → UserPageQueryV3
         → SELECT consumer
 ~~~
 
-UserPage خروجی‌های Stats را با همان propertyهای typed عبور می‌دهد و limit/offset را روی query داخلی اعمال می‌کند. UserPhoneRelation نیز با join بین UserModelV3 و UserPhoneModelV3 فیلد phone را به خروجی اضافه می‌کند. UserDisplayRelation خروجی fullName را از expression محاسبه‌شدهٔ concat نام و نام خانوادگی می‌سازد.
+UserPage خروجی‌های Stats را با همان propertyهای typed عبور می‌دهد و `limit`/`offset` را روی query داخلی اعمال می‌کند. UserPhone با join بین `UserModelV3` و `UserPhoneModelV3` خروجی `phone` را اضافه می‌کند. UserDisplay خروجی `fullName` را از expression محاسبه‌شدهٔ concat نام و نام خانوادگی می‌سازد.
 
 #### SELECT
 
 ~~~kotlin
-val query = QueryRenderSelectBuilder()
-    .from(
-        UserPhoneRelationV3().queryRelation(UserPhoneRelationV3.RelationFilters()),
-        "details",
-    )
-    .select {
-        addColumn { relationColumn(UserPhoneRelationV3::id, "details") }
-        addColumn { relationColumn(UserPhoneRelationV3::name, "details") }
-        addColumn { relationColumn(UserPhoneRelationV3::family, "details") }
-        addColumn { relationColumn(UserPhoneRelationV3::age, "details") }
-        addColumn { relationColumn(UserPhoneRelationV3::phone, "details") }
+queryManager
+    .queryBuilder { operations ->
+        operations.querySelect { query ->
+            query
+                .from {
+                    cte(UserPhoneQueryV3(UserPhoneQueryV3.RelationFilters()))
+                    alias("details")
+                }
+                .select {
+                    addColumn { cteOutput(UserPhoneQueryV3::id, "details") }
+                    addColumn { cteOutput(UserPhoneQueryV3::name, "details") }
+                    addColumn { cteOutput(UserPhoneQueryV3::family, "details") }
+                    addColumn { cteOutput(UserPhoneQueryV3::age, "details") }
+                    addColumn { cteOutput(UserPhoneQueryV3::phone, "details") }
+                }
+        }
     }
-
-queryManager.queryBuilder(query)
-    .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
+    .sql { (queryText, params) -> println(queryText + "\n" + params) }
     .execute()
     .success { rows ->
         rows.forEach { row ->
-            println("id=" + row.getValue(UserPhoneRelationV3::id))
-            println("name=" + row.getValue(UserPhoneRelationV3::name))
-            println("family=" + row.getValue(UserPhoneRelationV3::family))
-            println("phone=" + row.getValue(UserPhoneRelationV3::phone))
+            println("id=" + row.getValue(UserPhoneQueryV3::id))
+            println("name=" + row.getValue(UserPhoneQueryV3::name))
+            println("family=" + row.getValue(UserPhoneQueryV3::family))
+            println("age=" + row.getValue(UserPhoneQueryV3::age))
+            println("phone=" + row.getValue(UserPhoneQueryV3::phone))
         }
         rows
     }
@@ -550,41 +674,63 @@ queryManager.queryBuilder(query)
 SQL ساختاری:
 
 ~~~sql
-WITH v3_user_phone_details AS (
-    SELECT uu.id AS id, uu.name AS name, uu.family AS family,
-           uu.age AS age, up.phone AS phone
+WITH user_phone_query_v3 AS (
+    SELECT uu.id AS user_id, uu.name AS user_name, uu.family AS user_family,
+           uu.age AS user_age, up.phone AS user_phone
     FROM user_users AS uu
     INNER JOIN user_phones AS up ON uu.id = up.user_id
 )
-SELECT details.id AS id, details.name AS name, details.family AS family,
-       details.age AS age, details.phone AS phone
-FROM v3_user_phone_details AS details
+SELECT details.user_id AS user_id, details.user_name AS user_name,
+       details.user_family AS user_family, details.user_age AS user_age,
+       details.user_phone AS user_phone
+FROM user_phone_query_v3 AS details
 ~~~
 
 خروجی SELECT:
 
 ~~~text
-property                       output alias  DataType
-UserPhoneRelationV3::id        id            INT
-UserPhoneRelationV3::name      name          STRING
-UserPhoneRelationV3::family    family        STRING
-UserPhoneRelationV3::age       age           INT
-UserPhoneRelationV3::phone     phone         STRING
+property                    logical name  SQL alias   DataType
+UserPhoneQueryV3::id        id            user_id     INT
+UserPhoneQueryV3::name      name          user_name   STRING
+UserPhoneQueryV3::family    family        user_family STRING
+UserPhoneQueryV3::age       age           user_age    INT
+UserPhoneQueryV3::phone     phone         user_phone  STRING
 ~~~
 
-Qualifier details به‌صورت صریح در from و relationColumn آمده است. مثال‌های A2 تا A7 نیز whereIn، whereLike، شرط null، شرط مقداری، Relation صفحه‌بندی‌شده و خروجی fullName را نشان می‌دهند.
+Qualifier `details` به‌صورت صریح در `from` و `cteOutput` آمده است. مثال‌های A2 تا A7 نیز `whereIn`، `whereLike`، شرط null، شرط مقداری، Query صفحه‌بندی‌شده و خروجی `fullName` را نشان می‌دهند.
+
+#### افزودن CTE به `WITH`
+
+`IQueryWithsItemApi` دو overload برای افزودن CTE جدید دارد. `with(cte)` از نام مؤثر خود شیء `Cte` استفاده می‌کند؛ `with(withName, cte)` نام صریح caller را برای عبارت SQL `WITH` انتخاب می‌کند:
+
+~~~kotlin
+val statsDeclaration = UserStatsQueryV3(UserStatsQueryV3.RelationFilters())
+val statsCte = statsDeclaration.createCte(statsDeclaration.params)
+
+val withResolvedName = QueryRenderSelectBuilder().withs {
+    addWith { with(statsCte) }
+}
+
+val withExplicitName = QueryRenderSelectBuilder().withs {
+    addWith { with("published_stats", statsCte) }
+}
+~~~
+
+در overload نام‌دار، `published_stats` بر `statsCte.name` اولویت دارد، اما مقدار `statsCte.name` را تغییر نمی‌دهد. Builder نام انتخاب‌شده را در تعریف WITH و ارجاع‌های وابستگی به‌صورت هماهنگ به کار می‌برد. نام CTE از alias پیش‌فرض occurrence یعنی `QBQuery.alias` مستقل است؛ alias منبع همچنان از metadata یا `alias("...")` در همان occurrence می‌آید. نام صریح خالی و نام مؤثر تکراری رد می‌شود. APIهای قدیمی `with(name, ICte)` و `with(name, block)` نیز حفظ شده‌اند.
 
 #### INSERT
 
 ~~~kotlin
-val query = QueryRenderInsertBuilder()
-    .table { table(UserModelV3::class) }
-    .addValue { column(UserModelV3::class, UserModelV3::name, "Ali") }
-    .addValue { column(UserModelV3::class, UserModelV3::family, "Sadegi") }
-    .addValue { column(UserModelV3::class, UserModelV3::age, 50) }
-
-queryManager.queryBuilder(query)
-    .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
+queryManager
+    .queryBuilder { operations ->
+        operations.queryInsert {
+            table { table(UserModelV3::class) }
+            addValue { column(UserModelV3::class, UserModelV3::name, "Ali") }
+            addValue { column(UserModelV3::class, UserModelV3::family, "Sadegi") }
+            addValue { column(UserModelV3::class, UserModelV3::age, 50) }
+        }
+    }
+    .sql { (queryText, params) -> println(queryText + "\n" + params) }
     .execute()
     .success { key -> println("generated key: " + key); key }
     .error { failure -> println(failure) }
@@ -595,22 +741,24 @@ SQL ساختاری: INSERT INTO user_users (name, family, age) VALUES (...). ن�
 #### UPDATE
 
 ~~~kotlin
-val query = QueryRenderUpdateBuilder()
-    .table { table(UserModelV3::class) }
-    .addValue { column(UserModelV3::class, UserModelV3::name, "--changed--") }
-    .where {
-        conditions {
-            addCondition {
-                logicalAnd()
-                sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
-                operationEqual()
-                sideValue("id1", 5)
+queryManager
+    .queryBuilder { operations ->
+        operations.queryUpdate {
+            table { table(UserModelV3::class) }
+            addValue { column(UserModelV3::class, UserModelV3::name, "--changed--") }
+            where {
+                conditions {
+                    addCondition {
+                        logicalAnd()
+                        sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
+                        operationEqual()
+                        sideValue("id1", 5)
+                    }
+                }
             }
         }
     }
-
-queryManager.queryBuilder(query)
-    .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
+    .sql { (queryText, params) -> println(queryText + "\n" + params) }
     .execute()
     .success { count -> println("updated rows: " + count); count }
     .error { failure -> println(failure) }
@@ -621,22 +769,24 @@ SQL ساختاری: UPDATE user_users AS uu SET uu.name = ... WHERE (uu.id = ...
 #### DELETE
 
 ~~~kotlin
-val query = QueryRenderDeleteBuilder()
-    .addTarget("uu")
-    .table { table(UserModelV3::class) }
-    .where {
-        conditions {
-            addCondition {
-                logicalAnd()
-                sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
-                operationEqual()
-                sideValue("id1", 5)
+queryManager
+    .queryBuilder { operations ->
+        operations.queryDelete {
+            addTarget("uu")
+            table { table(UserModelV3::class) }
+            where {
+                conditions {
+                    addCondition {
+                        logicalAnd()
+                        sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
+                        operationEqual()
+                        sideValue("id1", 5)
+                    }
+                }
             }
         }
     }
-
-queryManager.queryBuilder(query)
-    .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
+    .sql { (queryText, params) -> println(queryText + "\n" + params) }
     .execute()
     .success { count -> println("deleted rows: " + count); count }
     .error { failure -> println(failure) }
@@ -652,6 +802,441 @@ SQL ساختاری: DELETE uu FROM user_users AS uu WHERE (uu.id = ...). نتی�
 |---|---|---|---|---|
 | V1 | alias و DataType صریح؛ خواندن با alias | generated key: Long | affected rows: Int | affected rows: Int |
 | V2 | Model property؛ خواندن با Model::property | Model | Model | Model |
-| V3 | Relation property و qualifier صریح در صورت alias؛ خواندن با Relation::property | Model V3 | Model V3 | Model V3 |
+| V3 | Query property و SQL alias اعلام‌شده؛ خواندن با `Query::property` | Model V3 | Model V3 | Model V3 |
 
 SELECT.execute() همهٔ ردیف‌ها را به‌صورت eager و با نوع ExecuteResult<List<QueryRow>> برمی‌گرداند. Consumer متد first() نیز برای دریافت اولین ردیف دارد. INSERT/UPDATE/DELETE فقط پس از فعال‌کردن گزینهٔ مربوط به اجرا اجرا می‌شوند.
+
+### Rules
+
+<a id="rules-model"></a>
+#### Model
+
+##### ۱.۱. Metadata سطح کلاس
+
+تعریف Model:
+
+```kotlin
+@QBTable(name = "user_users", alias = "uu")
+class UserModel : IModelBase
+```
+
+###### مرحله اول: مقادیر پیش‌فرض
+
+Engine مقادیر اولیه را از نام کلاس استخراج می‌کند:
+
+```text
+tableName  = user
+tableAlias = user
+```
+
+در این مثال، پسوند انتهایی `Model` از نام کلاس حذف و نام باقی‌مانده به `snake_case` تبدیل می‌شود.
+
+###### مرحله دوم: اعمال `QBTable`
+
+مقادیر Annotation جایگزین مقادیر پیش‌فرض متناظر می‌شوند:
+
+```text
+tableName  = user_users
+tableAlias = uu
+```
+
+- `QBTable.name` نام جدول منبع را مشخص می‌کند.
+- `QBTable.alias`، alias پیش‌فرض جدول را مشخص می‌کند.
+
+###### مرحله سوم: اعمال تنظیمات DSL
+
+```kotlin
+table {
+    table(UserModel::class)
+    alias("uu1")
+}
+```
+
+مقادیر نهایی:
+
+```text
+tableName  = user_users
+tableAlias = uu1
+```
+
+alias صریح DSL بر alias تعریف‌شده در Annotation اولویت دارد، اما نام جدول را تغییر نمی‌دهد.
+
+###### ترتیب اولویت در سطح کلاس
+
+| فیلد | ترتیب Resolve |
+|---|---|
+| `tableName` | نام پیش‌فرض حاصل از کلاس ← `QBTable.name` |
+| `tableAlias` | alias پیش‌فرض ← `QBTable.alias` ← alias صریح DSL |
+
+در این مثال، چون override مستقیمی برای `tableName` در DSL وجود ندارد، مقدار Annotation حفظ می‌شود.
+
+##### ۱.۲. Metadata سطح Property
+
+تعریف Property:
+
+```kotlin
+@QBColumn(
+    name = "user_id",
+    alias = "user_id",
+    primaryKey = true
+)
+val id: Int = 0
+```
+
+فرض می‌کنیم Metadata جدول قبلاً Resolve شده است.
+
+###### مرحله اول: مقادیر پیش‌فرض
+
+```text
+tableName      = user_users
+tableAlias     = uu1
+-------------------------
+columnName     = id
+columnAlias    = id
+columnDataType = INT
+```
+
+مقادیر اولیه به این صورت تعیین می‌شوند:
+
+- `columnName` از نام Property گرفته می‌شود.
+- `columnAlias` به‌صورت پیش‌فرض برابر نام Property است.
+- `columnDataType` از نوع تعریف‌شده Property، یعنی `Int`، استنباط می‌شود.
+
+###### مرحله دوم: اعمال `QBColumn`
+
+```text
+tableName      = user_users
+tableAlias     = uu1
+-------------------------
+columnName     = user_id
+columnAlias    = user_id
+columnDataType = INT
+```
+
+در این مرحله:
+
+- `QBColumn.name` نام ستون منبع را override می‌کند.
+- `QBColumn.alias`، alias پیش‌فرض ستون را override می‌کند.
+- نوع داده همچنان `INT` باقی می‌ماند، زیرا Annotation در این مثال نوع داده را تغییر نمی‌دهد.
+
+همچنین Metadata مربوط به `primaryKey = true` باید مستقل از نام و alias ستون حفظ شود.
+
+###### مرحله سوم: اعمال تنظیمات DSL
+
+```kotlin
+addColumn {
+    column(UserModel::class, UserModel::id)
+    alias("user_id_out")
+    execute(DataType.LONG)
+}
+```
+
+مقادیر نهایی:
+
+```text
+tableName      = user_users
+tableAlias     = uu1
+-------------------------
+columnName     = user_id
+columnAlias    = user_id_out
+columnDataType = LONG
+```
+
+نتیجه:
+
+- `columnName` برابر `user_id` باقی می‌ماند.
+- `columnAlias` به `user_id_out` تغییر می‌کند.
+- `columnDataType` به دلیل فراخوانی `execute(DataType.LONG)` برابر `LONG` می‌شود.
+
+تغییر نوع خروجی Query نباید نوع تعریف‌شده Property یا Metadata اصلی Model را تغییر دهد.
+
+###### ترتیب اولویت در سطح Property
+
+| فیلد | ترتیب Resolve |
+|---|---|
+| `columnName` | نام پیش‌فرض Property ← `QBColumn.name` |
+| `columnAlias` | alias پیش‌فرض Property ← `QBColumn.alias` ← alias صریح DSL |
+| `columnDataType` | نوع استنباط‌شده از Property ← نوع صریح DSL از طریق `execute(DataType)` |
+
+---
+
+<a id="rules-query"></a>
+#### Query
+
+در Query، چند مفهوم مستقل وجود دارند که نباید با یکدیگر ادغام شوند:
+
+- نام منطقی تعریف Query
+- نام CTE مورد استفاده در SQL
+- alias پیش‌فرض Query
+- alias یک occurrence مشخص از CTE در Query
+- نام منطقی خروجی Property
+- SQL alias خروجی
+- نوع داده خروجی
+
+این مقادیر حتی اگر در یک مثال برابر باشند، الزاماً معنای یکسانی ندارند.
+
+##### ۲.۱. Metadata سطح کلاس
+
+تعریف Query:
+
+```kotlin
+@QBQuery(
+    name = "user_display_query_v3",
+    alias = "v3_user_display"
+)
+class UserDisplayQueryV3(
+    params: UserDisplayQueryV3.RelationFilters,
+) : CteDeclaration<UserDisplayQueryV3.RelationFilters>(params) {
+    data class RelationFilters(val userId: Int? = null)
+}
+```
+
+###### مرحله اول: مقادیر پیش‌فرض
+
+Engine نام‌های اولیه را از قرارداد نام‌گذاری کلاس استخراج می‌کند:
+
+```text
+cteName             = user_display_query_v3
+defaultOccurrenceAlias = user_display_query_v3
+```
+
+در این نام کلاس، نام به `snake_case` تبدیل می‌شود؛ قرارداد حذف پسوند `Query` فقط هنگامی اعمال می‌شود که نام کلاس واقعاً به آن پسوند ختم شود.
+
+###### مرحله دوم: اعمال `QBQuery`
+
+```text
+cteName               = user_display_query_v3
+defaultOccurrenceAlias = v3_user_display
+```
+
+در این مرحله:
+
+- `QBQuery.name` نام پیش‌فرض runtime برای CTE را تعیین می‌کند.
+- `QBQuery.alias`، alias پیش‌فرض occurrence منبع را تعیین می‌کند.
+
+این مقادیر مستقل‌اند: نام CTE هویت SQL در `WITH` را مشخص می‌کند و alias فقط source occurrence را نام‌گذاری می‌کند.
+
+###### مرحله سوم: ساخت CTE و اعمال DSL
+
+```kotlin
+from {
+    cte(UserDisplayQueryV3(UserDisplayQueryV3.RelationFilters()))
+    alias("cte_user_display")
+}
+```
+
+مقادیر نهایی CTE و occurrence در این مثال:
+
+```text
+runtime CTE name       = user_display_query_v3
+source occurrence alias = cte_user_display
+```
+
+توضیح:
+
+- نام runtime CTE از `QBQuery.name` resolve می‌شود؛ در این مسیر declaration نام صریح مستقلی ندارد.
+- alias صریح `cte_user_display`، alias همان source occurrence را override می‌کند.
+- مقدار `v3_user_display` همچنان alias پیش‌فرض occurrence است، اما در این نمونه به دلیل وجود override صریح DSL استفاده نمی‌شود.
+
+**نکتهٔ نام‌گذاری:** helper ساخت CTE از Declaration، `QBQuery.name` و سپس convention کلاس را به‌کار می‌گیرد. Factoryای که نام runtime را صریحاً دریافت می‌کند، آن نام را بر metadata مقدم می‌کند. `QBQuery.alias` فقط alias پیش‌فرض occurrence است و `alias("...")` در بلوک `from { cte(declaration); ... }` فقط همان occurrence را override می‌کند. `with(cte)` از `Cte.name` استفاده می‌کند؛ `with(withName, cte)` نام صریح caller را برای SQL `WITH` و ارجاع‌های وابستگی مقدم می‌کند، بدون تغییر `Cte.name` یا alias occurrence.
+
+###### ترتیب اولویت در سطح کلاس
+
+| فیلد یا مفهوم | ترتیب Resolve |
+|---|---|
+| نام پیش‌فرض CTE از Declaration | convention کلاس ← `QBQuery.name` |
+| نام CTE در factory دارای نام صریح | convention کلاس ← `QBQuery.name` ← `name` صریح factory |
+| نام CTE در `WITH` | `Cte.name` برای `with(cte)` ← `withName` صریح برای `with(withName, cte)` |
+| alias پیش‌فرض occurrence | convention کلاس ← `QBQuery.alias` |
+| alias occurrence در DSL | alias صریح `from { ... }` ← alias حاصل از metadata |
+
+نام `Cte.name` از نام انتخاب‌شده هنگام ساخت CTE پیروی می‌کند. `with(withName, cte)` نام شیء CTE را تغییر نمی‌دهد؛ فقط نام SQL همان مورد WITH و ارجاع‌های وابسته را با نام صریح caller هماهنگ می‌کند.
+
+###### افزودن CTE به `WITH`
+
+`IQueryWithsItemApi` دو ورودی برای CTE جدید دارد. Declaration ابتدا به یک شیء `Cte` تبدیل می‌شود؛ سپس یکی از دو overload زیر آن را به `WITH` اضافه می‌کند:
+
+~~~kotlin
+val declaration = UserDisplayQueryV3(UserDisplayQueryV3.RelationFilters())
+val cte = declaration.createCte(declaration.params)
+
+val useCteName = QueryRenderSelectBuilder().withs {
+    addWith { with(cte) }
+}
+
+val useExplicitName = QueryRenderSelectBuilder().withs {
+    addWith { with("published_user_display", cte) }
+}
+~~~
+
+`with(cte)` از `Cte.name` استفاده می‌کند. `with(withName, cte)` نام صریح را برای تعریف SQL `WITH` به کار می‌برد و آن را در ارجاع‌های dependency نیز هماهنگ می‌کند؛ خود `Cte.name` تغییر نمی‌کند. این نام‌گذاری از `QBQuery.alias` و alias occurrence مستقل است. نام خالی و نام مؤثر تکراری در composition پذیرفته نمی‌شوند. overloadهای legacy `with(name, ICte)` و `with(name, block)` حفظ شده‌اند.
+
+##### ۲.۲. Metadata سطح Property
+
+تعریف Property خروجی:
+
+```kotlin
+@QBQuerySelect(
+    name = "full_name",
+    alias = "fullName"
+)
+val fullName: String?
+    get() = error("Typed output property must not be read")
+```
+
+Getter عمداً خطا ایجاد می‌کند تا مشخص شود Engine باید Metadata را از Declaration، Reflection و Annotation استخراج کند، نه از خواندن مقدار Property.
+
+###### مرحله اول: مقادیر پیش‌فرض
+
+با فرض اینکه CTE و source occurrence قبلاً Resolve شده باشند:
+
+```text
+cteName             = user_display_query_v3
+occurrenceAlias     = cte_user_display
+-------------------------
+logicalOutputName   = full_name
+publishedSqlAlias   = full_name
+columnDataType = STRING
+```
+
+مقادیر اولیه به این صورت تعیین می‌شوند:
+
+- نام منطقی و SQL alias پیش‌فرض از Property یعنی `fullName` به `snake_case` یعنی `full_name` تبدیل می‌شوند.
+- `columnDataType` از نوع تعریف‌شده Property یعنی `String?` استنباط می‌شود و به `STRING` نگاشت می‌شود.
+
+###### مرحله دوم: اعمال `QBQuerySelect`
+
+```text
+cteName             = user_display_query_v3
+occurrenceAlias     = cte_user_display
+-------------------------
+logicalOutputName   = full_name
+publishedSqlAlias   = fullName
+columnDataType = STRING
+```
+
+در این مرحله:
+
+- `QBQuerySelect.name` نام منطقی خروجی Property را تعیین می‌کند.
+- `QBQuerySelect.alias`، SQL alias منتشرشدهٔ خروجی را تعیین می‌کند.
+- نوع داده همچنان `STRING` باقی می‌ماند.
+
+نام منطقی خروجی و SQL alias دو فیلد مستقل هستند؛ در این مثال `full_name` و `fullName` مقادیر متفاوتی دارند.
+
+###### مرحله سوم: اعمال تنظیمات DSL
+
+```kotlin
+addColumn {
+    cteOutput(UserDisplayQueryV3::fullName)
+    alias("name")
+    execute(DataType.LONG)
+}
+```
+
+مقادیر نهایی:
+
+```text
+cteName             = user_display_query_v3
+occurrenceAlias     = cte_user_display
+-------------------------
+logicalOutputName   = full_name
+publishedSqlAlias   = name
+columnDataType = LONG
+```
+
+نتیجه:
+
+- نام منطقی خروجی `full_name` باقی می‌ماند؛ زیرا alias صریح خروجی آن را تغییر نمی‌دهد.
+- SQL alias خروجی به `name` تغییر می‌کند؛ زیرا alias صریح DSL بر `QBQuerySelect.alias` اولویت دارد.
+- `columnDataType` به `LONG` تغییر می‌کند؛ زیرا `execute(DataType.LONG)` نوع خروجی را صریحاً تعیین می‌کند.
+
+این تغییر نوع فقط به خروجی Query مربوط است و نباید نوع تعریف‌شده Property یا Metadata اصلی Query را تغییر دهد.
+
+**توجه:** این مثال صرفاً برای توضیح اولویت‌بندی Metadata است. با توجه به اینکه Property از نوع `String?` است، تعیین `DataType.LONG` لزوماً با نوع واقعی مقدار خروجی سازگار نیست. بررسی سازگاری نوع داده موضوعی مستقل از اولویت‌بندی Metadata است.
+
+Engine همچنین نباید Getter مربوط به `fullName` را برای Resolve کردن Metadata فراخوانی کند.
+
+###### ترتیب اولویت در سطح Property
+
+| فیلد | ترتیب Resolve |
+|---|---|
+| نام منطقی خروجی | نام پیش‌فرض Property ← `QBQuerySelect.name` |
+| SQL alias خروجی | alias پیش‌فرض Property ← `QBQuerySelect.alias` ← alias صریح DSL |
+| نوع داده خروجی | نوع استنباط‌شده از Property ← نوع صریح DSL از طریق `execute(DataType)` |
+
+تغییر SQL alias نباید نام منطقی خروجی را تغییر دهد. به همین ترتیب، تغییر نوع خروجی نباید نوع تعریف‌شده Property را بازنویسی کند.
+
+---
+
+#### ۳. تفاوت مقدار تعریف‌نشده و رشته خالی
+
+مقدار تعریف‌نشده و رشته خالی الزاماً معنای یکسانی ندارند.
+
+برای فیلدهای جدید Annotationهای Query، در صورت نیاز به تشخیص این دو حالت، می‌توان از یک مقدار قراردادی مانند `QB_METADATA_UNSET` استفاده کرد.
+
+- **تعریف‌نشده:** مقداری برای فیلد ارائه نشده است؛ بنابراین مقدار پیش‌فرض یا fallback متناظر قابل استفاده است.
+- **رشته خالی صریح:** مقدار فیلد عمداً خالی تعیین شده است؛ اگر آن فیلد الزاماً باید مقدار غیرخالی داشته باشد، باید اعتبارسنجی آن را رد کند.
+
+رفتار فعلی Annotationهای Model باید حفظ شود. به‌ویژه، مقادیر پیش‌فرض رشته خالی در `QBTable` و `QBColumn` نباید صرفاً برای یکسان‌سازی با Query تغییر کنند.
+
+استفاده از `QB_METADATA_UNSET` نباید بدون بررسی سازگاری به فیلدهای موجود Model تعمیم داده شود.
+
+---
+
+#### ۴. قواعد عمومی Resolve کردن Metadata
+
+قواعد زیر برای فرآیند Resolve کردن Metadata اعمال می‌شوند:
+
+1. مقادیر پیش‌فرض پیش از Annotationها تعیین شوند.
+2. هر Annotation فقط فیلدهای متناظر خود را تغییر دهد.
+3. تنظیمات صریح DSL در مرحله آخر اعمال شوند و فقط فیلدهایی را تغییر دهند که آن عملیات برای override کردنشان تعریف شده است.
+4. نام منطقی، نام منبع، نام CTE، SQL alias و نوع داده مستقل باقی بمانند.
+5. یکسان بودن مقدار دو فیلد به معنای یکسان بودن مفهوم آن‌ها نیست.
+6. Getter مربوط به Propertyهای خروجی Typed Query برای Resolve کردن Metadata فراخوانی نشود.
+7. `relationName` بخشی از قرارداد Query نیست؛ نام runtime پیش‌فرض CTE از `QBQuery.name` و سپس convention مجاز resolve می‌شود، درحالی‌که نام صریح factory بر آن مقدم است.
+8. رفتار موجود Model در مواردی که با قواعد جدید Query متفاوت است، حفظ شود.
+9. override نوع خروجی از نوع تعریف‌شده Property مستقل باقی بماند.
+10. اعتبارسنجی Metadata پس از تکمیل Declaration مربوط به SELECT و پیش از ساخت `BuiltCteComposition` انجام شود.
+
+##### الزامات اعتبارسنجی
+
+- اعتبارسنجی یکتایی SQL aliasها حفظ شود.
+- یکتایی نام‌های منطقی خروجی در میان خروجی‌های Typed متعلق به قرارداد فعلی Query بررسی شود.
+- تعلق یک خروجی به Query بر اساس رابطه موجود `declarationOwner` تعیین شود، نه صرفاً بر اساس کلاسی که Property در آن تعریف شده است.
+- Property معتبر به‌ارث‌رسیده نباید صرفاً به دلیل تعریف‌شدن در کلاس والد حذف شود.
+- Propertyهای منبع Model نباید به‌عنوان خروجی‌های Query شناسایی شوند.
+- برای اعتبارسنجی، مقدار Property نباید خوانده شود.
+
+---
+
+#### ۵. سازگاری و محدوده تغییرات
+
+این سند قرارداد Resolve کردن و اولویت‌بندی Metadata را مشخص می‌کند و به‌خودی‌خود مجوز تغییر سایر بخش‌های معماری Query Builder نیست.
+
+مگر اینکه یک مانع فنی مشخص، تغییر دیگری را ضروری کند:
+
+- AST، Executor، `QueryRow`، Materializer و امضاهای API عمومی تغییر نکنند.
+- قرارداد `Cte`، `ICteDeclaration<P>` و مسیر composition آن‌ها حفظ شود؛ نام صریح `with(withName, cte)` فقط نام SQL همان WITH را override کند.
+- صرفاً برای یکسان‌سازی ظاهری Metadataهای Model و Query، abstraction عمومی جدیدی اضافه نشود.
+- رفتار فعلی رشته خالی در Annotationهای Model تغییر نکند.
+- وجود `QBQuery.name` نباید نام صریحی را که caller به factory ساخت CTE داده است بازنویسی کند.
+- Resolve کردن Metadata از اجرای Query و استخراج مقدار Property مستقل باقی بماند.
+
+هر تغییر در این محدوده‌ها باید جداگانه توجیه و تأیید شود، نه اینکه به‌صورت ضمنی وارد بازنویسی Metadata شود.
+
+---
+
+#### ۶. معیارهای پذیرش
+
+پیاده‌سازی زمانی با این قرارداد سازگار است که:
+
+1. مثال کلاس Model به `tableName = user_users` و `tableAlias = uu1` برسد.
+2. مثال Property در Model به `columnName = user_id`، `columnAlias = user_id_out` و `columnDataType = LONG` برسد.
+3. نام منطقی و alias تعریف‌شده در Annotation مربوط به Query حفظ شوند.
+4. مثال Query به `cteName = user_display_query_v3` و `occurrenceAlias = cte_user_display` برسد: نام runtime از `QBQuery.name` و alias از override همان occurrence می‌آید.
+5. مثال خروجی Query به نام منطقی `full_name`، SQL alias برابر `name` و نوع خروجی `LONG` برسد.
+6. هر override فقط فیلد متناظر خود را تغییر دهد.
+7. Getter مربوط به Property خروجی Typed Query برای Resolve کردن Metadata فراخوانی نشود.
+8. نام منطقی Query، نام runtime CTE و alias occurrence مستقل باقی بمانند؛ نام `withName` صریح فقط در SQL `WITH` override شود.
+9. رفتار موجود Model و APIهای عمومی Query و CTE حفظ شوند.
+10. اعتبارسنجی Metadata پیش از ساخت `BuiltCteComposition` انجام شود.

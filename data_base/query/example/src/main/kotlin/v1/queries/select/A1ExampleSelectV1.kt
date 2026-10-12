@@ -39,7 +39,7 @@ class A1ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
                 execute(DataType.STRING)
             }
         }
-        .table { table("user_users").alias("uu") }
+        .from { table("user_users").alias("uu") }
         .joins {
             addJoin {
                 innerJoin()

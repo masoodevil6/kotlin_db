@@ -19,7 +19,7 @@ class A1ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             addColumn { column(UserModelV2::class, UserModelV2::age) }
             addColumn { column(UserPhoneModelV2::class, UserPhoneModelV2::phone) }
         }
-        .table { table(UserModelV2::class) }
+        .from { model(UserModelV2::class) }
         .joins {
             addJoin {
                 innerJoin()

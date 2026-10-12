@@ -7,22 +7,22 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.select.IQu
 import gog.my_project.data_base.query.ast.schema.select_schema.column.QueryColumnsAst
 import gog.my_project.data_base.query.ast.schema.select_schema.select.QuerySelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
-import gog.my_project.data_base.query.builder.ast.select_builder.RelationSourceContext
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 import gog.my_project.data_base.query.builder.ast.select_builder.column.QueryColumnsBuilder
 
 class QuerySelectBuilder internal constructor(
     override var params: MutableList<SqlParameter<*>>,
     override var ast: IQuerySelectAst,
     private val modelAliasContext: ModelTableAliasContext,
-    private val relationSourceContext: RelationSourceContext,
-    private val relationDefinitionName: String?,
-    private val relationDeclarationOwner: kotlin.reflect.KClass<*>?,
+    private val querySourceContext: CteSourceContext,
+    private val queryDefinitionName: String?,
+    private val queryDeclarationOwner: kotlin.reflect.KClass<*>?,
 ) : IQuerySelectApi {
 
     constructor(
         params: MutableList<SqlParameter<*>> = mutableListOf(),
         ast: IQuerySelectAst = QuerySelectAst(),
-    ) : this(params, ast, ModelTableAliasContext(), RelationSourceContext(), null, null)
+    ) : this(params, ast, ModelTableAliasContext(), CteSourceContext(), null, null)
 
     override fun addColumn(
         blockColumn: IQueryColumnsApi.() -> Unit
@@ -33,12 +33,12 @@ class QuerySelectBuilder internal constructor(
             params,
             ast,
             modelAliasContext,
-            relationSourceContext,
-            relationDefinitionName,
-            relationDeclarationOwner,
+            querySourceContext,
+            queryDefinitionName,
+            queryDeclarationOwner,
         ).apply(blockColumn)
-        require(relationDefinitionName == null || builder.hasExplicitAlias) {
-            "Every QueryRelation SELECT item must name its SQL output with alias(...)"
+        require(queryDefinitionName == null || builder.hasExplicitAlias) {
+            "Every Cte SELECT item must name its SQL output with alias(...)"
         }
         this.ast.columns.add(ast);
         return this;

@@ -170,11 +170,11 @@ class TypedModelReferenceTest {
 
     @Test
     fun `source alias is independent of table and cte declaration order`() {
-        val tableQuery = QueryRenderSelectBuilder().table {
+        val tableQuery = QueryRenderSelectBuilder().from {
             alias("shared")
             table("users")
         }
-        val cteQuery = QueryRenderSelectBuilder().table {
+        val cteQuery = QueryRenderSelectBuilder().from {
             cte("user_cte")
             alias("shared")
         }
@@ -187,7 +187,7 @@ class TypedModelReferenceTest {
 
     @Test
     fun `string source can be declared without an alias`() {
-        val query = QueryRenderSelectBuilder().table {
+        val query = QueryRenderSelectBuilder().from {
             table("users")
         }
 
@@ -202,8 +202,8 @@ class TypedModelReferenceTest {
                     column(TestUser::class, TestUser::userName)
                 }
             }
-            .table {
-                table(TestUser::class).alias("u")
+            .from {
+                model(TestUser::class).alias("u")
             }
 
         val table = query.ast.table!!
@@ -219,7 +219,7 @@ class TypedModelReferenceTest {
     @Test
     fun `typed column uses table and select defaults`() {
         val query = QueryRenderSelectBuilder()
-            .table { table(TestUser::class) }
+            .from { model(TestUser::class) }
             .select {
                 addColumn {
                     column(TestUser::class, TestUser::userName)
@@ -251,7 +251,7 @@ class TypedModelReferenceTest {
                     column(TestUser::class, TestUser::userName)
                 }
             }
-            .table { table(TestUser::class).alias("") }
+            .from { model(TestUser::class).alias("") }
 
         assertEquals("", query.ast.table!!.tableAlias)
         assertEquals("", query.ast.select!!.columns.single().Column!!.tableAlias)
@@ -279,10 +279,10 @@ class TypedModelReferenceTest {
     @Test
     fun `missing or empty table and column metadata fail`() {
         assertFailsWith<IllegalArgumentException> {
-            QueryRenderSelectBuilder().table { table(MissingTableModel::class) }
+            QueryRenderSelectBuilder().from { model(MissingTableModel::class) }
         }
         assertFailsWith<IllegalArgumentException> {
-            QueryRenderSelectBuilder().table { table(EmptyTableModel::class) }
+            QueryRenderSelectBuilder().from { model(EmptyTableModel::class) }
         }
         assertFailsWith<IllegalArgumentException> {
             QueryRenderSelectBuilder().select {
@@ -305,7 +305,7 @@ class TypedModelReferenceTest {
                     alias("user_id")
                 }
             }
-            .table { table("users").alias("u") }
+            .from { table("users").alias("u") }
 
         val column = query.ast.select!!.columns.single()
         assertEquals("users", query.ast.table!!.table)
@@ -324,7 +324,7 @@ class TypedModelReferenceTest {
                     alias("name")
                 }
             }
-            .table { table(TestUser::class).alias("u") }
+            .from { model(TestUser::class).alias("u") }
 
         val sql = MySqlDialect().render(query.ast)!!
 
@@ -342,7 +342,7 @@ class TypedModelReferenceTest {
                     column(Users::class, Users::userAge)
                 }
             }
-            .table { table(Users::class) }
+            .from { model(Users::class) }
 
         val sql = MySqlDialect().render(query.ast)!!
 
@@ -360,7 +360,7 @@ class TypedModelReferenceTest {
                     alias("")
                 }
             }
-            .table { table(TestUser::class).alias("") }
+            .from { model(TestUser::class).alias("") }
 
         val sql = MySqlDialect().render(query.ast)!!
 

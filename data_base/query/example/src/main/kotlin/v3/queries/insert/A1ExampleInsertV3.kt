@@ -9,7 +9,9 @@ import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleInsertV3 : IExampleV3<IQueryRenderInsertApi> {
-    override fun query(): IQueryRenderInsertApi = QueryRenderInsertBuilder()
+    override fun query(): IQueryRenderInsertApi = configureQuery(QueryRenderInsertBuilder())
+
+    private fun configureQuery(query: IQueryRenderInsertApi): IQueryRenderInsertApi = query
         .table { table(UserModelV3::class) }
         .addValue { column(UserModelV3::class, UserModelV3::name, "Ali") }
         .addValue { column(UserModelV3::class, UserModelV3::family, "Sadegi") }
@@ -17,8 +19,8 @@ class A1ExampleInsertV3 : IExampleV3<IQueryRenderInsertApi> {
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         queryManager
-            .queryBuilder(query())
-            .sql { builtQuery -> println("V3-Insert query: ${builtQuery.query}; params: ${builtQuery.params}") }
+            .queryBuilder { operations -> operations.queryInsert { configureQuery(this) } }
+            .sql { (queryText, params) -> println("V3-Insert query: $queryText; params: $params") }
             .execute()
             .success { generatedKey ->
                 println("V3-Insert: $generatedKey")

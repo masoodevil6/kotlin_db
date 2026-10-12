@@ -20,7 +20,7 @@ class A7ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
             }
             addColumn { column { tableColumn("uu", "age") }; alias("user_age"); execute(DataType.INT) }
         }
-        .table { table("user_users").alias("uu") }
+        .from { table("user_users").alias("uu") }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         val query = query()

@@ -18,7 +18,7 @@ class A4ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             addColumn { column(UserModelV2::class, UserModelV2::family) }
             addColumn { column(UserModelV2::class, UserModelV2::age) }
         }
-        .table { table(UserModelV2::class) }
+        .from { model(UserModelV2::class) }
         .where {
             conditions {
                 addCondition {

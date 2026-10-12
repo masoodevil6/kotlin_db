@@ -18,7 +18,7 @@ class A4ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
             addColumn { column { tableColumn("uu", "family") }; alias("user_family"); execute(DataType.STRING) }
             addColumn { column { tableColumn("uu", "age") }; alias("user_age"); execute(DataType.INT) }
         }
-        .table { table("user_users").alias("uu") }
+        .from { table("user_users").alias("uu") }
         .where {
             conditions {
                 addCondition {

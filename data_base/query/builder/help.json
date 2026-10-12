@@ -22,11 +22,11 @@
     },
     {
       "id": "query-builder-query-relation-declaration",
-      "title": "QueryRelationDeclarationTest.kt — آزمون تعریف Relation",
+      "title": "QueryDeclarationTest.kt — آزمون تعریف Relation",
       "description": "اعتبارسنجی base declaration و metadata مالک Concrete Relation.",
       "runner": {
         "type": "gradle-test",
-        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.QueryRelationDeclarationTest"
+        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.QueryDeclarationTest"
       },
       "parameters": [],
       "report": {

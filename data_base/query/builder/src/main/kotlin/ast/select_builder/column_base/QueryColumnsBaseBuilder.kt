@@ -1,15 +1,13 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.column_base
 
-import gog.my_project.data_base.core.annotations.models.QBColumn
-import gog.my_project.data_base.core.annotations.models.QBTable
 import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column_base.IQueryColumnsBaseAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
+import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
-import kotlin.reflect.full.findAnnotation
 
 class QueryColumnsBaseBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
@@ -21,20 +19,11 @@ class QueryColumnsBaseBuilder(
         property: KProperty1<T, R>,
         tableAlias: String,
     ): IQueryColumnsBaseApi {
-        val tableMetadata = table.findAnnotation<QBTable>()
-            ?: throw IllegalArgumentException("${table.qualifiedName} must be annotated with @QBTable")
-        require(tableMetadata.name.isNotEmpty()) {
-            "@QBTable on ${table.qualifiedName} must declare a non-empty table name"
-        }
-
-        val columnMetadata = property.findAnnotation<QBColumn>()
-            ?: throw IllegalArgumentException("${property.name} on ${table.qualifiedName} must be annotated with @QBColumn")
-        require(columnMetadata.name.isNotEmpty()) {
-            "@QBColumn on ${table.qualifiedName}.${property.name} must declare a non-empty column name"
-        }
+        QueryBuilderMetadata.requireTable(table)
+        val columnMetadata = QueryBuilderMetadata.requireColumn(table, property)
 
         ast.tableAlias = tableAlias
-        ast.column = columnMetadata.name
+        ast.column = QueryBuilderMetadata.columnName(table, property, columnMetadata)
         return this
     }
 

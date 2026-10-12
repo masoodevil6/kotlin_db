@@ -1,42 +1,37 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.column
 
-import gog.my_project.data_base.core.annotations.models.QBColumn
-import gog.my_project.data_base.core.annotations.models.QBTable
 import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column.IQueryColumnsApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
-import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
-import gog.my_project.data_base.query.api.interfaces.relations.IQueryRelation
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
+import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.tools.enums.SqlMethodColumn
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.ast.schema.select_schema.column.QueryColumnsAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
-import gog.my_project.data_base.query.builder.ast.select_builder.RelationSourceContext
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
-import kotlin.reflect.full.companionObjectInstance
-import kotlin.reflect.full.findAnnotation
-import kotlin.reflect.full.memberProperties
-import kotlin.reflect.jvm.isAccessible
 
 class QueryColumnsBuilder internal constructor(
     override var params: MutableList<SqlParameter<*>>,
     override var ast: IQueryColumnsAst,
     private val modelAliasContext: ModelTableAliasContext,
-    private val relationSourceContext: RelationSourceContext,
-    private val relationDefinitionName: String?,
-    private val relationDeclarationOwner: KClass<*>?,
+    private val querySourceContext: CteSourceContext,
+    private val queryDefinitionName: String?,
+    private val queryDeclarationOwner: KClass<*>?,
 ) : IQueryColumnsApi {
 
     constructor(
         params: MutableList<SqlParameter<*>> = mutableListOf(),
         ast: IQueryColumnsAst = QueryColumnsAst(),
-    ) : this(params, ast, ModelTableAliasContext(), RelationSourceContext(), null, null)
+    ) : this(params, ast, ModelTableAliasContext(), CteSourceContext(), null, null)
 
     private var explicitAliasWasSet = false
     internal val hasExplicitAlias: Boolean get() = explicitAliasWasSet
@@ -104,21 +99,12 @@ class QueryColumnsBuilder internal constructor(
         table: KClass<T>,
         property: KProperty1<T, R>,
     ): IQueryColumnsApi {
-        val tableMetadata = table.findAnnotation<QBTable>()
-            ?: throw IllegalArgumentException("${table.qualifiedName} must be annotated with @QBTable")
-        require(tableMetadata.name.isNotEmpty()) {
-            "@QBTable on ${table.qualifiedName} must declare a non-empty table name"
-        }
-
-        val columnMetadata = property.findAnnotation<QBColumn>()
-            ?: throw IllegalArgumentException("${property.name} on ${table.qualifiedName} must be annotated with @QBColumn")
-        require(columnMetadata.name.isNotEmpty()) {
-            "@QBColumn on ${table.qualifiedName}.${property.name} must declare a non-empty column name"
-        }
+        val tableMetadata = QueryBuilderMetadata.requireTable(table)
+        val columnMetadata = QueryBuilderMetadata.requireColumn(table, property)
 
         val baseAst = QueryColumnsBaseAst().apply {
-            tableAlias = tableMetadata.alias
-            column = columnMetadata.name
+            tableAlias = QueryBuilderMetadata.tableAlias(table, tableMetadata)
+            column = QueryBuilderMetadata.columnName(table, property, columnMetadata)
         }
         modelAliasContext.registerColumn(table, baseAst)
         this.ast.Column = baseAst
@@ -132,7 +118,7 @@ class QueryColumnsBuilder internal constructor(
         }
 
         if (!explicitAliasWasSet) {
-            this.ast.ColumnAlias = columnMetadata.alias.takeIf { it.isNotEmpty() } ?: property.name
+            this.ast.ColumnAlias = QueryBuilderMetadata.columnAlias(property, columnMetadata)
         }
         return this
     }
@@ -160,12 +146,12 @@ class QueryColumnsBuilder internal constructor(
         clearInferredExecutionType()
     }
 
-    override fun relationColumn(
-        relation: QueryRelation,
+    override fun cteOutput(
+        relation: Cte,
         sqlOutputName: String,
     ): IQueryColumnsApi {
         clearPropertyReferenceAndInferredExecutionType()
-        val (alias, sqlName) = relationSourceContext.resolve(relation, sqlOutputName)
+        val (alias, sqlName) = querySourceContext.resolve(relation, sqlOutputName)
         ast.Column = QueryColumnsBaseAst().apply {
             cteAlias = alias
             select = sqlName
@@ -176,21 +162,20 @@ class QueryColumnsBuilder internal constructor(
         return this
     }
 
-    override fun <T, R> relationColumn(
+    override fun <T, R> cteOutput(
         property: KProperty1<T, R>,
         qualifier: String?,
     ): IQueryColumnsApi {
         val isPropertyBacked = ast.ColumnMethod == null
         val ownerType = typedPropertyOwner(property)
-        val sqlOutputName = property.name
-        val canonicalRelationName = if (IQueryRelation::class.java.isAssignableFrom(ownerType.java)) {
+        val canonicalRelationName = if (ICteDeclaration::class.java.isAssignableFrom(ownerType.java)) {
             null
         } else {
-            resolveTypedRelationProperty(property).first
+            resolveTypedRelationProperty(property)
         }
-        val resolvedRelationName = relationSourceContext.validateTypedOutput(
+        val (resolvedRelationName, sqlOutputName) = querySourceContext.validateTypedOutput(
             ownerType,
-            sqlOutputName,
+            property,
             canonicalRelationName,
         )
         require(qualifier == null || qualifier.isNotBlank()) {
@@ -207,7 +192,7 @@ class QueryColumnsBuilder internal constructor(
             clearInferredExecutionType()
         }
         if (!explicitAliasWasSet) {
-            ast.ColumnAlias = property.name.takeIf { isPropertyBacked }
+            ast.ColumnAlias = QueryBuilderMetadata.queryPublishedAlias(property).takeIf { isPropertyBacked }
         }
         return this
     }
@@ -225,24 +210,26 @@ class QueryColumnsBuilder internal constructor(
 
     override fun <T, R> alias(property: KProperty1<T, R>): IQueryColumnsApi {
         val ownerType = typedPropertyOwner(property)
-        val outputName = property.name
+        val outputName: String
         when {
-            relationDeclarationOwner != null -> {
-                require(ownerType == relationDeclarationOwner) {
-                    "Typed output ${property.name} belongs to ${ownerType.qualifiedName}, not ${relationDeclarationOwner?.qualifiedName}"
+            queryDeclarationOwner != null -> {
+                require(ownerType == queryDeclarationOwner) {
+                    "Typed output ${property.name} belongs to ${ownerType.qualifiedName}, not ${queryDeclarationOwner?.qualifiedName}"
                 }
+                outputName = QueryBuilderMetadata.queryPublishedAlias(property)
             }
-            relationDefinitionName != null -> {
-                val canonicalRelationName = resolveTypedRelationProperty(property).first
-                require(canonicalRelationName == relationDefinitionName) {
-                    "Typed output ${property.name} belongs to relation $canonicalRelationName, not $relationDefinitionName"
-                }
+            queryDefinitionName != null -> {
+                // The factory name is a runtime/CTE identity and may explicitly override QBQuery.name.
+                // Resolve metadata for validation, but do not compare the logical Query name to that runtime name.
+                resolveTypedRelationProperty(property)
+                outputName = QueryBuilderMetadata.queryPublishedAlias(property)
             }
-            IQueryRelation::class.java.isAssignableFrom(ownerType.java) -> {
-                val canonicalRelationName = relationSourceContext.validateTypedOutput(ownerType, outputName, null)
+            ICteDeclaration::class.java.isAssignableFrom(ownerType.java) -> {
+                val (canonicalRelationName, publishedAlias) = querySourceContext.validateTypedOutput(ownerType, property, null)
                 require(canonicalRelationName.isNotBlank()) { "Typed relation alias owner name must not be blank" }
+                outputName = publishedAlias
             }
-            else -> throw IllegalArgumentException("Typed relation alias requires an IQueryRelation property owner")
+            else -> throw IllegalArgumentException("Typed CTE alias requires an ICteDeclaration property owner")
         }
         explicitAliasWasSet = true
         ast.ColumnAlias = outputName
@@ -256,34 +243,9 @@ class QueryColumnsBuilder internal constructor(
         return this
     }
 
-    private fun <T, R> resolveTypedRelationProperty(property: KProperty1<T, R>): Pair<String, String> {
+    private fun <T, R> resolveTypedRelationProperty(property: KProperty1<T, R>): String {
         val ownerType = typedPropertyOwner(property)
-        val outputName = property.name
-        require(outputName.isNotBlank()) { "Typed relation output name must not be blank" }
-
-        val companionFromKotlinReflection = try {
-            ownerType.companionObjectInstance
-        } catch (_: Exception) {
-            null
-        }
-        val companion = companionFromKotlinReflection ?: try {
-            ownerType.java.getDeclaredField("Companion").apply { isAccessible = true }.get(null)
-        } catch (_: Exception) {
-            throw IllegalArgumentException("${ownerType.qualifiedName} must declare companion relationName")
-        }
-
-        val relationNameProperty = companion::class.memberProperties.singleOrNull { it.name == "relationName" }
-            ?: throw IllegalArgumentException("${ownerType.qualifiedName} companion must declare relationName")
-        val canonicalRelationName = try {
-            relationNameProperty.isAccessible = true
-            relationNameProperty.getter.call(companion) as? String
-        } catch (cause: Exception) {
-            throw IllegalArgumentException("Cannot read companion relationName for ${ownerType.qualifiedName}", cause)
-        } ?: throw IllegalArgumentException("${ownerType.qualifiedName}.relationName must be a String")
-        require(canonicalRelationName.isNotBlank()) {
-            "${ownerType.qualifiedName}.relationName must not be blank"
-        }
-        return canonicalRelationName to outputName
+        return QueryBuilderMetadata.queryName(ownerType)
     }
 
     private fun <T, R> typedPropertyOwner(property: KProperty1<T, R>): KClass<*> {

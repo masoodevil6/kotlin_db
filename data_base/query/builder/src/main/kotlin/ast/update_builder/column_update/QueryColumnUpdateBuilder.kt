@@ -1,15 +1,13 @@
 package gog.my_project.data_base.query.builder.ast.update_builder.column_update
 
-import gog.my_project.data_base.core.annotations.models.QBColumn
-import gog.my_project.data_base.core.annotations.models.QBTable
 import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.update_api.column_update.IQueryColumnUpdateApi
 import gog.my_project.data_base.query.ast.interfaces.update_interface.column_update.IQueryColumnUpdateAst
 import gog.my_project.data_base.query.ast.schema.update_schema.column_update.QueryColumnUpdateAst
+import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
-import kotlin.reflect.full.findAnnotation
 
 class QueryColumnUpdateBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
@@ -22,26 +20,18 @@ class QueryColumnUpdateBuilder(
         columnValue: R,
         tableAlias: String?,
     ): IQueryColumnUpdateApi {
-        val tableMetadata = table.findAnnotation<QBTable>()
-            ?: throw IllegalArgumentException("${table.qualifiedName} must be annotated with @QBTable")
-        require(tableMetadata.name.isNotEmpty()) {
-            "@QBTable on ${table.qualifiedName} must declare a non-empty table name"
-        }
+        val tableMetadata = QueryBuilderMetadata.requireTable(table)
+        val columnMetadata = QueryBuilderMetadata.requireColumn(table, property)
 
-        val columnMetadata = property.findAnnotation<QBColumn>()
-            ?: throw IllegalArgumentException("${property.name} on ${table.qualifiedName} must be annotated with @QBColumn")
-        require(columnMetadata.name.isNotEmpty()) {
-            "@QBColumn on ${table.qualifiedName}.${property.name} must declare a non-empty column name"
-        }
-
-        val effectiveAlias = tableAlias ?: tableMetadata.alias
+        val effectiveAlias = tableAlias ?: QueryBuilderMetadata.tableAlias(table, tableMetadata)
         require(effectiveAlias.isNotEmpty()) {
             "UPDATE of ${table.qualifiedName}.${property.name} requires a non-empty table alias"
         }
 
         ast.columnAlias = effectiveAlias
-        ast.columnName = columnMetadata.name
-        ast.columnTag = "${effectiveAlias}_${columnMetadata.name}"
+        val columnName = QueryBuilderMetadata.columnName(table, property, columnMetadata)
+        ast.columnName = columnName
+        ast.columnTag = "${effectiveAlias}_${columnName}"
         params += SqlParameter.of(ast.columnTag!!, columnValue)
         return this
     }

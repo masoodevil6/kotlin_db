@@ -9,7 +9,9 @@ import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleUpdateV3 : IExampleV3<IQueryRenderUpdateApi> {
-    override fun query(): IQueryRenderUpdateApi = QueryRenderUpdateBuilder()
+    override fun query(): IQueryRenderUpdateApi = configureQuery(QueryRenderUpdateBuilder())
+
+    private fun configureQuery(query: IQueryRenderUpdateApi): IQueryRenderUpdateApi = query
         .table { table(UserModelV3::class) }
         .addValue { column(UserModelV3::class, UserModelV3::name, "--changed--") }
         .where {
@@ -25,8 +27,8 @@ class A1ExampleUpdateV3 : IExampleV3<IQueryRenderUpdateApi> {
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         queryManager
-            .queryBuilder(query())
-            .sql { builtQuery -> println("V3-Update query: ${builtQuery.query}; params: ${builtQuery.params}") }
+            .queryBuilder { operations -> operations.queryUpdate { configureQuery(this) } }
+            .sql { (queryText, params) -> println("V3-Update query: $queryText; params: $params") }
             .execute()
             .success { affectedRows ->
                 println("V3-Update: $affectedRows row(s) updated")

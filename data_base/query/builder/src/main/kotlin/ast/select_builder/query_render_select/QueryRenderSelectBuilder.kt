@@ -10,8 +10,10 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render
 import gog.my_project.data_base.query.api.interfaces.api.select_api.select.IQuerySelectApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.where.IQueryWhereApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQueryWithsApi
-import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
+import gog.my_project.data_base.core.annotations.models.QBQuery
 import kotlin.reflect.KClass
+import kotlin.reflect.full.findAnnotation
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.ast.schema.select_schema.joins.QueryJoinsAst
 import gog.my_project.data_base.query.ast.schema.select_schema.option_group.QueryOptionGroupAst
@@ -27,7 +29,9 @@ import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs_item.Qu
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
 import gog.my_project.data_base.query.builder.ast.select_builder.joins.QueryJoinsBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
-import gog.my_project.data_base.query.builder.ast.select_builder.RelationSourceContext
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
+import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.BuiltCteComposition
 import gog.my_project.data_base.query.builder.ast.select_builder.option_group.QueryOptionGroupBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.option_limit.QueryOptionLimitBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.option_offset.QueryOptionOffsetBuilder
@@ -44,17 +48,21 @@ class QueryRenderSelectBuilder(
 {
 
     private val modelAliasContext = ModelTableAliasContext()
-    private val relationSourceContext = RelationSourceContext()
-    private var relationFromConfigured = false
-    private var relationDefinitionName: String? = null
-    private var relationDeclarationOwner: KClass<*>? = null
+    private val querySourceContext = CteSourceContext()
+    private var querySourceConfigured = false
+    private var queryDefinitionName: String? = null
+    private var queryDeclarationOwner: KClass<*>? = null
+    private var explicitCteRoots: List<Cte> = emptyList()
+    private var explicitWithItems: List<IQueryWithsItemAst> = emptyList()
+    private var explicitCteNameOverrides = java.util.IdentityHashMap<Cte, String>()
+    private var cteParamPrefixSize = 0
 
-    internal fun requireRelationOutputAliases(name: String, declarationOwner: KClass<*>? = null) {
-        relationDefinitionName = name
-        relationDeclarationOwner = declarationOwner
+    internal fun requireCteOutputAliases(name: String, declarationOwner: KClass<*>? = null) {
+        queryDefinitionName = name
+        queryDeclarationOwner = declarationOwner
     }
 
-    internal fun relationDependencies(): List<QueryRelation> = relationSourceContext.dependencies()
+    internal fun cteDependencies(): List<Cte> = querySourceContext.dependencies()
 
 
     /* ==============================================================
@@ -65,13 +73,28 @@ class QueryRenderSelectBuilder(
         blockWiths: IQueryWithsApi.() -> Unit
     ): IQueryRenderSelectApi
     {
+        // Drop only the prefix inserted by the previous CTE composition pass.
+        // The remaining parameters still belong to the existing query/legacy WITH blocks.
+        if (cteParamPrefixSize > 0) {
+            val nonCteParams = params.drop(cteParamPrefixSize)
+            params.clear()
+            params.addAll(nonCteParams)
+            cteParamPrefixSize = 0
+        }
         val ast = QueryWithsAst();
-        QueryWithsBuilder(
+        val withsBuilder = QueryWithsBuilder(
             params,
             ast
         ).apply(blockWiths);
+        explicitCteRoots = withsBuilder.cteRoots.toList()
+        explicitWithItems = ast.withs.filterNot { item ->
+            withsBuilder.cteRootItems.any { cteItem -> cteItem === item }
+        }
+        explicitCteNameOverrides = java.util.IdentityHashMap<Cte, String>().also {
+            it.putAll(withsBuilder.cteNameOverrides)
+        }
         this.ast.withs = ast;
-        syncRelationWithItems()
+        syncCteWithItems()
         return this;
     }
 
@@ -89,96 +112,142 @@ class QueryRenderSelectBuilder(
             params,
             ast,
             modelAliasContext,
-            relationSourceContext,
-            relationDefinitionName,
-            relationDeclarationOwner,
+            querySourceContext,
+            queryDefinitionName,
+            queryDeclarationOwner,
         ).apply(blockSelect);
         this.ast.select = ast;
         return this;
     }
 
-    override fun from(
-        relation: QueryRelation,
+    internal fun addCteSource(
+        relation: Cte,
         alias: String?,
     ): IQueryRenderSelectApi {
-        check(!relationFromConfigured) { "Only one QueryRelation source is supported in this version" }
+        check(!querySourceConfigured) { "Only one Cte source is supported in this version" }
         require(this.ast.table == null || (this.ast.table?.table == null && this.ast.table?.cte == null)) {
-            "A QueryRelation cannot be added when a table source is already configured"
+            "A Cte cannot be added when a table source is already configured"
         }
-        require(relation.name.isNotBlank()) { "QueryRelation name must not be blank" }
+        require(relation.name.isNotBlank()) { "Cte name must not be blank" }
 
-        val effectiveAlias = alias ?: relation.name
-        require(effectiveAlias.isNotBlank()) { "QueryRelation alias must not be blank" }
+        val effectiveAlias = resolveCteOccurrenceAlias(relation, alias)
 
-        relationSourceContext.register(relation, effectiveAlias)
+        querySourceContext.register(relation, effectiveAlias)
         val currentWiths = this.ast.withs ?: QueryWithsAst().also { this.ast.withs = it }
-        val orderedRelations = syncRelationWithItems(currentWiths, relation)
-        params.addAll(0, orderedRelations.flatMap(::ownRelationParams))
+        syncCteWithItems(currentWiths)
 
         this.ast.table = QueryTableAst().apply {
-            cte = relation.name
+            cte = effectiveCteName(relation)
             cteAlias = effectiveAlias
         }
-        relationFromConfigured = true
+        querySourceConfigured = true
         return this
     }
 
-    private fun syncRelationWithItems(
+    internal fun addInlineCteSource(
+        cte: Cte,
+        alias: String?,
+    ): IQueryRenderSelectApi {
+        check(!querySourceConfigured) { "Only one Cte source is supported in this version" }
+        require(this.ast.table == null || (this.ast.table?.table == null && this.ast.table?.cte == null)) {
+            "A Cte cannot be added when a table source is already configured"
+        }
+        require(cte.name.isNotBlank()) { "Cte name must not be blank" }
+
+        val effectiveAlias = resolveCteOccurrenceAlias(cte, alias)
+        querySourceContext.registerInline(cte, effectiveAlias)
+        this.ast.table = QueryTableAst().apply {
+            derivedQuery = cte.definition.ast
+            tableAlias = effectiveAlias
+        }
+        params.addAll(cte.definition.params)
+        querySourceConfigured = true
+        return this
+    }
+
+    private fun resolveCteOccurrenceAlias(
+        cte: Cte,
+        alias: String?,
+    ): String {
+        val queryOwner = (cte as? BuiltCteComposition)?.declarationOwner
+        val defaultAlias = queryOwner?.let { QueryBuilderMetadata.queryAlias(it, it.findAnnotation<QBQuery>()) }
+            ?: cte.name
+        val effectiveAlias = alias ?: defaultAlias
+        require(effectiveAlias.isNotBlank()) { "Cte alias must not be blank" }
+        return effectiveAlias
+    }
+
+    private fun syncCteWithItems(
         withs: gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQueryWithsAst? = this.ast.withs,
-        rootRelation: QueryRelation? = null,
-    ): List<QueryRelation> {
-        val root = rootRelation ?: relationSourceContext.dependencies().firstOrNull()
-        val explicitNames = withs?.withs.orEmpty().mapNotNull { it.withName }
+    ): List<Cte> {
+        val roots = querySourceContext.dependencies() + explicitCteRoots
+        val explicitNames = explicitWithItems.mapNotNull { it.withName }
         require(explicitNames.distinct().size == explicitNames.size) {
             "Duplicate CTE names are not allowed in a query"
         }
-        if (root == null) return emptyList()
-        val orderedRelations = orderedRelationClosure(root)
-        val relationNames = orderedRelations.map { it.name }
-        require((relationNames + explicitNames).distinct().size == relationNames.size + explicitNames.size) {
+        val orderedRelations = orderedCteClosure(roots)
+        val queryRuntimeNames = orderedRelations.map(::effectiveCteName)
+        require((queryRuntimeNames + explicitNames).distinct().size == queryRuntimeNames.size + explicitNames.size) {
             "Duplicate CTE names are not allowed in a query"
         }
         if (withs != null) {
-            withs.withs.removeAll { item -> relationNames.contains(item.withName) }
-            withs.withs.addAll(0, orderedRelations.map(::relationWithItem))
+            withs.withs.clear()
+            withs.withs.addAll(orderedRelations.map(::cteWithItem))
+            withs.withs.addAll(explicitWithItems)
         }
+
+        querySourceContext.dependencies().singleOrNull()?.let { activeCte ->
+            this.ast.table?.cte = effectiveCteName(activeCte)
+        }
+
+        val composedCteParams = orderedRelations.flatMap(::ownCteParams)
+        val nonCteParams = params.drop(cteParamPrefixSize)
+        params.clear()
+        params.addAll(composedCteParams)
+        params.addAll(nonCteParams)
+        cteParamPrefixSize = composedCteParams.size
         return orderedRelations
     }
 
-    private fun orderedRelationClosure(root: QueryRelation): List<QueryRelation> {
-        val result = mutableListOf<QueryRelation>()
-        val visited = java.util.IdentityHashMap<QueryRelation, Boolean>()
-        val visiting = java.util.IdentityHashMap<QueryRelation, Boolean>()
+    private fun orderedCteClosure(roots: List<Cte>): List<Cte> {
+        val result = mutableListOf<Cte>()
+        val visited = java.util.IdentityHashMap<Cte, Boolean>()
+        val visiting = java.util.IdentityHashMap<Cte, Boolean>()
         val names = mutableSetOf<String>()
 
-        fun visit(relation: QueryRelation) {
-            require(relation.name.isNotBlank()) { "QueryRelation name must not be blank" }
-            check(!visiting.containsKey(relation)) { "QueryRelation dependency cycle detected at ${relation.name}" }
+        fun visit(relation: Cte) {
+            val effectiveName = effectiveCteName(relation)
+            require(effectiveName.isNotBlank()) { "Cte name must not be blank" }
+            check(!visiting.containsKey(relation)) { "Cte dependency cycle detected at $effectiveName" }
             if (visited.containsKey(relation)) return
             visiting[relation] = true
             relation.dependencies.forEach(::visit)
             visiting.remove(relation)
-            require(names.add(relation.name)) { "Duplicate QueryRelation CTE name ${relation.name}" }
+            require(names.add(effectiveName)) { "Duplicate CTE name $effectiveName" }
             visited[relation] = true
             result.add(relation)
         }
 
-        visit(root)
+        roots.forEach(::visit)
         return result
     }
 
-    private fun ownRelationParams(relation: QueryRelation): List<SqlParameter<*>> {
+    private fun orderedCteClosure(root: Cte): List<Cte> = orderedCteClosure(listOf(root))
+
+    private fun effectiveCteName(cte: Cte): String = explicitCteNameOverrides[cte] ?: cte.name
+
+    private fun ownCteParams(relation: Cte): List<SqlParameter<*>> {
         val dependencyParamCount = relation.dependencies.sumOf { it.definition.params.size }
         require(relation.definition.params.size >= dependencyParamCount) {
-            "QueryRelation ${relation.name} parameter list does not contain its dependency parameters"
+            "Cte ${relation.name} parameter list does not contain its dependency parameters"
         }
         return relation.definition.params.drop(dependencyParamCount)
     }
 
-    private fun relationWithItem(relation: QueryRelation): IQueryWithsItemAst = QueryWithsItemAst().apply {
-        withName = relation.name
+    private fun cteWithItem(relation: Cte): IQueryWithsItemAst = QueryWithsItemAst().apply {
+        withName = effectiveCteName(relation)
         val dependencyNames = relation.dependencies.flatMap { dependency ->
-            orderedRelationClosure(dependency).map { it.name }
+            orderedCteClosure(dependency).map { it.name }
         }.toSet()
         withBody = QueryRenderSelectAst().apply {
             val source = relation.definition.ast
@@ -188,7 +257,21 @@ class QueryRenderSelectBuilder(
                 }
             }
             select = source.select
-            table = source.table
+            table = source.table?.let { sourceTable ->
+                val referencedCte = relation.dependencies.firstOrNull { it.name == sourceTable.cte }
+                val effectiveDependencyName = referencedCte?.let(::effectiveCteName)
+                if (effectiveDependencyName == null || effectiveDependencyName == sourceTable.cte) {
+                    sourceTable
+                } else {
+                    QueryTableAst().apply {
+                        table = sourceTable.table
+                        tableAlias = sourceTable.tableAlias
+                        cte = effectiveDependencyName
+                        cteAlias = sourceTable.cteAlias
+                        derivedQuery = sourceTable.derivedQuery
+                    }
+                }
+            }
             joins = source.joins
             where = source.where
             optionLimit = source.optionLimit
@@ -201,19 +284,24 @@ class QueryRenderSelectBuilder(
 
 
     /* ==============================================================
-      structure [table]
+      structure [from]
       ============================================================== */
-    override fun table(
+    override fun from(
         blockTable: gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi.() -> Unit
     ): IQueryRenderSelectApi
     {
-        check(!relationFromConfigured) { "A QueryRelation source is already configured" }
+        check(!querySourceConfigured) { "A Cte source is already configured" }
         val ast = QueryTableAst();
-        QueryTableBuilder(
+        val tableBuilder = QueryTableBuilder(
             params,
             ast,
             modelAliasContext,
+            allowSelectQuerySources = true,
         ).apply(blockTable);
+        val selectedCte = tableBuilder.selectedQueryRelation
+        if (selectedCte != null) {
+            return addInlineCteSource(selectedCte, tableBuilder.selectedOccurrenceAlias)
+        }
         this.ast.table = ast;
         return this;
     }
@@ -316,4 +404,14 @@ class QueryRenderSelectBuilder(
     }
 
 
+}
+
+/** Internal bridge for Builder-owned Cte composition after removing the public SELECT overload. */
+internal fun IQueryRenderSelectApi.fromCteInternal(
+    relation: Cte,
+    alias: String? = null,
+): IQueryRenderSelectApi {
+    val builder = this as? QueryRenderSelectBuilder
+        ?: error("Internal Cte composition requires QueryRenderSelectBuilder")
+    return builder.addCteSource(relation, alias)
 }

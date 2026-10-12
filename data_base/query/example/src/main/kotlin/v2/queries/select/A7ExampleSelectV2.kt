@@ -18,7 +18,7 @@ class A7ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             addColumn { column { tableAttribute("concat( uu.name , '-' , uu.family )") }; alias("user_full_name"); execute(DataType.STRING) }
             addColumn { column(UserModelV2::class, UserModelV2::age) }
         }
-        .table { table(UserModelV2::class) }
+        .from { model(UserModelV2::class) }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         val query = query()

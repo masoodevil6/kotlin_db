@@ -11,9 +11,9 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.builder.relations.queryRelation as buildQueryRelationDefinition
-import gog.my_project.data_base.query.api.interfaces.relations.IQueryRelation
-import gog.my_project.data_base.query.api.interfaces.relations.QueryRelation
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte as buildCteDefinition
+import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base.query.executer.result.QueryRow
 import java.lang.reflect.InvocationHandler
@@ -51,17 +51,15 @@ private class UnsupportedMaterializedUser : IModelBase {
     val enabled: Boolean = false
 }
 
-private class MaterializedRelation : IQueryRelation<Unit> {
-    override val relationName = "materialized_relation"
-
+private class MaterializedRelation(override val params: Unit) : ICteDeclaration<Unit> {
     val fullName: String?
         get() = error("Typed Relation output getter must not be invoked")
 
-    override fun queryRelation(params: Unit): QueryRelation = buildQueryRelationDefinition(
-        name = relationName,
+    override fun createCte(params: Unit): Cte = buildCteDefinition(
+        name = "materialized_relation",
         declarationOwner = MaterializedRelation::class,
     ) {
-        table { table("source_users").alias("source") }
+        from { table("source_users").alias("source") }
         select {
             addColumn {
                 column { tableColumn("source", "full_name") }
@@ -320,10 +318,10 @@ class SmartQueryResultTest {
             rows = listOf(listOf(null)),
         )
         val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
-        val relation = MaterializedRelation().queryRelation(Unit)
-        val query = QueryRenderSelectBuilder().from(relation).select {
+        val declaration = MaterializedRelation(Unit)
+        val query = QueryRenderSelectBuilder().from { cte(declaration) }.select {
             addColumn {
-                relationColumn(MaterializedRelation::fullName)
+                cteOutput(MaterializedRelation::fullName)
                 alias("display_name")
             }
         }
