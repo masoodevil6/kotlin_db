@@ -4,9 +4,10 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.column_bas
 import gog.my_project.data_base.query.dialect.data_class.select_data.column_base.QueryColumnBaseData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.column_base.IQueryColumnBaseCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryColumnBaseCapability :
-    IQueryColumnBaseCapability {
+    IQueryColumnBaseCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:        IQueryColumnsBaseAst,

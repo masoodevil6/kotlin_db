@@ -14,6 +14,9 @@ export function buildRegistry(projects) {
       : createDefaultDefinition(project);
     const declaredActions = new Map(definition.module.actions.map((action) => [action.id, action]));
     const actions = [];
+    if (project.hasTestTask === true) {
+      actions.push(defaultTaskAction('test'));
+    }
     if (project.hasBuildTask ?? true) {
       actions.push(declaredActions.get('build') ?? defaultTaskAction('build'));
     }
@@ -45,6 +48,9 @@ function createDefaultDefinition(project) {
 }
 
 function defaultTaskAction(id) {
+  if (id === 'test') {
+    return { id, title: 'اجرای تست‌های ماژول', description: 'اجرای task استاندارد test برای این Gradle project.', task: id };
+  }
   return id === 'build'
     ? { id, title: 'ساخت ماژول', description: 'اجرای task استاندارد build برای این Gradle project.', task: id }
     : { id, title: 'اجرای ماژول', description: 'اجرای task استاندارد run برای این Gradle project.', task: id };
@@ -56,7 +62,7 @@ export function publicModules(registry) {
     module: module.module,
     hasTestsCapability: module.hasTestsCapability,
     actions: module.module.actions,
-    tests: module.tests.map(({ id, title, description, parameters, context }) => ({ id, title, description, parameters, context })),
+    tests: module.tests.map(({ id, title, description, runner, parameters, context }) => ({ id, title, description, runner, parameters, context })),
   }));
 }
 

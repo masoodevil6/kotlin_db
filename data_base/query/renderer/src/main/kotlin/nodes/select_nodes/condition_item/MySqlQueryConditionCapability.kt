@@ -9,9 +9,12 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_
 import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_item_collection.QueryConditionCollectionData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.condition_item.IQueryConditionCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
+import gog.my_project.data_base.query.renderer.interfaces.renderParameter
 
 class MySqlQueryConditionCapability :
-    IQueryConditionCapability {
+    IQueryConditionCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:       IQueryConditionsAst,
@@ -31,15 +34,11 @@ class MySqlQueryConditionCapability :
             return null
         }
 
-        var parameterOccurrence: SqlParameter<*>? = null
         val conditionSideRightStr =
             when (conditionSideRight) {
                 is IQueryColumnsBaseAst ->          ctx.registry.render(conditionSideRight , ctx.dialect , QueryColumnBaseData() );
                 is IQueryConditionsCollectionAst -> ctx.registry.render(conditionSideRight , ctx.dialect , QueryConditionCollectionData() );
-                is SqlParameter<*> -> {
-                    parameterOccurrence = conditionSideRight
-                    ":${conditionSideRight.name}"
-                }
+                is SqlParameter<*> -> ctx.renderParameter(conditionSideRight)
                 is String -> conditionSideRight;
                 else -> null;
             };
@@ -52,7 +51,6 @@ class MySqlQueryConditionCapability :
             }
 
             queryTemp += " $conditionSideLeftStr $conditionOperation $conditionSideRightStr  "
-            parameterOccurrence?.let { ctx.parameterOccurrences?.add(it) }
             return queryTemp;
         }
 
@@ -63,9 +61,12 @@ class MySqlQueryConditionCapability :
     }
 
     private fun rollbackOccurrences(ctx: IRenderContext, occurrenceStart: Int?) {
-        ctx.parameterOccurrences?.let { occurrences ->
-            while (occurrenceStart != null && occurrences.size > occurrenceStart) {
-                occurrences.removeAt(occurrences.lastIndex)
+        if (occurrenceStart == null) return
+        if (ctx is IParameterRenderContext) {
+            ctx.rollbackParameterOccurrences(occurrenceStart)
+        } else {
+            ctx.parameterOccurrences?.let { occurrences ->
+                while (occurrences.size > occurrenceStart) occurrences.removeAt(occurrences.lastIndex)
             }
         }
     }

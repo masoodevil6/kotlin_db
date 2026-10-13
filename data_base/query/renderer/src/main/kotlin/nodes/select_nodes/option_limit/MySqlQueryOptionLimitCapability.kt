@@ -4,9 +4,10 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.option_lim
 import gog.my_project.data_base.query.dialect.data_class.select_data.option_limit.QueryOptionLimitData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.option_limit.IQueryOptionLimitCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryOptionLimitCapability :
-    IQueryOptionLimitCapability {
+    IQueryOptionLimitCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:        IQueryOptionLimitAst,

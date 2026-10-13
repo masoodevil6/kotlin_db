@@ -4,6 +4,7 @@ import gog.my_project.data_base.core.data_base.DatabaseConfig
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.manager.execute.query.BoundQuery
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
@@ -21,6 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class QueryExecuteContractTest {
@@ -47,6 +49,37 @@ class QueryExecuteContractTest {
             ),
             script.bindings,
         )
+    }
+
+    @Test
+    fun `bound select binds same-name independent occurrences by positional index`() = withDatabase(Script()) { script ->
+        val first = SqlParameter("shared_value", 11, java.sql.Types.INTEGER)
+        val second = SqlParameter("shared_value", 22, java.sql.Types.BIGINT)
+        val third = SqlParameter("shared_value", 33, java.sql.Types.VARCHAR)
+        val nullable = SqlParameter.nullOf("optional_value", java.sql.Types.VARCHAR)
+        val occurrences = listOf(first, second, third, first, nullable)
+        val boundQuery = BoundQuery("SELECT ?, ?, ?, ?, ?", occurrences)
+
+        var callbackCount = 0
+        QueryExecute().executeSelect(boundQuery) { result ->
+            callbackCount++
+            assertIs<ExecuteResult.Success<ResultSet>>(result).result?.close()
+        }
+
+        assertEquals(1, callbackCount)
+        assertEquals("SELECT ?, ?, ?, ?, ?", script.preparedSql)
+        assertEquals(
+            listOf<List<Any?>>(
+                listOf(1, 11, java.sql.Types.INTEGER),
+                listOf(2, 22, java.sql.Types.BIGINT),
+                listOf(3, 33, java.sql.Types.VARCHAR),
+                listOf(4, 11, java.sql.Types.INTEGER),
+                listOf(5, java.sql.Types.VARCHAR),
+            ),
+            script.bindings,
+        )
+        assertSame(first, boundQuery.parameterOccurrences[0])
+        assertSame(first, boundQuery.parameterOccurrences[3])
     }
 
     @Test

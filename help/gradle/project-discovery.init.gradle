@@ -15,6 +15,7 @@ gradle.projectsEvaluated { loadedGradle ->
             path: project.path,
             projectDir: project.projectDir.canonicalPath,
             hasBuildTask: project.tasks.names.contains('build'),
+            hasTestTask: project.tasks.names.contains('test'),
             hasRunTask: project.tasks.names.contains('run'),
         ]
     }.sort { left, right -> left.path <=> right.path }

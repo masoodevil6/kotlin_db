@@ -4,8 +4,9 @@ import gog.my_project.data_base.query.ast.interfaces.insert_interface.columns_in
 import gog.my_project.data_base.query.dialect.data_class.insert_data.column_insert.QueryColumnInsertData
 import gog.my_project.data_base.query.dialect.nodes.insert_nodes.column_insert.IQueryColumnInsertCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
-class MySqlQueryColumnInsertCapability : IQueryColumnInsertCapability {
+class MySqlQueryColumnInsertCapability : IQueryColumnInsertCapability, IParameterOccurrenceAwareRenderer {
 
 
     override fun render(

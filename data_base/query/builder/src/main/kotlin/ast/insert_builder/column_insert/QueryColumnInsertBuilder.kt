@@ -25,7 +25,9 @@ class QueryColumnInsertBuilder(
         val columnName = QueryBuilderMetadata.columnName(table, property, columnMetadata)
         ast.columnName = columnName
         ast.columnTag = columnName
-        params += SqlParameter.of(columnName, columnValue)
+        val parameter = SqlParameter.of(columnName, columnValue)
+        ast.parameter = parameter
+        params += parameter
         return this
     }
 
@@ -36,7 +38,11 @@ class QueryColumnInsertBuilder(
     ): IQueryColumnInsertApi {
         this.ast.columnName = "${columnName}";
         this.ast.columnTag = "${columnName}";
-        this.ast.columnTag?.let { params += SqlParameter.of(it  , columnValue) }
+        this.ast.columnTag?.let {
+            val parameter = SqlParameter.of(it, columnValue)
+            this.ast.parameter = parameter
+            params += parameter
+        }
         return this;
     }
 

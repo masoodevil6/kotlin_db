@@ -6,8 +6,10 @@ import gog.my_project.data_base.query.dialect.data_class.insert_data.query_rende
 import gog.my_project.data_base.query.dialect.data_class.select_data.table.QueryTableData
 import gog.my_project.data_base.query.dialect.nodes.insert_nodes.query_render_insert.IQueryRenderInsertCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
+import gog.my_project.data_base.query.renderer.interfaces.renderParameter
 
-class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
+class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:        IQueryRenderInsertAst,
@@ -39,7 +41,8 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability {
 
                 if (columnName != null){
                     columnsReferenceStr +=  " $columnName ";
-                    columnsValuesStr +=  " :$columnTag ";
+                    val placeholder = column.parameter?.let(ctx::renderParameter) ?: ":$columnTag"
+                    columnsValuesStr +=  " $placeholder ";
 
                     if (index < columnsList.size - 1){
                         columnsReferenceStr += ","

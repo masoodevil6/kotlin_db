@@ -6,7 +6,7 @@ import { discoverGradleProjects } from './gradle-project-discovery.mjs';
 import { buildRegistry, findRegisteredAction, findRegisteredTest, publicModules } from './help-registry.mjs';
 import { validateParameters } from './parameter-validator.mjs';
 import { executeGradleTest } from './gradle-test-runner.mjs';
-import { executeGradleAction } from './gradle-action-runner.mjs';
+import { executeGradleAction, validateGradleActionOptions } from './gradle-action-runner.mjs';
 import { serveReportFile } from './report-server.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -111,11 +111,12 @@ export function createHelpServer({ registry, projects = [...registry.values()], 
       if (request.method === 'POST' && url.pathname === '/api/actions') {
         const body = await readJson(request);
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Request body must be an object');
-        for (const key of Object.keys(body)) if (!['projectPath', 'actionId', 'parameters'].includes(key)) throw new Error(`Unknown request field '${key}'`);
+        for (const key of Object.keys(body)) if (!['projectPath', 'actionId', 'parameters', 'gradleOptions'].includes(key)) throw new Error(`Unknown request field '${key}'`);
         if (typeof body.projectPath !== 'string' || typeof body.actionId !== 'string') throw new Error('projectPath and actionId are required');
         const selected = findRegisteredAction(registry, body.projectPath, body.actionId);
         if (!selected) return sendJson(response, 404, { error: 'Unknown Module or Action' });
         const bindings = validateParameters({ parameters: selected.action.parameters ?? [] }, body.parameters ?? {});
+        const gradleOptions = validateGradleActionOptions(selected.action.id, body.gradleOptions);
         const wantsStream = String(request.headers.accept ?? '').includes('text/event-stream');
         const sendEvent = (event, payload) => {
           if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -137,6 +138,7 @@ export function createHelpServer({ registry, projects = [...registry.values()], 
           module: selected.module,
           action: selected.action,
           bindings,
+          ...(body.gradleOptions === undefined ? {} : { gradleOptions }),
           onOutput: wantsStream ? (stream, data) => sendEvent('output', { stream, data }) : undefined,
         });
         const payload = {

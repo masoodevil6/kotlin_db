@@ -77,13 +77,14 @@ export async function discoverGradleProjects({ buildRoot, timeoutMs = 180_000 })
       if (typeof project.projectDir !== 'string' || !path.isAbsolute(project.projectDir)) {
         throw new Error(`Gradle discovery emitted an invalid projectDir for '${project.path}'`);
       }
-      if (typeof project.hasBuildTask !== 'boolean' || typeof project.hasRunTask !== 'boolean') {
+      if (typeof project.hasBuildTask !== 'boolean' || typeof project.hasTestTask !== 'boolean' || typeof project.hasRunTask !== 'boolean') {
         throw new Error(`Gradle discovery emitted invalid task capabilities for '${project.path}'`);
       }
       return {
         projectPath: project.path,
         projectDir: fs.realpathSync(project.projectDir),
         hasBuildTask: project.hasBuildTask,
+        hasTestTask: project.hasTestTask,
         hasRunTask: project.hasRunTask,
       };
     });

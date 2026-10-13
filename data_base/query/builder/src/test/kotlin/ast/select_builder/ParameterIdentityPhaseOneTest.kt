@@ -5,6 +5,8 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.column_bas
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_group.IQueryConditionsGroupsAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item.IQueryConditionsAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item_collection.IQueryConditionsCollectionAst
+import gog.my_project.data_base.query.builder.ast.insert_builder.column_insert.QueryColumnInsertBuilder
+import gog.my_project.data_base.query.builder.ast.update_builder.column_update.QueryColumnUpdateBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.dialect.data_class.select_data.column_base.QueryColumnBaseData
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
@@ -19,6 +21,23 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class ParameterIdentityPhaseOneTest {
+
+    @Test
+    fun `insert and update column builders retain typed parameter references beside legacy tags`() {
+        val insertBuilder = QueryColumnInsertBuilder()
+        insertBuilder.column("email", "person@example.test")
+
+        assertEquals("email", insertBuilder.ast.columnTag)
+        assertSame(insertBuilder.params.single(), insertBuilder.ast.parameter)
+        assertEquals("person@example.test", insertBuilder.ast.parameter?.value)
+
+        val updateBuilder = QueryColumnUpdateBuilder()
+        updateBuilder.column("status", "active")
+
+        assertEquals("status", updateBuilder.ast.columnTag)
+        assertSame(updateBuilder.params.single(), updateBuilder.ast.parameter)
+        assertEquals("active", updateBuilder.ast.parameter?.value)
+    }
 
     @Test
     fun `scalar condition stores and renders the original parameter reference`() {

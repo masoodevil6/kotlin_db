@@ -5,9 +5,10 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_
 import gog.my_project.data_base.query.dialect.data_class.select_data.where.QueryWhereData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.where.IQueryWhereCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryWhereCapability :
-    IQueryWhereCapability {
+    IQueryWhereCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:         IQueryWhereAst,

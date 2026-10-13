@@ -32,7 +32,9 @@ class QueryColumnUpdateBuilder(
         val columnName = QueryBuilderMetadata.columnName(table, property, columnMetadata)
         ast.columnName = columnName
         ast.columnTag = "${effectiveAlias}_${columnName}"
-        params += SqlParameter.of(ast.columnTag!!, columnValue)
+        val parameter = SqlParameter.of(ast.columnTag!!, columnValue)
+        ast.parameter = parameter
+        params += parameter
         return this
     }
 
@@ -43,7 +45,11 @@ class QueryColumnUpdateBuilder(
     ): IQueryColumnUpdateApi {
         this.ast.columnName = "${columnName}";
         this.ast.columnTag = "${columnName}";
-        this.ast.columnTag?.let { params += SqlParameter.of(it  , columnValue) }
+        this.ast.columnTag?.let {
+            val parameter = SqlParameter.of(it, columnValue)
+            this.ast.parameter = parameter
+            params += parameter
+        }
         return this;
     }
 
@@ -55,7 +61,11 @@ class QueryColumnUpdateBuilder(
         this.ast.columnAlias = "${columnAlias}";
         this.ast.columnName = "${columnName}";
         this.ast.columnTag = "${columnAlias}_${columnName}";
-        this.ast.columnTag?.let { params += SqlParameter.of(it  , columnValue) }
+        this.ast.columnTag?.let {
+            val parameter = SqlParameter.of(it, columnValue)
+            this.ast.parameter = parameter
+            params += parameter
+        }
         return this;
     }
 

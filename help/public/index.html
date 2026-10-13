@@ -7,7 +7,7 @@
   <title>راهنمای پروژه</title>
   <link rel="stylesheet" href="/vendor/bootstrap.rtl.min.css">
   <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js?v=separate-test-run-build-views" defer></script>
+  <script src="/app.js?v=module-test-command-preview" defer></script>
 </head>
 <body>
   <header class="app-header">
@@ -23,7 +23,7 @@
     <section class="intro mb-4 mb-lg-5">
       <p class="intro-kicker">یک نقطهٔ شروع برای کارهای پروژه</p>
       <h2>چه کاری می‌خواهید انجام دهید؟</h2>
-      <p>ماژول را از ساختار Gradle انتخاب کنید و نمای مستقل تست، اجرای برنامه یا ساخت ماژول را باز کنید. خروجی هر اجرا در همان نمای مربوط نمایش داده می‌شود.</p>
+      <p>ماژول را از ساختار Gradle انتخاب کنید و تست‌های ثبت‌شده، تست کامل ماژول، اجرای برنامه یا ساخت ماژول را اجرا کنید. خروجی هر اجرا در همان نما نمایش داده می‌شود.</p>
     </section>
 
     <section class="card app-card workflow-card">
@@ -76,6 +76,11 @@
           </div>
           <p id="test-description" class="text-secondary small mt-2 mb-0"></p>
           <form id="parameters" class="parameter-grid" autocomplete="on"></form>
+          <div id="test-command-box" class="card p-3 mt-3" hidden>
+            <strong>فرمان Gradle (PowerShell از ریشهٔ مخزن)</strong>
+            <pre class="bg-dark text-light rounded p-3 mt-2 mb-2 overflow-auto"><code id="test-command"></code></pre>
+            <small class="text-secondary">مقادیر ورودی از طریق متغیرهای محیطی فرستاده می‌شوند و در این فرمان نمایش داده نمی‌شوند.</small>
+          </div>
           <div class="workflow-actions workflow-actions-between">
             <button id="test-back" type="button" class="btn btn-outline-secondary">→ بازگشت به اکشن</button>
             <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-3">
@@ -92,6 +97,11 @@
           </div>
           <p id="run-module-summary" class="workflow-summary"></p>
           <form id="run-parameters" class="parameter-grid mt-3" autocomplete="off"></form>
+          <div id="run-command-box" class="card p-3 mt-3" hidden>
+            <strong>فرمان Gradle (PowerShell از ریشهٔ مخزن)</strong>
+            <pre class="bg-dark text-light rounded p-3 mt-2 mb-2 overflow-auto"><code id="run-command"></code></pre>
+            <small class="text-secondary">مقادیر ورودی از طریق متغیرهای محیطی فرستاده می‌شوند و در این فرمان نمایش داده نمی‌شوند.</small>
+          </div>
           <div class="workflow-actions workflow-actions-between">
             <button id="run-back" type="button" class="btn btn-outline-secondary">→ بازگشت به اکشن</button>
             <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-3">
@@ -105,13 +115,42 @@
         <section data-step-panel="build" hidden>
           <div class="section-heading">
             <span class="step-number">B</span>
-            <div><h2 class="h4 mb-1">ساخت ماژول</h2><p class="text-secondary mb-0">ماژول از طریق Gradle ساخته می‌شود؛ پیام‌های فرایند در همین صفحه زنده نمایش داده می‌شوند.</p></div>
+            <div><h2 id="build-title" class="h4 mb-1">اجرای task ماژول</h2><p id="build-description" class="text-secondary mb-0">task انتخاب‌شده از طریق Gradle اجرا می‌شود؛ پیام‌های فرایند در همین صفحه زنده نمایش داده می‌شوند.</p></div>
           </div>
           <p id="build-module-summary" class="workflow-summary"></p>
+          <div id="gradle-test-options" class="card p-3 mt-3" hidden>
+            <h3 class="h6 mb-3">تنظیمات اجرای تست Gradle</h3>
+            <div class="d-flex flex-column gap-2">
+              <label class="form-check">
+                <input id="gradle-rerun-tasks" class="form-check-input" type="checkbox">
+                <span class="form-check-label">اجرای دوبارهٔ همهٔ taskها <code>--rerun-tasks</code></span>
+              </label>
+              <label class="form-check">
+                <input id="gradle-no-configuration-cache" class="form-check-input" type="checkbox">
+                <span class="form-check-label">غیرفعال‌کردن Configuration Cache <code>--no-configuration-cache</code></span>
+              </label>
+              <label class="form-check">
+                <input id="gradle-info" class="form-check-input" type="checkbox">
+                <span class="form-check-label">نمایش گزارش جزئی‌تر <code>--info</code></span>
+              </label>
+              <label class="form-label mb-0" for="gradle-console">حالت نمایش خروجی</label>
+              <select id="gradle-console" class="form-select">
+                <option value="plain" selected>plain <code>--console=plain</code></option>
+                <option value="auto">auto <code>--console=auto</code></option>
+                <option value="rich">rich <code>--console=rich</code></option>
+                <option value="verbose">verbose <code>--console=verbose</code></option>
+              </select>
+            </div>
+          </div>
+          <div id="build-command-box" class="card p-3 mt-3" hidden>
+            <strong>فرمان Gradle (PowerShell از ریشهٔ مخزن)</strong>
+            <pre class="bg-dark text-light rounded p-3 mt-2 mb-2 overflow-auto"><code id="build-command"></code></pre>
+            <small class="text-secondary">مقادیر ورودی از طریق متغیرهای محیطی فرستاده می‌شوند و در این فرمان نمایش داده نمی‌شوند.</small>
+          </div>
           <div class="workflow-actions workflow-actions-between">
             <button id="build-back" type="button" class="btn btn-outline-secondary">→ بازگشت به اکشن</button>
             <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-3">
-              <button id="build-module" type="button" class="btn btn-primary btn-lg px-4">ساخت ماژول</button>
+              <button id="build-module" type="button" class="btn btn-primary btn-lg px-4">اجرای task</button>
               <p id="build-status" class="result-message mb-0" role="status" aria-live="polite"></p>
             </div>
           </div>

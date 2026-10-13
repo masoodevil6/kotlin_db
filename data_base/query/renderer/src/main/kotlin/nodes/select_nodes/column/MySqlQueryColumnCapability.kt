@@ -6,10 +6,11 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.column.Quer
 import gog.my_project.data_base.query.dialect.data_class.select_data.column_base.QueryColumnBaseData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.column.IQueryColumnCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 import java.util.Locale
 
 class MySqlQueryColumnCapability :
-    IQueryColumnCapability {
+    IQueryColumnCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:       IQueryColumnsAst,

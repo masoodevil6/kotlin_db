@@ -2,6 +2,29 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const MAX_OUTPUT_CHARS_PER_STREAM = 512 * 1024;
+const CONSOLE_MODES = new Set(['plain', 'auto', 'rich', 'verbose']);
+const GRADLE_OPTION_FIELDS = new Set(['rerunTasks', 'noConfigurationCache', 'info', 'console']);
+
+export function validateGradleActionOptions(actionId, rawOptions) {
+  if (rawOptions === undefined) {
+    return actionId === 'test'
+      ? { rerunTasks: false, noConfigurationCache: false, info: false, console: 'plain' }
+      : undefined;
+  }
+  if (actionId !== 'test') throw new Error('Gradle options are supported only for module test actions');
+  if (!rawOptions || typeof rawOptions !== 'object' || Array.isArray(rawOptions)) throw new Error('gradleOptions must be an object');
+  for (const key of Object.keys(rawOptions)) if (!GRADLE_OPTION_FIELDS.has(key)) throw new Error(`Unknown Gradle option '${key}'`);
+  for (const field of ['rerunTasks', 'noConfigurationCache', 'info']) {
+    if (typeof rawOptions[field] !== 'boolean') throw new Error(`gradleOptions.${field} must be boolean`);
+  }
+  if (!CONSOLE_MODES.has(rawOptions.console)) throw new Error('gradleOptions.console is not supported');
+  return {
+    rerunTasks: rawOptions.rerunTasks,
+    noConfigurationCache: rawOptions.noConfigurationCache,
+    info: rawOptions.info,
+    console: rawOptions.console,
+  };
+}
 
 function javaExecutable() {
   const executable = process.platform === 'win32' ? 'java.exe' : 'java';
@@ -38,16 +61,24 @@ function runChild(command, args, { onOutput, ...options }) {
   });
 }
 
-export async function executeGradleAction({ buildRoot, module, action, bindings = {}, onOutput, launchProcess = runChild }) {
-  if (!['build', 'run'].includes(action.id) || action.task !== action.id) throw new Error('Unsupported Gradle action');
+export async function executeGradleAction({ buildRoot, module, action, bindings = {}, gradleOptions: rawGradleOptions, onOutput, launchProcess = runChild }) {
+  if (!['build', 'run', 'test'].includes(action.id) || action.task !== action.id) throw new Error('Unsupported Gradle action');
+  const gradleOptions = validateGradleActionOptions(action.id, rawGradleOptions);
   const taskPath = module.projectPath === ':' ? `:${action.task}` : `${module.projectPath}:${action.task}`;
   const args = [
     '-jar', path.join(buildRoot, 'gradle', 'wrapper', 'gradle-wrapper.jar'),
     `--project-dir=${buildRoot}`,
     '--no-daemon',
-    '--console=plain',
-    taskPath,
   ];
+  if (action.id === 'test') {
+    if (gradleOptions.rerunTasks) args.push('--rerun-tasks');
+    if (gradleOptions.noConfigurationCache) args.push('--no-configuration-cache');
+    args.push(`--console=${gradleOptions.console}`);
+    if (gradleOptions.info) args.push('--info');
+  } else {
+    args.push('--console=plain');
+  }
+  args.push(taskPath);
   const startedAt = Date.now();
   try {
     const env = { ...process.env };

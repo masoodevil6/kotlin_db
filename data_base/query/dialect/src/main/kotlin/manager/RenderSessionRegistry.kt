@@ -3,13 +3,14 @@ package gog.my_project.data_base.query.renderer.manager
 import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.query.renderer.interfaces.IAstRenderer
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 import gog.my_project.data_base.query.renderer.interfaces.IRendererRegistry
 import kotlin.reflect.KClass
 
 /** Keeps one occurrence collector available across recursive renderer dispatch. */
 internal class RenderSessionRegistry(
     private val delegate: IRendererRegistry,
-    private val parameterOccurrences: MutableList<Any>,
+    private val session: ParameterRenderSession,
 ) : IRendererRegistry {
 
     override val renderers: MutableMap<KClass<*>, IAstRenderer<*, *>>
@@ -18,7 +19,12 @@ internal class RenderSessionRegistry(
     override fun <A : Any, D : QueryDataClass?> register(
         renderClass: KClass<A>,
         renderer: IAstRenderer<A, D>,
-    ) = delegate.register(renderClass, renderer)
+    ) {
+        check(!session.requireOccurrenceAwareRenderers) {
+            "Renderer registration is disabled during identity-aware rendering"
+        }
+        delegate.register(renderClass, renderer)
+    }
 
     override fun <A : Any, D : QueryDataClass?> get(type: KClass<A>): IAstRenderer<A, D>? =
         delegate.get(type)
@@ -36,10 +42,19 @@ internal class RenderSessionRegistry(
         } ?: error("No renderer registered for ${ast::class}")
 
         val renderer = rendererEntry.value as IAstRenderer<Any, QueryDataClass?>
-        return renderer.render(
+        if (session.requireOccurrenceAwareRenderers && renderer !is IParameterOccurrenceAwareRenderer) {
+            throw UnsupportedOperationException(
+                "Identity-aware rendering does not support unverified renderer ${renderer::class.qualifiedName} " +
+                    "for ${rendererEntry.key.qualifiedName}"
+            )
+        }
+        val occurrenceStart = session.occurrences.size
+        val rendered = renderer.render(
             ast,
-            RenderContext(dialect, this, parameterOccurrences),
+            RenderContext(dialect, this, session),
             dataClass,
         )
+        if (rendered == null) session.rollbackTo(occurrenceStart)
+        return rendered
     }
 }

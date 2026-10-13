@@ -5,9 +5,10 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.table.Query
 import gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.table.IQueryTableCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryTableCapability :
-    IQueryTableCapability {
+    IQueryTableCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:         IQueryTableAst,

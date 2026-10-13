@@ -6,9 +6,10 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_
 import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_item.QueryConditionsData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.condition_group.IQueryConditionGroupCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryConditionGroupCapability :
-    IQueryConditionGroupCapability {
+    IQueryConditionGroupCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:       IQueryConditionsGroupsAst,

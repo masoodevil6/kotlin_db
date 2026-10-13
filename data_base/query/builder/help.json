@@ -61,6 +61,92 @@
         "type": "gradle-html",
         "path": "build/reports/tests/test"
       }
+    },
+    {
+      "id": "query-builder-query-relation-mysql-integration",
+      "title": "QueryRelationMySqlIntegrationTest.kt — آزمون یکپارچه‌سازی Relation با MySQL",
+      "description": "اجرای Query تو‌در‌تو و بررسی ترتیب bind پارامترها روی MySQL. این تست جدول موقت ایجاد و حذف می‌کند؛ فقط از پایگاه دادهٔ آزمایشی با مجوز CREATE و DROP استفاده کنید، نه پایگاه دادهٔ production.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.builder.ast.select_builder.QueryRelationMySqlIntegrationTest"
+      },
+      "parameters": [
+        {
+          "id": "db-host",
+          "label": "میزبان MySQL",
+          "type": "text",
+          "required": true,
+          "default": "127.0.0.1",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.host"
+          }
+        },
+        {
+          "id": "db-port",
+          "label": "درگاه MySQL",
+          "type": "number",
+          "required": true,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.port"
+          }
+        },
+        {
+          "id": "db-name",
+          "label": "نام پایگاه دادهٔ آزمایشی",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.name"
+          }
+        },
+        {
+          "id": "db-username",
+          "label": "نام کاربری MySQL",
+          "type": "text",
+          "required": true,
+          "default": "root",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.username"
+          }
+        },
+        {
+          "id": "db-password",
+          "label": "گذرواژهٔ MySQL",
+          "type": "password",
+          "required": false,
+          "allowEmpty": true,
+          "secret": true,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.password"
+          }
+        }
+      ],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
     }
   ]
 }

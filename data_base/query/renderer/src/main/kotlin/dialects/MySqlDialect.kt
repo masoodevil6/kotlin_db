@@ -24,8 +24,11 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQue
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
 import gog.my_project.data_base.query.ast.interfaces.update_interface.column_update.IQueryColumnUpdateAst
 import gog.my_project.data_base.query.ast.interfaces.update_interface.query_render_update.IQueryRenderUpdateAst
+import gog.my_project.data_base.query.dialect.data_class.RenderedQuery
 import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.dialect.manager.BaseSqlDialect
+import gog.my_project.data_base.query.meta_data.parameters.QueryParameterMetadataExtractor
+import gog.my_project.data_base.query.meta_data.parameters.QueryParameterRepresentation
 import gog.my_project.data_base.query.renderer.nodes.delete_nodes.query.MySqlQueryRenderDeleteCapability
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.column_insert.MySqlQueryColumnInsertCapability
 import gog.my_project.data_base.query.renderer.nodes.insert_nodes.query.MySqlQueryRenderInsertCapability
@@ -51,6 +54,34 @@ import gog.my_project.data_base.query.renderer.nodes.update_nodes.query.MySqlQue
 
 open class MySqlDialect(
 ) : BaseSqlDialect() {
+
+    /** Safe entry point: only identity-aware SELECT ASTs are eligible for positional dual rendering. */
+    internal fun renderIdentityAware(ast: IQueryRenderSelectAst): RenderedQuery {
+        return renderIdentityAwareQuery(ast)
+    }
+
+    internal fun renderIdentityAware(ast: IQueryAst): RenderedQuery {
+        require(
+            ast is IQueryRenderSelectAst ||
+                ast is IQueryRenderInsertAst ||
+                ast is IQueryRenderUpdateAst ||
+                ast is IQueryRenderDeleteAst,
+        ) {
+            "Identity-aware rendering requires a SELECT, INSERT, UPDATE, or DELETE AST"
+        }
+        return renderIdentityAwareQuery(ast)
+    }
+
+    private fun renderIdentityAwareQuery(ast: IQueryAst): RenderedQuery {
+        val metadata = QueryParameterMetadataExtractor.inspect(ast)
+        require(metadata.representation == QueryParameterRepresentation.IdentityAware) {
+            "Identity-aware rendering requires an IdentityAware query AST, was ${metadata.representation}"
+        }
+        val rendered = renderIdentityAwarePasses(ast)
+        return rendered.copy(
+            parameterOccurrences = metadata.validateOccurrences(rendered.parameterOccurrences),
+        )
+    }
 
     override val _prefixWiths:  String = "with";
     override val _prefixSelect: String = "select";

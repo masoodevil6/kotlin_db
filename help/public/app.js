@@ -93,17 +93,71 @@ function selectedModuleTaskAction(module = selectedModule()) {
   return module?.actions?.find((action) => action.id === actionId);
 }
 
+function moduleTaskStep(action = selectedModuleTaskAction()) {
+  if (!action) return undefined;
+  return action.id === 'run' ? 'run' : 'build';
+}
+
 function selectedModuleAction(module = selectedModule()) {
   return actionSelect.value === MODULE_TEST_ACTION
     ? { title: 'تست ماژول', description: 'اجرای تست انتخاب‌شده برای این ماژول.' }
     : selectedModuleTaskAction(module);
 }
 
+function quotePowerShellArgument(value) {
+  const text = String(value);
+  return /^[A-Za-z0-9_./:=\\-]+$/.test(text) ? text : `'${text.replaceAll("'", "''")}'`;
+}
+
+function gradleWrapperCommand(taskPath, options = [], trailingArguments = []) {
+  return ['.\\gradlew.bat', '--no-daemon', ...options, taskPath, ...trailingArguments]
+    .map(quotePowerShellArgument)
+    .join(' ');
+}
+
+function setCommandPreview(boxId, codeId, command) {
+  const box = document.querySelector(boxId);
+  box.hidden = !command;
+  document.querySelector(codeId).textContent = command ?? '';
+}
+
+function updateCommandPreviews() {
+  const module = selectedModule();
+  const test = module?.tests.find((item) => item.id === testSelect.value);
+  const testTask = test && (module.projectPath === ':' ? ':test' : `${module.projectPath}:test`);
+  setCommandPreview('#test-command-box', '#test-command', test
+    ? gradleWrapperCommand(testTask, ['--console=plain'], ['--tests', test.runner.testFilter])
+    : undefined);
+
+  const runAction = module?.actions?.find((action) => action.id === 'run');
+  const runTask = runAction && (module.projectPath === ':' ? `:${runAction.task}` : `${module.projectPath}:${runAction.task}`);
+  setCommandPreview('#run-command-box', '#run-command', runTask
+    ? gradleWrapperCommand(runTask, ['--console=plain'])
+    : undefined);
+
+  const taskAction = selectedModuleTaskAction(module);
+  const taskPath = taskAction && (module.projectPath === ':' ? `:${taskAction.task}` : `${module.projectPath}:${taskAction.task}`);
+  let taskOptions;
+  if (taskAction?.id === 'test') {
+    taskOptions = [];
+    if (document.querySelector('#gradle-rerun-tasks').checked) taskOptions.push('--rerun-tasks');
+    if (document.querySelector('#gradle-no-configuration-cache').checked) taskOptions.push('--no-configuration-cache');
+    taskOptions.push(`--console=${document.querySelector('#gradle-console').value}`);
+    if (document.querySelector('#gradle-info').checked) taskOptions.push('--info');
+  } else if (taskAction) {
+    taskOptions = ['--console=plain'];
+  }
+  setCommandPreview('#build-command-box', '#build-command', taskPath
+    ? gradleWrapperCommand(taskPath, taskOptions)
+    : undefined);
+}
+
 function canOpenWorkflowStep(step) {
   if (step === 'module') return true;
   if (step === 'action') return Boolean(selectedProjectPath());
   if (step === 'test') return Boolean(selectedProjectPath()) && actionSelect.value === MODULE_TEST_ACTION && Boolean(selectedModule()?.tests.length);
-  if (step === 'run' || step === 'build') return Boolean(selectedProjectPath()) && selectedModuleTaskAction()?.id === step;
+  if (step === 'run') return Boolean(selectedProjectPath()) && selectedModuleTaskAction()?.id === 'run';
+  if (step === 'build') return Boolean(selectedProjectPath()) && ['build', 'test'].includes(selectedModuleTaskAction()?.id);
   if (step === 'results') return actionSelect.value === MODULE_TEST_ACTION && Boolean(latestOutcome);
   return false;
 }
@@ -119,10 +173,20 @@ function renderWorkflow() {
   workflowNav.hidden = !actionFlowActive;
   if (module) {
     runModuleSummary.textContent = `${module.module.title} · ${module.projectPath} · Gradle task: ${module.projectPath === ':' ? ':run' : `${module.projectPath}:run`}`;
-    buildModuleSummary.textContent = `${module.module.title} · ${module.projectPath} · Gradle task: ${module.projectPath === ':' ? ':build' : `${module.projectPath}:build`}`;
+    const taskAction = selectedModuleTaskAction(module);
+    const taskPath = module.projectPath === ':' ? `:${taskAction?.task ?? 'build'}` : `${module.projectPath}:${taskAction?.task ?? 'build'}`;
+    buildModuleSummary.textContent = `${module.module.title} · ${module.projectPath} · Gradle task: ${taskPath}`;
+    document.querySelector('#build-title').textContent = taskAction?.title ?? 'اجرای task ماژول';
+    document.querySelector('#build-description').textContent = taskAction?.description ?? 'task انتخاب‌شده از طریق Gradle اجرا می‌شود؛ پیام‌های فرایند در همین صفحه زنده نمایش داده می‌شوند.';
+    document.querySelector('#build-module').textContent = taskAction?.id === 'test' ? 'اجرای تست‌ها' : 'ساخت ماژول';
+    document.querySelector('#gradle-test-options').hidden = taskAction?.id !== 'test';
   } else {
     runModuleSummary.textContent = '';
     buildModuleSummary.textContent = '';
+    document.querySelector('#build-title').textContent = 'اجرای task ماژول';
+    document.querySelector('#build-description').textContent = 'task انتخاب‌شده از طریق Gradle اجرا می‌شود؛ پیام‌های فرایند در همین صفحه زنده نمایش داده می‌شوند.';
+    document.querySelector('#build-module').textContent = 'اجرای task';
+    document.querySelector('#gradle-test-options').hidden = true;
   }
   for (const panel of workflowPanels) panel.hidden = panel.dataset.stepPanel !== currentStep;
   for (const button of workflowSteps.querySelectorAll('[data-step-target]')) {
@@ -137,11 +201,13 @@ function renderWorkflow() {
   }
   moduleNext.disabled = !projectPath;
   const taskAction = selectedModuleTaskAction(module);
-  const destination = taskAction?.id ?? 'test';
+  const destination = moduleTaskStep(taskAction) ?? 'test';
   actionNext.disabled = !canOpenWorkflowStep(destination);
   actionNext.textContent = taskAction?.id === 'run'
     ? 'رفتن به نمای اجرای برنامه ←'
-    : taskAction?.id === 'build' ? 'رفتن به نمای ساخت ماژول ←' : 'ادامه به انتخاب تست ←';
+    : taskAction?.id === 'test' ? 'رفتن به نمای اجرای تست‌های ماژول ←'
+      : taskAction?.id === 'build' ? 'رفتن به نمای ساخت ماژول ←' : 'ادامه به انتخاب تست ←';
+  updateCommandPreviews();
 }
 
 function goToWorkflowStep(step) {
@@ -195,7 +261,7 @@ function restoreSelectionFromUrl() {
     || (params.has('test') && (actionSelect.value !== MODULE_TEST_ACTION || !requestedTestIsValid));
   currentStep = actionSelect.value === MODULE_TEST_ACTION
     ? (requestedTestIsValid ? 'test' : 'action')
-    : isTaskActionSelected ? selectedModuleTaskAction(module).id : 'module';
+    : isTaskActionSelected ? moduleTaskStep(selectedModuleTaskAction(module)) : 'module';
   renderWorkflow();
   if (hasInvalidSelection) updateSelectionUrl('replace');
 }
@@ -293,7 +359,7 @@ function renderActions() {
 
   const definitions = [
     ...(module.tests.length ? [{ id: MODULE_TEST_ACTION, title: 'تست‌های ماژول', description: `اجرای یکی از ${new Intl.NumberFormat('fa-IR').format(module.tests.length)} تست ثبت‌شده برای این ماژول.`, icon: '✓' }] : []),
-    ...(module.actions ?? []).map((action) => ({ ...action, id: `${MODULE_TASK_PREFIX}${action.id}`, icon: action.id === 'build' ? 'B' : '▶' })),
+    ...(module.actions ?? []).map((action) => ({ ...action, id: `${MODULE_TASK_PREFIX}${action.id}`, icon: action.id === 'build' ? 'B' : action.id === 'test' ? '✓' : '▶' })),
   ];
   for (const action of definitions) {
     const card = document.createElement('button');
@@ -343,7 +409,12 @@ function renderTests() {
     : !actionSelected
       ? 'ابتدا اکشن را انتخاب کنید'
       : (module?.tests.length ? 'انتخاب تست' : 'برای این ماژول تستی تعریف نشده است'), ''));
-  for (const test of (actionSelected ? module?.tests ?? [] : [])) testSelect.append(option(test.title, test.id));
+  for (const test of (actionSelected ? module?.tests ?? [] : [])) {
+    const className = test.runner?.testFilter?.split('.').find((segment) => /^[A-Z][A-Za-z0-9_$]*$/.test(segment));
+    const fileName = className ? `${className}.kt` : undefined;
+    const title = fileName && !test.title.includes(fileName) ? `${fileName} — ${test.title}` : test.title;
+    testSelect.append(option(title, test.id));
+  }
   testSelect.disabled = !actionSelected || !module || module.tests.length === 0;
   moduleDescription.textContent = projectPath
     ? (module ? (module.module.description ?? 'برای این ماژول توضیحی ثبت نشده است.') : 'این Gradle Project در Help ثبت نشده است.')
@@ -1112,14 +1183,17 @@ actionChoices.addEventListener('click', (event) => {
 moduleNext.addEventListener('click', () => goToWorkflowStep('action'));
 actionNext.addEventListener('click', () => {
   const taskAction = selectedModuleTaskAction();
-  goToWorkflowStep(taskAction?.id ?? 'test');
+  goToWorkflowStep(moduleTaskStep(taskAction) ?? 'test');
 });
 document.querySelector('#action-back').addEventListener('click', () => goToWorkflowStep('module'));
 document.querySelector('#test-back').addEventListener('click', () => goToWorkflowStep('action'));
 document.querySelector('#run-back').addEventListener('click', () => goToWorkflowStep('action'));
 document.querySelector('#build-back').addEventListener('click', () => goToWorkflowStep('action'));
 document.querySelector('#run-app').addEventListener('click', () => runModuleAction('run'));
-document.querySelector('#build-module').addEventListener('click', () => runModuleAction('build'));
+document.querySelector('#build-module').addEventListener('click', () => {
+  const action = selectedModuleTaskAction();
+  if (action) runModuleAction(action.id);
+});
 workflowSteps.addEventListener('click', (event) => {
   const button = event.target.closest('[data-step-target]');
   if (button && !button.disabled) goToWorkflowStep(button.dataset.stepTarget);
@@ -1138,6 +1212,9 @@ testSelect.addEventListener('change', () => {
   renderWorkflow();
   updateSelectionUrl();
 });
+for (const selector of ['#gradle-rerun-tasks', '#gradle-no-configuration-cache', '#gradle-info', '#gradle-console']) {
+  document.querySelector(selector).addEventListener('change', updateCommandPreviews);
+}
 window.addEventListener('popstate', restoreSelectionFromUrl);
 parameterForm.addEventListener('submit', (event) => event.preventDefault());
 
@@ -1156,7 +1233,13 @@ async function runModuleAction(actionId) {
       const parameter = action.parameters.find((item) => item.id === parameterId);
       return parameter.type === 'boolean' || value !== '';
     }));
-  currentStep = actionId;
+  const gradleOptions = actionId === 'test' ? {
+    rerunTasks: document.querySelector('#gradle-rerun-tasks').checked,
+    noConfigurationCache: document.querySelector('#gradle-no-configuration-cache').checked,
+    info: document.querySelector('#gradle-info').checked,
+    console: document.querySelector('#gradle-console').value,
+  } : undefined;
+  currentStep = moduleTaskStep(action);
   renderWorkflow();
   const button = document.querySelector(actionId === 'run' ? '#run-app' : '#build-module');
   const status = document.querySelector(actionId === 'run' ? '#run-status' : '#build-status');
@@ -1167,12 +1250,13 @@ async function runModuleAction(actionId) {
 
   button.disabled = true;
   status.removeAttribute('data-state');
-  status.textContent = actionId === 'run' ? 'برنامه در حال اجراست…' : 'ساخت ماژول در حال اجراست…';
+  status.textContent = actionId === 'run' ? 'برنامه در حال اجراست…'
+    : actionId === 'test' ? 'تست‌های ماژول در حال اجراست…' : 'ساخت ماژول در حال اجراست…';
   try {
     const response = await fetch('/api/actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ projectPath: module.projectPath, actionId, parameters }),
+      body: JSON.stringify({ projectPath: module.projectPath, actionId, parameters, ...(gradleOptions ? { gradleOptions } : {}) }),
     });
     if (!response.ok) {
       const error = await response.json();

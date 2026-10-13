@@ -6,9 +6,10 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.query_rende
 import gog.my_project.data_base.query.dialect.data_class.select_data.withs_item.QueryWithsItemData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.withs_item.IQueryWithsItemCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryWithsItemCapability:
-    IQueryWithsItemCapability {
+    IQueryWithsItemCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:        IQueryWithsItemAst,

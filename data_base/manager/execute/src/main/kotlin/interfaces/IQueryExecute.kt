@@ -5,6 +5,7 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.manager.execute.query.BoundQuery
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
@@ -43,20 +44,58 @@ interface IQueryExecute {
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,
     )
 
+    /** Executes positional SQL with occurrence-ordered parameter references. */
+    fun executeSelect(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<ResultSet>) -> Unit,
+    ) {
+        blockExecute(
+            ExecuteResult.Failure(
+                UnsupportedOperationException(
+                    "${this::class.qualifiedName} does not support identity-aware BoundQuery execution",
+                ),
+            ),
+        )
+    }
+
     fun executeUpdate(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
     )
+
+    /** Executes positional UPDATE SQL with occurrence-ordered parameter references. */
+    fun executeUpdate(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        blockExecute(unsupportedBoundQueryExecution())
+    }
 
     fun executeInsert(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Long>) -> Unit,
     )
 
+    /** Executes positional INSERT SQL with occurrence-ordered parameter references. */
+    fun executeInsert(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Long>) -> Unit,
+    ) {
+        blockExecute(unsupportedBoundQueryExecution())
+    }
+
     fun executeDelete(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
     )
+
+    /** Executes positional DELETE SQL with occurrence-ordered parameter references. */
+    fun executeDelete(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        blockExecute(unsupportedBoundQueryExecution())
+    }
 
     fun executeTable(
         builtQuery: BuiltQuery,
@@ -129,5 +168,25 @@ interface IQueryExecute {
 
         return ps
     }
+
+    /** Binds each positional occurrence directly without resolving or merging by logical name. */
+    fun readyParamsInQuery(
+        ps: PreparedStatement?,
+        boundQuery: BoundQuery,
+    ): PreparedStatement? {
+        if (ps == null) return null
+
+        boundQuery.parameterOccurrences.forEachIndexed { index, parameter ->
+            parameter.bind(ps, index + 1)
+        }
+        return ps
+    }
+
+    private fun <T> unsupportedBoundQueryExecution(): ExecuteResult<T> =
+        ExecuteResult.Failure(
+            UnsupportedOperationException(
+                "${this::class.qualifiedName} does not support identity-aware BoundQuery execution",
+            ),
+        )
 
 }

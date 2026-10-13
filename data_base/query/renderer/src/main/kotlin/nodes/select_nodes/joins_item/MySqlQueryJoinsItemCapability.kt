@@ -8,9 +8,10 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.joins_item.
 import gog.my_project.data_base.query.dialect.data_class.select_data.table.QueryTableData
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.joins_item.IQueryJoinsItemCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
 
 class MySqlQueryJoinsItemCapability :
-    IQueryJoinsItemCapability {
+    IQueryJoinsItemCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast:         IQueryJoinsItemAst,

@@ -131,6 +131,7 @@ test('registry exposes build/run actions for projects without help.json and keep
   assert.deepEqual([...registry.keys()], [':one', ':two', ':opt-out']);
   const publishedModules = publicModules(registry);
   assert.equal(publishedModules.length, 3);
+  assert.equal(publishedModules.find(({ projectPath }) => projectPath === ':one').tests[0].runner.testFilter, 'sample.IntegrationTest.runs');
   assert.deepEqual(publishedModules.find(({ projectPath }) => projectPath === ':opt-out').actions.map(({ id }) => id), ['build']);
   assert.deepEqual(registry.get(':opt-out').module.actions.map(({ id }) => id), ['build']);
   assert.deepEqual(registry.get(':one').module.actions.map(({ id }) => id), ['build', 'run']);

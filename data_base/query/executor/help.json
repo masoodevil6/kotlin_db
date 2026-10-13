@@ -19,6 +19,48 @@
         "type": "gradle-html",
         "path": "build/reports/tests/test"
       }
+    },
+    {
+      "id": "query-executor-identity-aware-select",
+      "title": "IdentityAwareSelectExecutionTest.kt — آزمون اجرای SELECT هویت‌محور",
+      "description": "بررسی binding پارامترهای هم‌نام در Declarationهای تو‌در‌تو و هر دو ترتیب ساخت where/from با JDBC آزمایشی؛ بدون نیاز به دیتابیس واقعی.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.executer.manager.IdentityAwareSelectExecutionTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    },
+    {
+      "id": "query-executor-identity-aware-dml",
+      "title": "IdentityAwareDmlExecutionTest.kt — آزمون اجرای DML هویت‌محور",
+      "description": "بررسی binding پارامترهای مستقل هم‌نام در INSERT/UPDATE/DELETE، مسیر Legacy و رد ترکیب پشتیبانی‌نشده با JDBC آزمایشی؛ بدون نیاز به دیتابیس واقعی.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.executer.manager.IdentityAwareDmlExecutionTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
+    },
+    {
+      "id": "query-executor-consumer",
+      "title": "QueryConsumerTest.kt — آزمون قرارداد QueryConsumer",
+      "description": "بررسی اتصال QueryConsumer به Executor و واگذاری اجرای Query و تولید BuiltQuery از طریق sql().",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.executer.manager.QueryConsumerTest"
+      },
+      "parameters": [],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
     }
   ]
 }

@@ -1,14 +1,113 @@
 package gog.my_project.data_base.manager.execute.manager
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
+import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base.manager.execute.query.BoundQuery
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Statement
+import java.sql.PreparedStatement
 import kotlin.use
 
 class QueryExecute : IQueryExecute {
+    override fun executeSelect(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<ResultSet>) -> Unit,
+    ) {
+        val connection = DatabaseConnection().build()
+        connection.use { conn ->
+            val statement = try {
+                conn.prepareStatement(boundQuery.jdbcSql)
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@use
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<ResultSet> = try {
+                    val prepared = requireNotNull(readyParamsInQuery(stmt, boundQuery))
+                    ExecuteResult.Success(prepared.executeQuery())
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
+                }
+                // Consumer callbacks remain outside the JDBC catch, matching legacy SELECT.
+                blockExecute(result)
+            }
+        }
+    }
+
+    override fun executeInsert(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Long>) -> Unit,
+    ) {
+        executeBoundStatement(boundQuery, returnGeneratedKeys = true, blockExecute = blockExecute) { prepared ->
+            val affectedRows = prepared.executeUpdate()
+            when {
+                affectedRows <= 0 -> ExecuteResult.Failure(IllegalStateException("INSERT did not affect any rows"))
+                else -> {
+                    val generatedKey = prepared.generatedKeys.use { keys ->
+                        if (keys.next()) keys.getLong(1) else null
+                    }
+                    if (generatedKey == null) {
+                        ExecuteResult.Failure(IllegalStateException("No generated key returned"))
+                    } else {
+                        ExecuteResult.Success(generatedKey)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun executeUpdate(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        executeBoundStatement(boundQuery, blockExecute = blockExecute) { prepared ->
+            ExecuteResult.Success(prepared.executeUpdate())
+        }
+    }
+
+    override fun executeDelete(
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        executeBoundStatement(boundQuery, blockExecute = blockExecute) { prepared ->
+            ExecuteResult.Success(prepared.executeUpdate())
+        }
+    }
+
+    private fun <T> executeBoundStatement(
+        boundQuery: BoundQuery,
+        returnGeneratedKeys: Boolean = false,
+        blockExecute: (ExecuteResult<T>) -> Unit,
+        operation: (PreparedStatement) -> ExecuteResult<T>,
+    ) {
+        val connection = DatabaseConnection().build()
+        connection.use { conn ->
+            val statement = try {
+                if (returnGeneratedKeys) {
+                    conn.prepareStatement(boundQuery.jdbcSql, Statement.RETURN_GENERATED_KEYS)
+                } else {
+                    conn.prepareStatement(boundQuery.jdbcSql)
+                }
+            } catch (exception: SQLException) {
+                blockExecute(ExecuteResult.Failure(exception))
+                return@use
+            }
+
+            statement.use { stmt ->
+                val result: ExecuteResult<T> = try {
+                    operation(requireNotNull(readyParamsInQuery(stmt, boundQuery)))
+                } catch (exception: SQLException) {
+                    ExecuteResult.Failure(exception)
+                }
+                blockExecute(result)
+            }
+        }
+    }
+
     override fun executeSelect(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,

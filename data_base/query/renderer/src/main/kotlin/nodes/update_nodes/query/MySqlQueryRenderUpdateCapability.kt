@@ -7,8 +7,10 @@ import gog.my_project.data_base.query.dialect.data_class.update_data.column_upda
 import gog.my_project.data_base.query.dialect.data_class.update_data.query_render_update.QueryRenderUpdateData
 import gog.my_project.data_base.query.dialect.nodes.update_nodes.query_render_update.IQueryRenderUpdateCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
+import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
+import gog.my_project.data_base.query.renderer.interfaces.renderParameter
 
-class MySqlQueryRenderUpdateCapability : IQueryRenderUpdateCapability {
+class MySqlQueryRenderUpdateCapability : IQueryRenderUpdateCapability, IParameterOccurrenceAwareRenderer {
 
     override fun render(
         ast: IQueryRenderUpdateAst,
@@ -39,7 +41,8 @@ class MySqlQueryRenderUpdateCapability : IQueryRenderUpdateCapability {
                     );
 
                 if (columnName != null){
-                    columnsStr +=  " $columnName = :$columnTag ";
+                    val placeholder = column.parameter?.let(ctx::renderParameter) ?: ":$columnTag"
+                    columnsStr +=  " $columnName = $placeholder ";
 
                     if (index < columnsList.size - 1){
                         columnsStr += ","
