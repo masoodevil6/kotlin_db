@@ -29,6 +29,7 @@ import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs_item.Qu
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
 import gog.my_project.data_base.query.builder.ast.select_builder.joins.QueryJoinsBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.BuiltCteComposition
@@ -46,6 +47,17 @@ class QueryRenderSelectBuilder(
     override var ast: IQueryRenderSelectAst = QueryRenderSelectAst(),
 ) : IQueryRenderSelectApi
 {
+
+    internal var parameterBindingScope = ParameterBindingScope()
+        private set
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryRenderSelectAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
     private val modelAliasContext = ModelTableAliasContext()
     private val querySourceContext = CteSourceContext()
@@ -84,7 +96,8 @@ class QueryRenderSelectBuilder(
         val ast = QueryWithsAst();
         val withsBuilder = QueryWithsBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockWiths);
         explicitCteRoots = withsBuilder.cteRoots.toList()
         explicitWithItems = ast.withs.filterNot { item ->
@@ -297,6 +310,7 @@ class QueryRenderSelectBuilder(
             ast,
             modelAliasContext,
             allowSelectQuerySources = true,
+            parameterBindingScope = parameterBindingScope,
         ).apply(blockTable);
         val selectedCte = tableBuilder.selectedQueryRelation
         if (selectedCte != null) {
@@ -318,7 +332,8 @@ class QueryRenderSelectBuilder(
         val ast = QueryJoinsAst();
         QueryJoinsBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockJoins);
         this.ast.joins = ast;
         return this;
@@ -337,7 +352,8 @@ class QueryRenderSelectBuilder(
         val ast = QueryWhereAst();
         QueryWhereBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockGroup);
         this.ast.where = ast;
         return this;

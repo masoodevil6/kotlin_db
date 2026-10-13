@@ -9,5 +9,17 @@ class RenderContext(
     override val registry: IRendererRegistry
 ) : IRenderContext
 {
+    private var occurrenceCollector: MutableList<Any>? = null
+
+    override val parameterOccurrences: MutableList<Any>?
+        get() = occurrenceCollector
+
+    internal constructor(
+        dialect: ISqlDialect,
+        registry: IRendererRegistry,
+        parameterOccurrences: MutableList<Any>,
+    ) : this(dialect, registry) {
+        occurrenceCollector = parameterOccurrences
+    }
 
 }

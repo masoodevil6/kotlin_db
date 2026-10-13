@@ -10,6 +10,7 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQue
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.table.QueryTableAst
 import gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import kotlin.reflect.KClass
@@ -19,6 +20,7 @@ class QueryTableBuilder internal constructor(
     override var ast: IQueryTableAst,
     private val modelAliasContext: ModelTableAliasContext,
     private val allowSelectQuerySources: Boolean = false,
+    private val parameterBindingScope: ParameterBindingScope? = null,
 ) : IQueryTableApi {
 
     private var configuredAlias: String? = null
@@ -35,6 +37,12 @@ class QueryTableBuilder internal constructor(
         params: MutableList<SqlParameter<*>> = mutableListOf(),
         ast: IQueryTableAst = QueryTableAst(),
     ) : this(params, ast, ModelTableAliasContext())
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryTableAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast, ModelTableAliasContext(), parameterBindingScope = parameterBindingScope)
 
     override fun <T : IModelBase> table(
         table: KClass<T>,
@@ -81,7 +89,10 @@ class QueryTableBuilder internal constructor(
 
         val nestedAst = QueryRenderSelectAst()
         val nestedParams = mutableListOf<SqlParameter<*>>()
-        QueryRenderSelectBuilder(nestedParams, nestedAst).apply(blockQuery)
+        val nestedBuilder = parameterBindingScope?.let {
+            QueryRenderSelectBuilder(nestedParams, nestedAst, it)
+        } ?: QueryRenderSelectBuilder(nestedParams, nestedAst)
+        nestedBuilder.apply(blockQuery)
         params.addAll(nestedParams)
         ast.table = null
         ast.cte = null

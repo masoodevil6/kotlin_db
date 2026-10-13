@@ -12,12 +12,23 @@ import gog.my_project.data_base.query.ast.schema.select_schema.conditions_item_c
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.conditions_item_collection.QueryConditionsCollectionBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 import kotlin.collections.plusAssign
 
 class QueryConditionsBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryConditionsAst = QueryConditionsAst(),
 ): IQueryConditionsApi {
+
+    private var parameterBindingScope = ParameterBindingScope()
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryConditionsAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
     /* ==============================================================
     structure [logical]
@@ -161,8 +172,9 @@ class QueryConditionsBuilder(
         paramValue: T
     ): IQueryConditionsApi
     {
-        this.ast.conditionSideRight = ":${paramName}";
-        params += SqlParameter.of(paramName , paramValue)
+        val parameter = parameterBindingScope.canonical(SqlParameter.of(paramName, paramValue))
+        this.ast.conditionSideRight = parameter
+        params += parameter
         return this;
     }
 
@@ -176,7 +188,8 @@ class QueryConditionsBuilder(
         QueryConditionsCollectionBuilder(
             params,
             ast,
-            paramName
+            paramName,
+            parameterBindingScope,
         ).apply(blockParamsCollection)
         this.ast.conditionSideRight = ast
         return this;

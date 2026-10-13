@@ -11,11 +11,22 @@ import gog.my_project.data_base.query.ast.schema.select_schema.joins_item.QueryJ
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.table.QueryTableAst
 import gog.my_project.data_base.query.builder.ast.select_builder.conditions_group.QueryConditionsGroupsBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.table.QueryTableBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 
 class QueryJoinsItemBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryJoinsItemAst = QueryJoinsItemAst(),
 )  : IQueryJoinsItemApi {
+
+    private var parameterBindingScope = ParameterBindingScope()
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryJoinsItemAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
 
 
@@ -53,7 +64,8 @@ class QueryJoinsItemBuilder(
         val ast = QueryTableAst();
         QueryTableBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockTable)
         this.ast.joinTable = ast;
         return this;
@@ -72,7 +84,8 @@ class QueryJoinsItemBuilder(
         val ast = QueryConditionsGroupsAst();
         QueryConditionsGroupsBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockCondition)
         this.ast.joinConditions = ast;
         return this;

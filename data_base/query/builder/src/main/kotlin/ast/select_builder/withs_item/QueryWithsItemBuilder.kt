@@ -9,11 +9,22 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item
 import gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs_item.QueryWithsItemAst
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 
 class QueryWithsItemBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryWithsItemAst = QueryWithsItemAst(),
 ): IQueryWithsItemApi {
+
+    private var parameterBindingScope = ParameterBindingScope()
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryWithsItemAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
     internal var selectedCte: Cte? = null
     internal var selectedCteNameOverride: String? = null
@@ -70,7 +81,8 @@ class QueryWithsItemBuilder(
         val ast = QueryRenderSelectAst();
         QueryRenderSelectBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockWith);
         this.ast.withBody = ast;
 

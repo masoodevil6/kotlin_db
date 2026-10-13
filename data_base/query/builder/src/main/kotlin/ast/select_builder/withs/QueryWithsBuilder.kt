@@ -8,11 +8,22 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQue
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs.QueryWithsAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs_item.QueryWithsItemAst
 import gog.my_project.data_base.query.builder.ast.select_builder.withs_item.QueryWithsItemBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 
 class QueryWithsBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryWithsAst = QueryWithsAst(),
 ) : IQueryWithsApi {
+
+    private var parameterBindingScope = ParameterBindingScope()
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryWithsAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
     internal val cteRoots = mutableListOf<Cte>()
     internal val cteRootItems = mutableListOf<QueryWithsItemAst>()
@@ -25,7 +36,8 @@ class QueryWithsBuilder(
         val ast = QueryWithsItemAst();
         val itemBuilder = QueryWithsItemBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockWith)
         val cte = itemBuilder.selectedCte
         this.ast.withs.add(ast)

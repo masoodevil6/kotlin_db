@@ -1,9 +1,12 @@
 package gog.my_project.data_base.query.builder.ast.select_builder
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
+import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
+import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item.IQueryConditionsAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
@@ -14,6 +17,8 @@ import java.sql.Types
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private data class ScopedValue(val value: Int)
@@ -74,14 +79,43 @@ class InlineCteParameterBindingTest {
             outerParameterName = "outer_value",
         )
 
-        val whereFirstSql = MySqlDialect().render(whereBeforeFrom.ast)!!
-        val fromFirstSql = MySqlDialect().render(fromBeforeWhere.ast)!!
+        val dialect = MySqlDialect()
+        val whereFirstSql = dialect.render(whereBeforeFrom.ast)!!
+        val fromFirstSql = dialect.render(fromBeforeWhere.ast)!!
+        val (whereFirstTrackedSql, whereFirstOccurrences) = dialect.renderWithBindings(whereBeforeFrom.ast)
+        val (fromFirstTrackedSql, fromFirstOccurrences) = dialect.renderWithBindings(fromBeforeWhere.ast)
         val expectedPlaceholderOrder = listOf("inner_value", "parent_value", "outer_value")
 
         assertEquals(fromFirstSql, whereFirstSql)
+        assertEquals(whereFirstSql, whereFirstTrackedSql)
+        assertEquals(fromFirstSql, fromFirstTrackedSql)
         assertTrue(whereFirstSql.contains("As outer_source"), whereFirstSql)
         assertTrue(Regex("FROM\\s+\\(\\s*SELECT", RegexOption.IGNORE_CASE).containsMatchIn(whereFirstSql), whereFirstSql)
         assertEquals(expectedPlaceholderOrder, placeholderNames(whereFirstSql))
+
+        val whereFirstParent = whereBeforeFrom.ast.table!!.derivedQuery!!
+        val whereFirstNested = whereFirstParent.table!!.derivedQuery!!
+        val expectedWhereFirstReferences = listOf(
+            conditionParameter(whereFirstNested),
+            conditionParameter(whereFirstParent),
+            conditionParameter(whereBeforeFrom.ast),
+        )
+        assertEquals(listOf(11, 22, 33), whereFirstOccurrences.map { assertIs<SqlParameter<*>>(it).value })
+        expectedWhereFirstReferences.indices.forEach { index ->
+            assertSame(expectedWhereFirstReferences[index], whereFirstOccurrences[index])
+        }
+
+        val fromFirstParent = fromBeforeWhere.ast.table!!.derivedQuery!!
+        val fromFirstNested = fromFirstParent.table!!.derivedQuery!!
+        val expectedFromFirstReferences = listOf(
+            conditionParameter(fromFirstNested),
+            conditionParameter(fromFirstParent),
+            conditionParameter(fromBeforeWhere.ast),
+        )
+        assertEquals(listOf(11, 22, 33), fromFirstOccurrences.map { assertIs<SqlParameter<*>>(it).value })
+        expectedFromFirstReferences.indices.forEach { index ->
+            assertSame(expectedFromFirstReferences[index], fromFirstOccurrences[index])
+        }
 
         // The Builder list reflects invocation order; JDBC binding must reflect SQL order.
         assertEquals(
@@ -191,6 +225,11 @@ class InlineCteParameterBindingTest {
             .findAll(sql)
             .map { it.groupValues[1] }
             .toList()
+
+    private fun conditionParameter(ast: IQueryRenderSelectAst): SqlParameter<*> =
+        assertIs<SqlParameter<*>>(
+            (ast.where!!.condition!!.conditions.single() as IQueryConditionsAst).conditionSideRight,
+        )
 
     private fun bindInSqlOrder(
         sql: String,

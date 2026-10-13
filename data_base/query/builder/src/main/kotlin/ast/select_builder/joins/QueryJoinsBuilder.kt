@@ -7,11 +7,22 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.joins.IQue
 import gog.my_project.data_base.query.ast.schema.select_schema.joins.QueryJoinsAst
 import gog.my_project.data_base.query.ast.schema.select_schema.joins_item.QueryJoinsItemAst
 import gog.my_project.data_base.query.builder.ast.select_builder.joins_item.QueryJoinsItemBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 
 class QueryJoinsBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryJoinsAst = QueryJoinsAst(),
 ) : IQueryJoinsApi {
+
+    private var parameterBindingScope = ParameterBindingScope()
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryJoinsAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
 
     override fun addJoin(
@@ -21,7 +32,8 @@ class QueryJoinsBuilder(
         val ast = QueryJoinsItemAst();
         QueryJoinsItemBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockJoin);
         this.ast.joins.add(ast);
         return this;

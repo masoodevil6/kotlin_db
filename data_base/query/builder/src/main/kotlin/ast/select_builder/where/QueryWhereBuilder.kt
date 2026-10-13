@@ -7,11 +7,22 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.where.IQue
 import gog.my_project.data_base.query.ast.schema.select_schema.conditions_group.QueryConditionsGroupsAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.where.QueryWhereAst
 import gog.my_project.data_base.query.builder.ast.select_builder.conditions_group.QueryConditionsGroupsBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 
 class QueryWhereBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryWhereAst = QueryWhereAst(),
 ) : IQueryWhereApi {
+
+    private var parameterBindingScope = ParameterBindingScope()
+
+    internal constructor(
+        params: MutableList<SqlParameter<*>>,
+        ast: IQueryWhereAst,
+        parameterBindingScope: ParameterBindingScope,
+    ) : this(params, ast) {
+        this.parameterBindingScope = parameterBindingScope
+    }
 
 
     override fun conditions(
@@ -21,7 +32,8 @@ class QueryWhereBuilder(
         val ast = QueryConditionsGroupsAst();
         QueryConditionsGroupsBuilder(
             params,
-            ast
+            ast,
+            parameterBindingScope,
         ).apply(blockCondition);
         this.ast.condition = ast;
         return this;
