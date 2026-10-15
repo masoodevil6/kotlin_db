@@ -6,7 +6,7 @@ import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.queries.QueryMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -28,7 +28,7 @@ fun cte(
 fun ICteDeclaration<*>.buildCte(
     block: IQueryRenderSelectApi.() -> Unit,
 ): Cte = cte(
-    name = QueryBuilderMetadata.queryName(this::class),
+    name = QueryMetadataResolver.queryName(this::class),
     declarationOwner = this::class,
     block = block,
 )
@@ -39,7 +39,7 @@ private fun buildCteDefinition(
     block: IQueryRenderSelectApi.() -> Unit,
 ): Cte {
     require(name.isNotBlank()) { "Cte name must not be blank" }
-    val logicalQueryName = declarationOwner?.let { QueryBuilderMetadata.queryName(it) }
+    val logicalQueryName = declarationOwner?.let { QueryMetadataResolver.queryName(it) }
 
     val builder = QueryRenderSelectBuilder(
         params = mutableListOf(),
@@ -80,7 +80,7 @@ private fun validateUniqueLogicalOutputNames(
             ?.takeIf { it.kind == KParameter.Kind.INSTANCE }
             ?.type?.classifier as? KClass<*>
         if (receiverType != declarationOwner) return@mapNotNull null
-        QueryBuilderMetadata.queryLogicalOutputName(property as KProperty1<*, *>)
+        QueryMetadataResolver.queryLogicalOutputName(property as KProperty1<*, *>)
     }
     require(logicalNames.distinct().size == logicalNames.size) {
         "Cte $queryName cannot declare duplicate logical output names"

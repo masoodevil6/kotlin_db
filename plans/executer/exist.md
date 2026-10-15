@@ -86,6 +86,9 @@ queryManager.queryBuilder(query)
         println(builtQuery.query)
         println(builtQuery.params)
     }
+    .details { metadata ->
+        println("meta_data: $metadata")
+    }
     .execute()
     .success { rows ->
         rows.forEach { row ->
@@ -305,6 +308,7 @@ val query = QueryRenderSelectBuilder()
 
 queryManager.queryBuilder(query)
     .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
+    .details { metadata -> println("meta_data: $metadata") }
     .execute()
     .success { rows ->
         rows.forEach { row ->
@@ -621,6 +625,7 @@ queryManager
         }
     }
     .sql { (queryText, params) -> println(queryText + "\n" + params) }
+    .details { metadata -> println("meta_data: $metadata") }
     .execute()
 ~~~
 
@@ -657,6 +662,7 @@ queryManager
         }
     }
     .sql { (queryText, params) -> println(queryText + "\n" + params) }
+    .details { metadata -> println("meta_data: $metadata") }
     .execute()
     .success { rows ->
         rows.forEach { row ->
@@ -804,7 +810,26 @@ SQL ساختاری: DELETE uu FROM user_users AS uu WHERE (uu.id = ...). نتی�
 | V2 | Model property؛ خواندن با Model::property | Model | Model | Model |
 | V3 | Query property و SQL alias اعلام‌شده؛ خواندن با `Query::property` | Model V3 | Model V3 | Model V3 |
 
-SELECT.execute() همهٔ ردیف‌ها را به‌صورت eager و با نوع ExecuteResult<List<QueryRow>> برمی‌گرداند. Consumer متد first() نیز برای دریافت اولین ردیف دارد. INSERT/UPDATE/DELETE فقط پس از فعال‌کردن گزینهٔ مربوط به اجرا اجرا می‌شوند.
+`SELECT.execute()` همهٔ ردیف‌ها را به‌صورت eager و با نوع `ExecuteResult<List<QueryRow>>` برمی‌گرداند. Consumer متد `first()` نیز برای دریافت اولین ردیف دارد. INSERT/UPDATE/DELETE فقط پس از فعال‌کردن گزینهٔ مربوط به اجرا اجرا می‌شوند.
+
+#### مشاهدهٔ Metadata مؤثر SELECT با `details`
+
+`QueryConsumer.details()`، Metadata مؤثر SELECT را از Provider همان Query دریافت می‌کند. نسخهٔ callback یعنی `details { metadata -> ... }` Metadata را به callback می‌دهد و همان Consumer را برمی‌گرداند؛ بنابراین می‌توان آن را میان `.sql { ... }` و `.execute()` زنجیره کرد:
+
+~~~kotlin
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
+
+queryManager.queryBuilder(query)
+    .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
+    .details { metadata -> println(formatEffectiveQueryMetadata(metadata)) }
+    .execute()
+~~~
+
+تابع formatEffectiveQueryMetadata در ماژول Example اطلاعات را در دو جدول کنسولی، یکی برای Relationها و دیگری برای خروجی‌ها، نمایش می‌دهد. مقدار null با `<null>`، رشتهٔ خالی با `<empty>` و فهرست بدون عضو با `<none>` نمایش داده می‌شود. Metadata فعلی CTE و Query را گزارش می‌کند؛ sourceهای عادی Model یا جدول در این فهرست Relationها قرار نمی‌گیرند، بنابراین SELECT بدون CTE در هر دو بخش `<none>` نشان می‌دهد.
+
+مقدار `metadata` از نوع `EffectiveQueryMetadata` است و فهرست Relationها و خروجی‌های مؤثر را نگه می‌دارد؛ از جمله نام منطقی Query، نام runtime مربوط به CTE، نام SQL در `WITH`، alias مربوط به occurrence، نام منطقی خروجی، alias منتشرشده در SQL و `executionType`. فیلدهای nullable در صورت نبود مقدار `null` باقی می‌مانند و خروجی‌ها و Relationها ترتیب Query را حفظ می‌کنند.
+
+فراخوانی `details` به‌تنهایی SQL را render نمی‌کند و Query را اجرا نمی‌کند. اگر SELECT سفارشی Provider مربوط به `EffectiveQueryMetadata` را نداشته باشد، `details()` با `IllegalStateException` روشن خطا می‌دهد؛ این محدودیت بر `.sql()` و `.execute()` اثری ندارد. این API متعلق به SELECT است و برای Consumerهای INSERT، UPDATE و DELETE ارائه نشده است.
 
 ### Rules
 

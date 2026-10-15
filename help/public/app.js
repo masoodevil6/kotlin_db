@@ -15,6 +15,8 @@ const runSummary = document.querySelector('#run-summary');
 const copyAiReportButton = document.querySelector('#copy-ai-report');
 const copyAiReportStatus = document.querySelector('#copy-ai-report-status');
 const aiReportFallback = document.querySelector('#ai-report-text');
+const explainTestWithAiButton = document.querySelector('#explain-test-with-ai');
+const explainTestWithAiStatus = document.querySelector('#explain-test-with-ai-status');
 const connection = document.querySelector('#connection');
 const workflowNav = document.querySelector('#workflow-nav');
 const workflowSteps = document.querySelector('#workflow-steps');
@@ -26,6 +28,11 @@ const testSelectionSummary = document.querySelector('#test-selection-summary');
 const moduleUses = document.querySelector('#module-uses');
 const runModuleSummary = document.querySelector('#run-module-summary');
 const buildModuleSummary = document.querySelector('#build-module-summary');
+const moduleTestSummary = document.querySelector('#module-test-summary');
+const moduleTestAiActions = document.querySelector('#module-test-ai-actions');
+const moduleTestExplainAiButton = document.querySelector('#module-test-explain-ai');
+const moduleTestExplainAiStatus = document.querySelector('#module-test-explain-ai-status');
+const moduleTestAiFallback = document.querySelector('#module-test-ai-text');
 let modules = [];
 let projectPaths = [];
 let moduleTree = { children: new Map() };
@@ -339,6 +346,11 @@ function renderModulePath() {
 function renderActions() {
   const projectPath = selectedProjectPath();
   const module = selectedModule();
+  moduleTestSummary.replaceChildren();
+  moduleTestSummary.hidden = true;
+  moduleTestAiActions.hidden = true;
+  moduleTestExplainAiStatus.textContent = '';
+  moduleTestAiFallback.hidden = true;
   actionChoices.replaceChildren();
   const hasActions = Boolean(module && (module.tests.length || module.actions?.length));
   actionSelect.replaceChildren(option(projectPath
@@ -426,6 +438,8 @@ function renderTests() {
   runButton.disabled = !actionSelected || !testSelect.value;
   latestOutcome = null;
   runSummary.replaceChildren();
+  explainTestWithAiButton.hidden = true;
+  explainTestWithAiStatus.textContent = '';
   reportPanel.hidden = true;
   reportFrame.removeAttribute('src');
 }
@@ -535,7 +549,7 @@ function createAiHandoffMarkdown(outcome) {
       `- زمان کل اجرای Gradle: ${outcome.processDurationMs ?? 0} ms`,
     );
   } else {
-    lines.push('- Gradle فایل نتیجهٔ JUnit XML برای این اجرا تولید نکرد.');
+    lines.push(`- ${outcome.testResultsMessage ?? 'Gradle فایل نتیجهٔ JUnit XML برای این اجرا تولید نکرد.'}`);
   }
   if (outcome.message) lines.push(`- پیام اجرا: ${markdownInline(outcome.message)}`);
 
@@ -573,6 +587,55 @@ function createAiHandoffMarkdown(outcome) {
   return lines.join('\n');
 }
 
+function createTestExplanationPrompt(outcome) {
+  const projectPath = outcome.moduleInfo?.projectPath;
+  const moduleTaskTest = outcome.actionInfo?.id === 'test' && !outcome.testFilter;
+  const taskPath = outcome.taskPath ?? (projectPath
+    ? (projectPath === ':' ? ':test' : `${projectPath}:test`)
+    : undefined);
+  const testFilter = outcome.testFilter;
+  const gradleOptions = outcome.gradleOptions ?? {};
+  const commandOptions = moduleTaskTest
+    ? [
+      ...(gradleOptions.rerunTasks ? ['--rerun-tasks'] : []),
+      ...(gradleOptions.noConfigurationCache ? ['--no-configuration-cache'] : []),
+      `--console=${gradleOptions.console ?? 'plain'}`,
+      ...(gradleOptions.info ? ['--info'] : []),
+    ]
+    : ['--console=plain'];
+  const command = taskPath && testFilter
+    ? gradleWrapperCommand(taskPath, commandOptions, ['--tests', testFilter])
+    : taskPath ? gradleWrapperCommand(taskPath, commandOptions) : undefined;
+  const suites = outcome.testResults?.suites ?? [];
+  const suiteSummary = suites.length
+    ? suites.map((suite) => `- ${suite.name}: ${suite.tests} تست، ${suite.failures} ناموفق، ${suite.skipped} ردشده، ${formatDuration(suite.durationMs)}`).join('\n')
+    : '- اطلاعات suite از گزارش JUnit در دسترس نیست.';
+
+  return [
+    '# درخواست تحلیل نتیجهٔ تست ماژول',
+    '',
+    'لطفاً نتیجهٔ اجرای زیر را برای یک برنامه‌نویس تحلیل کن. از شواهد موجود در گزارش استفاده کن؛ علت‌هایی را که در داده‌ها اثبات نشده‌اند قطعی بیان نکن.',
+    '- ابتدا مشخص کن اجرا موفق، شکست assertion، خطای compile یا مشکل زیرساختی بوده است؛ اگر اطلاعات برای تشخیص کافی نیست، صریح بگو.',
+    '- خطاها را بر اساس پیام و stack traceهای موجود گروه‌بندی کن و علت ریشه‌ای محتمل را از خطاهای زنجیره‌ای جدا کن.',
+    '- برای هر نتیجه، فایل/کلاس/تست و گام بعدی مشخص پیشنهاد بده؛ تست‌های موفق را از شکست‌ها جدا نگه دار.',
+    '- اگر گزارش ناقص یا بریده شده است، محدودیت را در نتیجه‌گیری لحاظ کن و اطلاعات لازم برای ادامهٔ تشخیص را فهرست کن.',
+    '',
+    '## اجرای انتخاب‌شده',
+    `- ماژول: ${outcome.moduleInfo?.title ?? 'نامشخص'} (${projectPath ?? 'مسیر نامشخص'})`,
+    `- تست: ${moduleTaskTest ? 'همهٔ تست‌های ماژول' : (outcome.testInfo?.title ?? 'نامشخص')} (${outcome.testInfo?.id ?? 'شناسه نامشخص'})`,
+    `- Gradle task: ${taskPath ?? 'نامشخص'}`,
+    `- فیلتر: ${testFilter ?? 'نامشخص'}`,
+    ...(command ? ['', '### فرمان قابل اجرای مجدد', '```powershell', command, '```'] : []),
+    ...(outcome.testResults ? ['', `- گزارش XML حداکثر ${outcome.testResults.failures?.length ?? 0} جزئیات شکست را نگه می‌دارد و متن هر مورد ممکن است کوتاه شده باشد.${outcome.testResults.failed > (outcome.testResults.failures?.length ?? 0) ? ` ${outcome.testResults.failed - outcome.testResults.failures.length} شکست دیگر در گزارش کامل Gradle است.` : ''}`, ...(outcome.reportAvailable ? ['- گزارش HTML کامل همین اجرا در صفحهٔ Help موجود است.'] : [])] : []),
+    '',
+    '## خلاصهٔ suiteها',
+    suiteSummary,
+    '',
+    '## گزارش تفصیلی همین اجرا',
+    createAiHandoffMarkdown(outcome),
+  ].join('\n');
+}
+
 async function copyActionOutput(text) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -589,6 +652,23 @@ async function copyActionOutput(text) {
   const copied = document.execCommand('copy');
   fallback.remove();
   if (!copied) throw new Error('Clipboard copy failed');
+}
+
+async function copyTestExplanation(outcome, statusElement, fallback) {
+  if (!outcome) return;
+  const prompt = createTestExplanationPrompt(outcome);
+  fallback.value = prompt;
+  statusElement.textContent = '';
+  try {
+    await copyActionOutput(prompt);
+    fallback.hidden = true;
+    statusElement.textContent = 'پرامپت همراه گزارش همین اجرا کپی شد؛ آن را در سرویس AI دلخواه الصاق کنید.';
+  } catch {
+    fallback.hidden = false;
+    fallback.focus();
+    fallback.select();
+    statusElement.textContent = 'کپی خودکار در دسترس نیست؛ متن کامل انتخاب شده و می‌توانید آن را کپی کنید.';
+  }
 }
 
 function createActionOutputStream(name, value = '') {
@@ -647,10 +727,10 @@ function appendLiveActionOutput(streams, stream, data) {
   target.scrollTop = target.scrollHeight;
 }
 
-function renderRunSummary(outcome, test) {
-  runSummary.replaceChildren();
+function renderRunSummary(outcome, test, target = runSummary) {
+  target.replaceChildren();
   const status = outcome.executionStatus ?? 'Failed';
-  runSummary.dataset.state = status;
+  target.dataset.state = status;
 
   const overview = summaryElement('div', 'run-overview');
   const statusBadge = summaryElement('span', `run-status-badge ${status === 'Passed' ? 'is-passed' : 'is-failed'}`,
@@ -662,7 +742,7 @@ function renderRunSummary(outcome, test) {
   const titleGroup = summaryElement('div', 'run-overview-title');
   titleGroup.append(title, subtitle);
   overview.append(statusBadge, titleGroup);
-  runSummary.append(overview);
+  target.append(overview);
 
   const data = outcome.testResults;
   if (data) {
@@ -677,8 +757,47 @@ function renderRunSummary(outcome, test) {
       metric.append(summaryElement('span', 'run-metric-label', label), summaryElement('strong', 'run-metric-value', typeof value === 'number' ? faNumber(value) : value));
       metrics.append(metric);
     }
-    runSummary.append(metrics);
-    runSummary.append(summaryElement('p', 'run-data-source', `جزئیات از ${data.source} خوانده شد؛ این آمار متعلق به اجرای فعلی است.`));
+    target.append(metrics);
+
+    const chartSection = summaryElement('section', 'run-test-chart');
+    chartSection.append(summaryElement('h4', 'h6 mb-2', 'نمای کلی نتیجه‌ها'));
+    const counts = [
+      { key: 'passed', label: 'موفق', color: 'is-passed', value: Math.max(0, Number(data.passed) || 0) },
+      { key: 'failed', label: 'ناموفق', color: 'is-failed', value: Math.max(0, Number(data.failed) || 0) },
+      { key: 'skipped', label: 'ردشده', color: 'is-skipped', value: Math.max(0, Number(data.skipped) || 0) },
+    ];
+    const knownTotal = counts.reduce((sum, item) => sum + item.value, 0);
+    const chartTotal = Math.max(Number(data.total) || 0, knownTotal);
+    if (chartTotal > knownTotal) counts.push({ key: 'other', label: 'نامشخص', color: 'is-other', value: chartTotal - knownTotal });
+    if (chartTotal > 0) {
+      const track = summaryElement('div', 'run-test-chart-track');
+      track.setAttribute('role', 'img');
+      track.setAttribute('aria-label', counts.map((item) => `${item.label}: ${item.value}`).join('، '));
+      for (const item of counts) {
+        if (!item.value) continue;
+        const segment = summaryElement('span', `run-test-chart-segment ${item.color}`);
+        segment.style.width = `${(item.value / chartTotal) * 100}%`;
+        segment.title = `${item.label}: ${faNumber(item.value)}`;
+        track.append(segment);
+      }
+      chartSection.append(track);
+      const legend = summaryElement('ul', 'run-test-chart-legend');
+      for (const item of counts) {
+        const entry = summaryElement('li', `run-test-chart-item ${item.color}`);
+        entry.append(
+          summaryElement('span', 'run-test-chart-swatch'),
+          summaryElement('span', 'run-test-chart-label', item.label),
+          summaryElement('strong', '', faNumber(item.value)),
+          summaryElement('span', 'run-test-chart-percent', `${faNumber(Math.round((item.value / chartTotal) * 100))}٪`),
+        );
+        legend.append(entry);
+      }
+      chartSection.append(legend);
+    } else {
+      chartSection.append(summaryElement('p', 'run-test-chart-empty', 'برای این اجرا نتیجهٔ تستی در گزارش ثبت نشده است.'));
+    }
+    target.append(chartSection);
+    target.append(summaryElement('p', 'run-data-source', `جزئیات از ${data.source} خوانده شد؛ این آمار متعلق به اجرای فعلی است.`));
 
     if (data.failures?.length) {
       const failureSection = summaryElement('section', 'run-failures');
@@ -692,15 +811,17 @@ function renderRunSummary(outcome, test) {
         failureSection.append(item);
       }
       if (data.failed > data.failures.length) failureSection.append(summaryElement('p', 'small text-secondary', `${faNumber(data.failed - data.failures.length)} مورد دیگر در گزارش کامل Gradle موجود است.`));
-      runSummary.append(failureSection);
+      target.append(failureSection);
     } else if (data.total === 0) {
-      runSummary.append(summaryElement('p', 'run-data-source', 'Gradle فایل نتیجه تولید کرد، اما مورد تستی در آن ثبت نشده است.'));
+      target.append(summaryElement('p', 'run-data-source', 'Gradle فایل نتیجه تولید کرد، اما مورد تستی در آن ثبت نشده است.'));
     }
   } else {
-    const message = outcome.actionInfo
-      ? 'این اکشن Gradle گزارش JUnit تولید نمی‌کند؛ وضعیت بالا نتیجهٔ خود task است.'
+    const message = outcome.actionInfo?.id === 'test'
+      ? (outcome.testResultsMessage ?? 'برای این اجرا گزارش تازهٔ JUnit در دسترس نیست؛ نتیجهٔ task را از خروجی Gradle بررسی کنید.')
+      : outcome.actionInfo
+        ? 'این اکشن Gradle گزارش JUnit تولید نمی‌کند؛ وضعیت بالا نتیجهٔ خود task است.'
       : 'Gradle برای این اجرا فایل نتیجهٔ JUnit XML تولید نکرد؛ ممکن است task پیش از شروع تست‌ها متوقف شده باشد.';
-    runSummary.append(summaryElement('p', 'run-data-source', message));
+    target.append(summaryElement('p', 'run-data-source', message));
   }
 
   const execution = summaryElement('dl', 'run-execution-details');
@@ -712,8 +833,12 @@ function renderRunSummary(outcome, test) {
   for (const [label, value] of details) {
     execution.append(summaryElement('dt', '', label), summaryElement('dd', '', value));
   }
-  if (details.length) runSummary.append(execution);
-  if (outcome.actionInfo) {
+  if (details.length) target.append(execution);
+  if (target === runSummary) {
+    explainTestWithAiButton.hidden = !test || Boolean(outcome.actionInfo);
+    explainTestWithAiStatus.textContent = '';
+  }
+  if (outcome.actionInfo && target === runSummary) {
     const outputSection = summaryElement('section', 'action-process-output');
     outputSection.append(summaryElement('h4', 'h6 mb-2', 'خروجی واقعی فرایند'));
     if (outcome.outputTruncated) outputSection.append(summaryElement('p', 'small text-warning', 'بخشی از خروجی به علت محدودیت حجم ذخیره نشده است.'));
@@ -724,16 +849,18 @@ function renderRunSummary(outcome, test) {
     if (!outcome.stdout && !outcome.stderr) {
       outputSection.append(summaryElement('p', 'small text-secondary mb-0', 'فرایند هیچ متنی در stdout یا stderr تولید نکرد.'));
     }
-    runSummary.append(outputSection);
+    target.append(outputSection);
   }
   const context = outcome.context ?? test?.context;
-  if (context) runSummary.append(renderContextSection(context));
-  runSummary.append(renderWorkflowSection(outcome.runtimeStatus, outcome.runtime, context, outcome.runtimeValidationError));
-  runSummary.append(renderExpectedActualSection(context, outcome.runtime));
-  if (outcome.reportAvailable && outcome.reportUrl) {
+  if (context) target.append(renderContextSection(context));
+  if (target === runSummary || context || outcome.runtime || outcome.runtimeStatus) {
+    target.append(renderWorkflowSection(outcome.runtimeStatus, outcome.runtime, context, outcome.runtimeValidationError));
+    target.append(renderExpectedActualSection(context, outcome.runtime));
+  }
+  if (target === runSummary && outcome.reportAvailable && outcome.reportUrl) {
     reportFrame.src = outcome.reportUrl;
     reportPanel.hidden = false;
-  } else {
+  } else if (target === runSummary) {
     reportPanel.hidden = true;
     reportFrame.removeAttribute('src');
   }
@@ -1158,6 +1285,11 @@ function renderParameters() {
 actionSelect.addEventListener('change', () => {
   currentStep = 'action';
   latestOutcome = null;
+  moduleTestSummary.replaceChildren();
+  moduleTestSummary.hidden = true;
+  moduleTestAiActions.hidden = true;
+  moduleTestExplainAiStatus.textContent = '';
+  moduleTestAiFallback.hidden = true;
   document.querySelector('#run-output').replaceChildren();
   document.querySelector('#build-output').replaceChildren();
   document.querySelector('#run-status').textContent = '';
@@ -1202,11 +1334,14 @@ workflowSteps.addEventListener('click', (event) => {
 testSelect.addEventListener('change', () => {
   latestOutcome = null;
   runSummary.replaceChildren();
+  explainTestWithAiButton.hidden = true;
+  explainTestWithAiStatus.textContent = '';
   reportPanel.hidden = true;
   reportFrame.removeAttribute('src');
   result.removeAttribute('data-state');
   result.textContent = '';
   copyAiReportStatus.textContent = '';
+  explainTestWithAiStatus.textContent = '';
   aiReportFallback.hidden = true;
   renderParameters();
   renderWorkflow();
@@ -1239,6 +1374,24 @@ async function runModuleAction(actionId) {
     info: document.querySelector('#gradle-info').checked,
     console: document.querySelector('#gradle-console').value,
   } : undefined;
+  const actionParameters = action.parameters ?? [];
+  const secretValues = actionParameters.filter((parameter) => parameter.secret)
+    .map((parameter) => parameters[parameter.id]).filter((value) => typeof value === 'string' && value.length > 0);
+  const startedAt = new Date().toISOString();
+  const testRunMetadata = actionId === 'test' ? {
+    moduleInfo: { title: module.module.title, projectPath: module.projectPath },
+    actionInfo: { title: action.title, id: action.id },
+    testInfo: { title: 'همهٔ تست‌های ماژول', id: 'module-test' },
+    taskPath: module.projectPath === ':' ? `:${action.task}` : `${module.projectPath}:${action.task}`,
+    inputParameters: actionParameters.map((parameter) => ({
+      id: parameter.id,
+      label: parameter.label,
+      value: parameter.secret ? undefined : parameters[parameter.id],
+      secret: parameter.secret,
+    })),
+    gradleOptions,
+    startedAt,
+  } : undefined;
   currentStep = moduleTaskStep(action);
   renderWorkflow();
   const button = document.querySelector(actionId === 'run' ? '#run-app' : '#build-module');
@@ -1247,6 +1400,12 @@ async function runModuleAction(actionId) {
   const outputStreams = createLiveActionOutputView(outputContainer);
   const liveOutput = { stdout: '', stderr: '' };
   const taskPath = module.projectPath === ':' ? `:${action.task}` : `${module.projectPath}:${action.task}`;
+  latestOutcome = null;
+  moduleTestSummary.replaceChildren();
+  moduleTestSummary.hidden = true;
+  moduleTestAiActions.hidden = true;
+  moduleTestExplainAiStatus.textContent = '';
+  moduleTestAiFallback.hidden = true;
 
   button.disabled = true;
   status.removeAttribute('data-state');
@@ -1306,6 +1465,12 @@ async function runModuleAction(actionId) {
     const succeeded = outcome.executionStatus === 'Passed';
     status.dataset.state = outcome.executionStatus;
     status.textContent = `${succeeded ? 'اجرا موفق بود' : 'اجرا ناموفق بود'} · ${taskPath} · exit ${outcome.exitCode ?? 'ناموجود'} · ${formatDuration(outcome.processDurationMs)}`;
+    if (actionId === 'test') {
+      latestOutcome = { ...redactSecretValues(outcome, secretValues), ...testRunMetadata, completedAt: new Date().toISOString() };
+      moduleTestSummary.hidden = false;
+      renderRunSummary(latestOutcome, undefined, moduleTestSummary);
+      moduleTestAiActions.hidden = false;
+    }
     if (outcome.outputTruncated) {
       outputContainer.append(summaryElement('p', 'small text-warning mt-2', 'بخشی از خروجی به علت محدودیت حجم ذخیره نشده است.'));
     }
@@ -1315,6 +1480,17 @@ async function runModuleAction(actionId) {
   } catch (error) {
     status.dataset.state = 'Failed';
     status.textContent = `اجرای ${taskPath} ناموفق بود: ${error.message}`;
+    if (actionId === 'test') {
+      latestOutcome = {
+        ...testRunMetadata,
+        executionStatus: 'Failed',
+        message: redactSecretValues(error.message, secretValues),
+        completedAt: new Date().toISOString(),
+      };
+      moduleTestSummary.hidden = false;
+      renderRunSummary(latestOutcome, undefined, moduleTestSummary);
+      moduleTestAiActions.hidden = false;
+    }
     if (!liveOutput.stdout && !liveOutput.stderr) {
       outputContainer.append(summaryElement('p', 'small text-danger mt-2', error.message));
     }
@@ -1337,6 +1513,8 @@ runButton.addEventListener('click', async () => {
   const runMetadata = {
     moduleInfo: { title: module.module.title, projectPath: module.projectPath },
     testInfo: { title: test.title, id: test.id },
+    taskPath: module.projectPath === ':' ? ':test' : `${module.projectPath}:test`,
+    testFilter: test.runner.testFilter,
     inputParameters,
     startedAt: new Date().toISOString(),
   };
@@ -1352,6 +1530,8 @@ runButton.addEventListener('click', async () => {
   reportPanel.hidden = true; reportFrame.removeAttribute('src');
   latestOutcome = null;
   runSummary.replaceChildren();
+  explainTestWithAiButton.hidden = true;
+  explainTestWithAiStatus.textContent = '';
   try {
     const response = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectPath: module.projectPath, testId: test.id, parameters: values }) });
     const outcome = await response.json();
@@ -1373,6 +1553,14 @@ runButton.addEventListener('click', async () => {
     for (const input of parameterForm.querySelectorAll('input[type="password"]')) input.value = '';
     runButton.disabled = false;
   }
+});
+
+explainTestWithAiButton.addEventListener('click', async () => {
+  await copyTestExplanation(latestOutcome, explainTestWithAiStatus, aiReportFallback);
+});
+
+moduleTestExplainAiButton.addEventListener('click', async () => {
+  await copyTestExplanation(latestOutcome, moduleTestExplainAiStatus, moduleTestAiFallback);
 });
 
 copyAiReportButton.addEventListener('click', async () => {

@@ -11,6 +11,8 @@ interface IQueryColumnsAst : IQueryAst {
     var Column:       IQueryColumnsBaseAst?;
     var ColumnAlias:  String?;
     var ExecutionType: DataType?;
+    /** Whether [ExecutionType] was explicitly set rather than inferred from a property. */
+    var IsExecutionTypeExplicit: Boolean;
     var PropertyReference: KProperty1<*, *>?;
 
 }

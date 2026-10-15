@@ -11,6 +11,7 @@ class QueryColumnsAst() : IQueryColumnsAst {
     override var Column:       IQueryColumnsBaseAst?  = null;
     override var ColumnAlias:  String?                = null;
     override var ExecutionType: DataType?              = null;
+    override var IsExecutionTypeExplicit: Boolean      = false;
     override var PropertyReference: KProperty1<*, *>?   = null;
 
 }

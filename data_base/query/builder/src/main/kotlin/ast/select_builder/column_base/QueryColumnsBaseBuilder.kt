@@ -5,7 +5,7 @@ import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column_base.IQueryColumnsBaseAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.models.ModelMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
 
@@ -19,11 +19,11 @@ class QueryColumnsBaseBuilder(
         property: KProperty1<T, R>,
         tableAlias: String,
     ): IQueryColumnsBaseApi {
-        QueryBuilderMetadata.requireTable(table)
-        val columnMetadata = QueryBuilderMetadata.requireColumn(table, property)
+        ModelMetadataResolver.requireTable(table)
+        ModelMetadataResolver.requireColumn(table, property)
 
         ast.tableAlias = tableAlias
-        ast.column = QueryBuilderMetadata.columnName(table, property, columnMetadata)
+        ast.column = ModelMetadataResolver.columnName(table, property)
         return this
     }
 

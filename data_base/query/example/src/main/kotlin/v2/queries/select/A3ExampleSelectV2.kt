@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.v2.queries.select
 
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
 
@@ -37,6 +38,9 @@ class A3ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             .queryBuilder(query)
             .sql { (queryText, params) ->
                 println("\n=============================================\nV2-Ex3: Model-backed select with WhereLike\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
             }
             .execute()
             .success { rows ->

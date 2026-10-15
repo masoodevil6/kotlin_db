@@ -45,6 +45,7 @@
             <option value="$PROJECT_DIR$/data_base/query/dialect" />
             <option value="$PROJECT_DIR$/data_base/query/example" />
             <option value="$PROJECT_DIR$/data_base/query/executor" />
+            <option value="$PROJECT_DIR$/data_base/query/meta_data" />
             <option value="$PROJECT_DIR$/data_base/query/renderer" />
             <option value="$PROJECT_DIR$/tools" />
             <option value="$PROJECT_DIR$/utils" />

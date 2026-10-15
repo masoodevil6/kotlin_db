@@ -14,7 +14,8 @@ import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.Q
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.models.ModelMetadataResolver
+import gog.my_project.data_base.query.meta_data.queries.QueryMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -70,6 +71,7 @@ class QueryColumnsBuilder internal constructor(
 
     override fun execute(dataType: DataType): IQueryColumnsApi {
         ast.ExecutionType = dataType
+        ast.IsExecutionTypeExplicit = true
         explicitExecutionTypeWasSet = true
         return this
     }
@@ -99,12 +101,12 @@ class QueryColumnsBuilder internal constructor(
         table: KClass<T>,
         property: KProperty1<T, R>,
     ): IQueryColumnsApi {
-        val tableMetadata = QueryBuilderMetadata.requireTable(table)
-        val columnMetadata = QueryBuilderMetadata.requireColumn(table, property)
+        ModelMetadataResolver.requireTable(table)
+        ModelMetadataResolver.requireColumn(table, property)
 
         val baseAst = QueryColumnsBaseAst().apply {
-            tableAlias = QueryBuilderMetadata.tableAlias(table, tableMetadata)
-            column = QueryBuilderMetadata.columnName(table, property, columnMetadata)
+            tableAlias = ModelMetadataResolver.tableAlias(table)
+            column = ModelMetadataResolver.columnName(table, property)
         }
         modelAliasContext.registerColumn(table, baseAst)
         this.ast.Column = baseAst
@@ -118,7 +120,7 @@ class QueryColumnsBuilder internal constructor(
         }
 
         if (!explicitAliasWasSet) {
-            this.ast.ColumnAlias = QueryBuilderMetadata.columnAlias(property, columnMetadata)
+            this.ast.ColumnAlias = ModelMetadataResolver.columnAlias(property)
         }
         return this
     }
@@ -192,7 +194,7 @@ class QueryColumnsBuilder internal constructor(
             clearInferredExecutionType()
         }
         if (!explicitAliasWasSet) {
-            ast.ColumnAlias = QueryBuilderMetadata.queryPublishedAlias(property).takeIf { isPropertyBacked }
+            ast.ColumnAlias = QueryMetadataResolver.queryPublishedAlias(property).takeIf { isPropertyBacked }
         }
         return this
     }
@@ -216,13 +218,13 @@ class QueryColumnsBuilder internal constructor(
                 require(ownerType == queryDeclarationOwner) {
                     "Typed output ${property.name} belongs to ${ownerType.qualifiedName}, not ${queryDeclarationOwner?.qualifiedName}"
                 }
-                outputName = QueryBuilderMetadata.queryPublishedAlias(property)
+                outputName = QueryMetadataResolver.queryPublishedAlias(property)
             }
             queryDefinitionName != null -> {
                 // The factory name is a runtime/CTE identity and may explicitly override QBQuery.name.
                 // Resolve metadata for validation, but do not compare the logical Query name to that runtime name.
                 resolveTypedRelationProperty(property)
-                outputName = QueryBuilderMetadata.queryPublishedAlias(property)
+                outputName = QueryMetadataResolver.queryPublishedAlias(property)
             }
             ICteDeclaration::class.java.isAssignableFrom(ownerType.java) -> {
                 val (canonicalRelationName, publishedAlias) = querySourceContext.validateTypedOutput(ownerType, property, null)
@@ -245,7 +247,7 @@ class QueryColumnsBuilder internal constructor(
 
     private fun <T, R> resolveTypedRelationProperty(property: KProperty1<T, R>): String {
         val ownerType = typedPropertyOwner(property)
-        return QueryBuilderMetadata.queryName(ownerType)
+        return QueryMetadataResolver.queryName(ownerType)
     }
 
     private fun <T, R> typedPropertyOwner(property: KProperty1<T, R>): KClass<*> {

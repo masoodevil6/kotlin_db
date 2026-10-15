@@ -12,6 +12,7 @@ repositories {
 dependencies {
     implementation(project(":data_base:core"))
     implementation(project(":data_base:query:ast"))
+    implementation("org.jetbrains.kotlin:kotlin-reflect:1.8.20")
 
     testImplementation(kotlin("test"))
 }

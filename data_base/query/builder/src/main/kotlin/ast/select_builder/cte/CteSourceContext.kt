@@ -11,6 +11,11 @@ internal class CteSourceContext {
     private var effectiveAlias: String? = null
     private val dependencies = mutableListOf<Cte>()
 
+    internal data class Snapshot(
+        val relation: Cte,
+        val effectiveAlias: String,
+    )
+
     fun register(
         relation: Cte,
         alias: String,
@@ -36,6 +41,8 @@ internal class CteSourceContext {
     }
 
     fun dependencies(): List<Cte> = dependencies.toList()
+
+    fun snapshot(): Snapshot? = relation?.let { Snapshot(it, effectiveAlias ?: it.name) }
 
     fun resolve(
         requested: Cte,

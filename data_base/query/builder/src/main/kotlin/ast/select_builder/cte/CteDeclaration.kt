@@ -3,7 +3,7 @@ package gog.my_project.data_base.query.builder.ast.select_builder.cte
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.queries.QueryMetadataResolver
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte as buildCtePrimitive
 
 /** Optional declaration base that builds a typed relation using its concrete runtime owner. */
@@ -15,7 +15,7 @@ abstract class CteDeclaration<P>(
     protected final fun buildCte(
         block: IQueryRenderSelectApi.() -> Unit,
     ): Cte = buildCtePrimitive(
-        name = QueryBuilderMetadata.queryName(this::class),
+        name = QueryMetadataResolver.queryName(this::class),
         declarationOwner = this::class,
         block = block,
     )

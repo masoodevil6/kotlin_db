@@ -11,10 +11,13 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.select.IQuer
 import gog.my_project.data_base.query.api.interfaces.api.select_api.where.IQueryWhereApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQueryWithsApi
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
-import gog.my_project.data_base.core.annotations.models.QBQuery
+import gog.my_project.data_base.query.api.metadata.EffectiveOutputMetadata
+import gog.my_project.data_base.query.api.metadata.EffectiveQueryMetadata
+import gog.my_project.data_base.query.api.metadata.EffectiveQueryMetadataProvider
+import gog.my_project.data_base.query.api.metadata.EffectiveRelationMetadata
 import kotlin.reflect.KClass
-import kotlin.reflect.full.findAnnotation
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
 import gog.my_project.data_base.query.ast.schema.select_schema.joins.QueryJoinsAst
 import gog.my_project.data_base.query.ast.schema.select_schema.option_group.QueryOptionGroupAst
 import gog.my_project.data_base.query.ast.schema.select_schema.option_limit.QueryOptionLimitAst
@@ -27,11 +30,12 @@ import gog.my_project.data_base.query.ast.schema.select_schema_ast.where.QueryWh
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs.QueryWithsAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs_item.QueryWithsItemAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQueryTableAst
 import gog.my_project.data_base.query.builder.ast.select_builder.joins.QueryJoinsBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.queries.QueryMetadataResolver
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.BuiltCteComposition
 import gog.my_project.data_base.query.builder.ast.select_builder.option_group.QueryOptionGroupBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.option_limit.QueryOptionLimitBuilder
@@ -45,8 +49,18 @@ import gog.my_project.data_base.query.builder.ast.select_builder.withs.QueryWith
 class QueryRenderSelectBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryRenderSelectAst = QueryRenderSelectAst(),
-) : IQueryRenderSelectApi
+) : IQueryRenderSelectApi, EffectiveQueryMetadataProvider
 {
+
+    private data class OutputSource(
+        val tableName: String?,
+        val tableAlias: String?,
+    )
+
+    private data class OutputSourceCandidate(
+        val lookupAlias: String?,
+        val source: OutputSource,
+    )
 
     internal var parameterBindingScope = ParameterBindingScope()
         private set
@@ -68,6 +82,135 @@ class QueryRenderSelectBuilder(
     private var explicitWithItems: List<IQueryWithsItemAst> = emptyList()
     private var explicitCteNameOverrides = java.util.IdentityHashMap<Cte, String>()
     private var cteParamPrefixSize = 0
+
+    override fun effectiveQueryMetadata(): EffectiveQueryMetadata {
+        val sourceSnapshot = querySourceContext.snapshot()
+        val knownRelations = orderedCteClosure(querySourceContext.dependencies() + explicitCteRoots)
+        val withItems = ast.withs?.withs.orEmpty()
+        val metadata = mutableListOf<EffectiveRelationMetadata>()
+
+        knownRelations.forEach { relation ->
+            val withItem = withItems.firstOrNull { item ->
+                item.withName == effectiveCteName(relation)
+            }
+            metadata += relationMetadata(
+                relation = relation,
+                withSqlName = withItem?.withName,
+                occurrenceAlias = null,
+            )
+        }
+
+        withItems.forEach { item ->
+            val knownRelation = knownRelations.firstOrNull { relation ->
+                relation.name == item.withName || effectiveCteName(relation) == item.withName
+            }
+            if (knownRelation == null) {
+                metadata += relationMetadata(
+                    relation = null,
+                    withSqlName = item.withName,
+                    occurrenceAlias = null,
+                    definitionAst = item.withBody,
+                )
+            }
+        }
+
+        if (sourceSnapshot != null) {
+            metadata += relationMetadata(
+                relation = sourceSnapshot.relation,
+                withSqlName = null,
+                occurrenceAlias = sourceSnapshot.effectiveAlias,
+            )
+        }
+
+        val namedSource = ast.table?.cte
+        if (sourceSnapshot == null && namedSource != null) {
+            val namedSourceWithItem = withItems.firstOrNull { it.withName == namedSource }
+            metadata += relationMetadata(
+                relation = null,
+                withSqlName = namedSourceWithItem?.withName,
+                occurrenceAlias = ast.table?.cteAlias?.takeIf { it.isNotBlank() },
+                cteRuntimeName = namedSource,
+                definitionAst = namedSourceWithItem?.withBody,
+            )
+        }
+
+        return EffectiveQueryMetadata(
+            relations = metadata,
+            outputs = ast.select?.columns.orEmpty().map { column ->
+                val property = column.PropertyReference
+                val source = outputSource(column)
+                EffectiveOutputMetadata(
+                    logicalOutputName = property?.let { QueryMetadataResolver.queryLogicalOutputName(it) },
+                    publishedSqlAlias = column.ColumnAlias,
+                    executionType = column.ExecutionType,
+                    tableName = source.tableName,
+                    tableAlias = source.tableAlias,
+                )
+            },
+        )
+    }
+
+    private fun outputSource(column: IQueryColumnsAst): OutputSource {
+        val columnAst = column.Column ?: return OutputSource(null, null)
+        val referenceAlias = columnAst.cteAlias ?: columnAst.tableAlias
+            ?: return OutputSource(null, null)
+        val sourceSnapshot = querySourceContext.snapshot()
+        val candidates = buildList {
+            ast.table?.let { add(outputSourceCandidate(it, sourceSnapshot)) }
+            ast.joins?.joins.orEmpty().forEach { join ->
+                add(outputSourceCandidate(join.joinTable, null))
+            }
+        }.filter { it.lookupAlias == referenceAlias }
+
+        val displayAlias = referenceAlias.takeIf { it.isNotBlank() }
+        if (candidates.size != 1) return OutputSource(null, displayAlias)
+        return candidates.single().source
+    }
+
+    private fun outputSourceCandidate(
+        table: IQueryTableAst,
+        sourceSnapshot: CteSourceContext.Snapshot?,
+    ): OutputSourceCandidate {
+        val lookupAlias = if (table.cte != null) table.cteAlias else table.tableAlias
+        val tableName = when {
+            table.cte != null -> table.cte
+            table.table != null -> table.table
+            table.derivedQuery != null && sourceSnapshot?.effectiveAlias == lookupAlias ->
+                sourceSnapshot?.relation?.name
+            else -> null
+        }
+        return OutputSourceCandidate(
+            lookupAlias = lookupAlias,
+            source = OutputSource(
+                tableName = tableName,
+                tableAlias = lookupAlias?.takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    private fun relationMetadata(
+        relation: Cte?,
+        withSqlName: String?,
+        occurrenceAlias: String?,
+        cteRuntimeName: String? = relation?.name,
+        definitionAst: IQueryRenderSelectAst? = relation?.definition?.ast,
+    ): EffectiveRelationMetadata {
+        val composition = relation as? BuiltCteComposition
+        return EffectiveRelationMetadata(
+            logicalQueryName = composition?.logicalQueryName,
+            cteRuntimeName = cteRuntimeName,
+            withSqlName = withSqlName,
+            occurrenceAlias = occurrenceAlias,
+            outputs = definitionAst?.select?.columns.orEmpty().map { column ->
+                val property = column.PropertyReference
+                EffectiveOutputMetadata(
+                    logicalOutputName = property?.let { QueryMetadataResolver.queryLogicalOutputName(it) },
+                    publishedSqlAlias = column.ColumnAlias,
+                    executionType = column.ExecutionType,
+                )
+            },
+        )
+    }
 
     internal fun requireCteOutputAliases(name: String, declarationOwner: KClass<*>? = null) {
         queryDefinitionName = name
@@ -183,7 +326,7 @@ class QueryRenderSelectBuilder(
         alias: String?,
     ): String {
         val queryOwner = (cte as? BuiltCteComposition)?.declarationOwner
-        val defaultAlias = queryOwner?.let { QueryBuilderMetadata.queryAlias(it, it.findAnnotation<QBQuery>()) }
+        val defaultAlias = queryOwner?.let { QueryMetadataResolver.queryAlias(it) }
             ?: cte.name
         val effectiveAlias = alias ?: defaultAlias
         require(effectiveAlias.isNotBlank()) { "Cte alias must not be blank" }

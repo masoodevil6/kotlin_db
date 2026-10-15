@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.v3.queries.select
 
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
 
@@ -36,6 +37,9 @@ class A4ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
             .queryBuilder { operations -> operations.querySelect { query -> configureQuery(query) } }
             .sql { (queryText, params) ->
                 println("\n=============================================\nV3-Ex4: Relation-backed select with WhereIsNull\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
             }
             .execute()
             .success { rows ->

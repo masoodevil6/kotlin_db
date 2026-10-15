@@ -3,6 +3,8 @@ package gog.my_project.data_base.query.executer.result
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.api.metadata.EffectiveQueryMetadata
+import gog.my_project.data_base.query.api.metadata.EffectiveQueryMetadataProvider
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
 /** Fluent SELECT handle that delegates all work to its bound executor. */
@@ -22,6 +24,17 @@ class QueryConsumer internal constructor(
 
     fun sql(block: (BuiltQuery) -> Unit): QueryConsumer {
         block(sql())
+        return this
+    }
+
+    fun details(): EffectiveQueryMetadata =
+        (query as? EffectiveQueryMetadataProvider)?.effectiveQueryMetadata()
+            ?: throw IllegalStateException(
+                "This SELECT query does not provide EffectiveQueryMetadata",
+            )
+
+    fun details(block: (EffectiveQueryMetadata) -> Unit): QueryConsumer {
+        block(details())
         return this
     }
 }

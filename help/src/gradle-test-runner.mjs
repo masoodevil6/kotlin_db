@@ -53,7 +53,24 @@ function xmlChildText(xml, tag) {
   return (attributes.get('message') || body || '').slice(0, 1200) || `${tag} reported without a message`;
 }
 
-export function readGradleTestResults(testResultsDirectory, projectRoot) {
+export function snapshotGradleTestResultFiles(testResultsDirectory, projectRoot) {
+  let files;
+  try { files = fs.readdirSync(testResultsDirectory).filter((file) => file.toLowerCase().endsWith('.xml')).sort(); }
+  catch { return new Map(); }
+  const snapshot = new Map();
+  for (const file of files) {
+    try {
+      const filePath = path.join(testResultsDirectory, file);
+      const canonical = fs.realpathSync(filePath);
+      if (!isWithin(testResultsDirectory, canonical) || !isWithin(projectRoot, canonical) || !fs.statSync(canonical).isFile()) continue;
+      const stat = fs.statSync(canonical);
+      snapshot.set(file, { size: stat.size, modifiedAt: stat.mtimeMs });
+    } catch { /* Unreadable files are omitted from the before-run snapshot. */ }
+  }
+  return snapshot;
+}
+
+export function readGradleTestResults(testResultsDirectory, projectRoot, previousSnapshot) {
   let files;
   try { files = fs.readdirSync(testResultsDirectory).filter((file) => file.toLowerCase().endsWith('.xml')).sort(); }
   catch { return null; }
@@ -65,6 +82,9 @@ export function readGradleTestResults(testResultsDirectory, projectRoot) {
       const filePath = path.join(testResultsDirectory, file);
       const canonical = fs.realpathSync(filePath);
       if (!isWithin(testResultsDirectory, canonical) || !isWithin(projectRoot, canonical) || !fs.statSync(canonical).isFile()) continue;
+      const stat = fs.statSync(canonical);
+      const previous = previousSnapshot?.get(file);
+      if (previous && previous.size === stat.size && previous.modifiedAt === stat.mtimeMs) continue;
       const xml = fs.readFileSync(canonical, 'utf8');
       const suiteTags = [...xml.matchAll(/<testsuite\b([^>]*)>/g)];
       if (suiteTags.length === 0) continue;

@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.v2.queries.select
 
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.builder.ast.select_builder.requireResultOutputAliases
@@ -17,8 +18,16 @@ class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             addWith { with("cte_info_user", gog.my_project.data_base.query.builder.cte.modules.users.CteInfoUser(1)) }
         }
         .select {
-            addColumn { column { cteColumn("ciu", "cte_user_id") }; alias("cte_user_id"); execute(DataType.LONG) }
-            addColumn { column { cteColumn("ciu", "cte_user_name") }; alias("cte_user_name"); execute(DataType.STRING) }
+            addColumn {
+                column { cteColumn("ciu", "cte_user_id") }
+                alias("cte_user_id")
+                execute(DataType.LONG)
+            }
+            addColumn {
+                column { cteColumn("ciu", "cte_user_name") };
+                alias("cte_user_name");
+                execute(DataType.STRING)
+            }
             addColumn { column { cteColumn("ciu", "cte_user_family") }; alias("cte_user_family"); execute(DataType.STRING) }
             addColumn { column { cteColumn("ciu", "cte_user_age") }; alias("cte_user_age"); execute(DataType.INT) }
             addColumn { column { cteColumn("ciu", "cte_user_phone") }; alias("cte_user_phone"); execute(DataType.STRING) }
@@ -35,6 +44,9 @@ class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             .queryBuilder(query)
             .sql { (queryText, params) ->
                 println("\n=============================================\nV2-Ex6: Query with CTE\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
             }
             .execute()
             .success { rows ->

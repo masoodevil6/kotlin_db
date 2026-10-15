@@ -10,7 +10,6 @@ import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.fromCteInternal
 import gog.my_project.data_base.query.builder.ast.update_builder.query_render_update.QueryRenderUpdateBuilder
@@ -34,6 +33,15 @@ private class DefaultUserModel : IModelBase {
 private class EmptyAliasModel : IModelBase {
     @QBColumn(name = "")
     val invalidColumn: Int = 0
+}
+
+@QBTable(name = "explicit_dml_table", alias = "ed")
+private class ExplicitDmlModel : IModelBase {
+    @QBColumn(name = "insert_id", alias = "insert_id_output")
+    val insertId: Int get() = error("Metadata resolution must not invoke the getter")
+
+    @QBColumn(name = "updated_amount", alias = "updated_amount_output")
+    val amount: Int get() = error("Metadata resolution must not invoke the getter")
 }
 
 @QBQuery(name = "logical_people", alias = "people_source")
@@ -153,10 +161,36 @@ class QueryMetadataResolutionTest {
     }
 
     @Test
-    fun `explicit factory runtime name overrides query metadata while occurrence alias stays independent`() {
-        assertEquals("logical_people", QueryBuilderMetadata.queryName(MetadataQuery::class))
-        assertEquals("annotation_named_default", QueryBuilderMetadata.queryName(DefaultNamedQuery::class))
+    fun `explicit model annotation names reach insert and update ASTs`() {
+        val insert = QueryRenderInsertBuilder()
+            .table { model(ExplicitDmlModel::class) }
+            .addValue { column(ExplicitDmlModel::class, ExplicitDmlModel::insertId, 7) }
 
+        assertEquals("explicit_dml_table", insert.ast.table!!.table)
+        assertEquals("ed", insert.ast.table!!.tableAlias)
+        assertEquals("insert_id", insert.ast.columns.single().columnName)
+        assertEquals("insert_id", insert.params.single().name)
+
+        val update = QueryRenderUpdateBuilder()
+            .addValue { column(ExplicitDmlModel::class, ExplicitDmlModel::amount, 8) }
+            .table { model(ExplicitDmlModel::class) }
+
+        assertEquals("explicit_dml_table", update.ast.table!!.table)
+        assertEquals("ed", update.ast.table!!.tableAlias)
+        assertEquals("updated_amount", update.ast.columns.single().columnName)
+        assertEquals("ed", update.ast.columns.single().columnAlias)
+        assertEquals("ed_updated_amount", update.ast.columns.single().columnTag)
+        assertEquals("ed_updated_amount", update.params.single().name)
+
+        val explicitlyAliasedUpdate = QueryRenderUpdateBuilder().addValue {
+            column(ExplicitDmlModel::class, ExplicitDmlModel::amount, 9, "caller_alias")
+        }
+        assertEquals("caller_alias", explicitlyAliasedUpdate.ast.columns.single().columnAlias)
+        assertEquals("caller_alias_updated_amount", explicitlyAliasedUpdate.params.single().name)
+    }
+
+    @Test
+    fun `explicit factory runtime name overrides query metadata while occurrence alias stays independent`() {
         val relation = cte("runtime_people", MetadataQuery::class) {
             from { table("source_people") }
             select {
@@ -286,16 +320,18 @@ class QueryMetadataResolutionTest {
     }
 
     @Test
-    fun `logical output default is distinct from published alias and explicit execution type`() {
-        assertEquals("full_name", QueryBuilderMetadata.queryLogicalOutputName(FullNameQuery::fullName))
-        assertEquals("full_name", QueryBuilderMetadata.queryPublishedAlias(FullNameQuery::fullName))
-        assertFailsWith<IllegalArgumentException> { QueryBuilderMetadata.queryName(EmptyNamedQuery::class) }
-        assertFailsWith<IllegalArgumentException> { QueryBuilderMetadata.queryAlias(EmptyAliasQuery::class) }
-        assertFailsWith<IllegalArgumentException> {
-            QueryBuilderMetadata.queryLogicalOutputName(EmptyOutputMetadataQuery::emptyLogicalName)
+    fun `empty metadata occurrence alias is validated even when explicit alias is supplied`() {
+        val relation = cte("empty_alias_runtime", EmptyAliasQuery::class) {
+            select { addColumn { column { tableAttribute("1") }; alias("value") } }
         }
-        assertFailsWith<IllegalArgumentException> {
-            QueryBuilderMetadata.queryPublishedAlias(EmptyOutputMetadataQuery::emptyPublishedAlias)
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            QueryRenderSelectBuilder().fromCteInternal(relation, "explicit_occurrence")
         }
+
+        assertEquals(
+            "@QBQuery on ${EmptyAliasQuery::class.qualifiedName} must declare a non-empty query alias",
+            error.message,
+        )
     }
 }

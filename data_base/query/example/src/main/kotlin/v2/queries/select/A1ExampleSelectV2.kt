@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.v2.queries.select
 
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
 
@@ -52,6 +53,9 @@ class A1ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             .queryBuilder(query)
             .sql { (queryText, params) ->
                 println("\n=============================================\nV2-Ex1: Model-backed select with phone join\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
             }
             .execute()
             .success { rows ->

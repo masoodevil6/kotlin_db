@@ -11,7 +11,7 @@ import gog.my_project.data_base.query.ast.schema.select_schema_ast.table.QueryTa
 import gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.models.ModelMetadataResolver
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import kotlin.reflect.KClass
 
@@ -54,11 +54,11 @@ class QueryTableBuilder internal constructor(
         check(selectedQueryRelation == null && !derivedSelectConfigured) {
             "A model source cannot be combined with a Query or nested SELECT source"
         }
-        val metadata = QueryBuilderMetadata.requireTable(model)
+        ModelMetadataResolver.requireTable(model)
 
-        val effectiveAlias = configuredAlias ?: QueryBuilderMetadata.tableAlias(model, metadata)
+        val effectiveAlias = configuredAlias ?: ModelMetadataResolver.tableAlias(model)
         configuredModel = model
-        this.ast.table = QueryBuilderMetadata.tableName(model, metadata)
+        this.ast.table = ModelMetadataResolver.tableName(model)
         // The current renderer uses the empty string as its no-alias sentinel.
         this.ast.tableAlias = effectiveAlias
         modelAliasContext.registerTable(model, effectiveAlias)

@@ -237,6 +237,20 @@ body {
 .run-metric { display: flex; min-height: 87px; flex-direction: column; justify-content: center; gap: 7px; padding: 13px 15px; border: 1px solid #e6eaf2; border-radius: 12px; background: #fff; }
 .run-metric-label { color: var(--help-muted); font-size: .82rem; }
 .run-metric-value { color: var(--help-ink); font-size: 1.16rem; font-weight: 800; }
+.run-test-chart { margin-top: 16px; padding: 16px; border: 1px solid #e6eaf2; border-radius: 12px; background: linear-gradient(135deg, #fbfcff, #f7f9fc); }
+.run-test-chart h4 { color: var(--help-ink); font-weight: 800; }
+.run-test-chart-track { display: flex; width: 100%; height: 18px; overflow: hidden; direction: ltr; border: 1px solid #e1e7ef; border-radius: 999px; background: #edf0f5; }
+.run-test-chart-segment { display: block; min-width: 0; height: 100%; transition: width .2s ease; }
+.run-test-chart-segment.is-passed, .run-test-chart-item.is-passed .run-test-chart-swatch { background: #1a9a70; }
+.run-test-chart-segment.is-failed, .run-test-chart-item.is-failed .run-test-chart-swatch { background: #d8485e; }
+.run-test-chart-segment.is-skipped, .run-test-chart-item.is-skipped .run-test-chart-swatch { background: #9aa6b7; }
+.run-test-chart-segment.is-other, .run-test-chart-item.is-other .run-test-chart-swatch { background: #d3a64a; }
+.run-test-chart-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.run-test-chart-item { display: flex; align-items: center; gap: 7px; min-width: 0; color: #53617a; font-size: .82rem; }
+.run-test-chart-swatch { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; }
+.run-test-chart-item strong { color: var(--help-ink); }
+.run-test-chart-percent { margin-inline-start: auto; color: var(--help-muted); font-variant-numeric: tabular-nums; }
+.run-test-chart-empty { margin: 0; padding: 14px; border: 1px dashed #cbd3e0; border-radius: 9px; color: var(--help-muted); text-align: center; }
 .run-data-source { margin: 15px 0 0; color: var(--help-muted); font-size: .86rem; line-height: 1.8; }
 .run-execution-details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 15px; margin: 18px 0 0; padding: 15px 17px; border-radius: 12px; background: #f7f8fb; font-size: .85rem; }
 .run-execution-details dt { color: var(--help-muted); font-weight: 650; }
@@ -311,6 +325,7 @@ body {
 .expected-actual-column { min-width: 0; padding: 14px; border-radius: 11px; background: #f8f9fc; }
 .runtime-json { max-height: 360px; overflow: auto; margin: 0; padding: 12px; border-radius: 9px; direction: ltr; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; color: #34415a; background: #fff; font: .76rem/1.6 Consolas, monospace; }
 .result-copy-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #e8ecf4; }
+.result-copy-actions[hidden] { display: none !important; }
 .result-copy-actions .btn { min-height: 44px; }
 .ai-report-fallback { flex: 1 0 100%; min-height: 230px; direction: ltr; text-align: left; white-space: pre; font: .82rem/1.6 Consolas, monospace; }
 
@@ -323,6 +338,12 @@ body {
 .action-output-stream summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: .45rem .65rem .45rem .85rem; font-weight: 600; background: #f4f6fa; }
 .action-output-label { min-width: 0; }
 .action-output-controls { display: inline-flex; align-items: center; gap: 8px; }
+.part-console-entry-type,
+.part-console-entry-date {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
 .action-output-copy-status { color: #16835b; font-size: .72rem; font-weight: 400; }
 .action-output-copy { display: inline-grid; width: 32px; height: 32px; place-items: center; padding: 5px; border: 1px solid #cbd5e1; border-radius: 7px; color: #34415a; background: #fff; cursor: pointer; }
 .action-output-copy:hover { border-color: #8292ad; background: #f8fafc; }
@@ -340,6 +361,7 @@ body {
   .workflow-actions-between .btn { width: 100%; }
   .parameter-grid { grid-template-columns: minmax(0, 1fr); }
   .run-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-test-chart-legend { grid-template-columns: 1fr; }
   .run-overview { flex-direction: column; }
   .runtime-step { grid-template-columns: 30px minmax(0, 1fr); }
   .runtime-step-status, .runtime-step-duration, .runtime-step-data { grid-column: 2; }

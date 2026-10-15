@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "module": {
+    "title": "آزمون‌های Migration Executor",
+    "description": "تست‌های یکپارچه‌سازی Migration با MySQL واقعی؛ برای اجرا باید یک پایگاه دادهٔ آزمایشی و دورریختنی انتخاب شود.",
+    "icon": "database"
+  },
+  "tests": [
+    {
+      "id": "migration-executor-migrator-mysql-integration",
+      "title": "MigrationMigratorIntegrationTest.kt — اجرای Migration روی MySQL",
+      "description": "bootstrap، اجرای Migration، ثبت تاریخچه و رد اجرای تکراری روی پایگاه دادهٔ اختصاصی و دورریختنی.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.migration.executor.manager.MigrationMigratorIntegrationTest.bootstrapsRunsRecordsAndSkipsMigrationOnSecondInvocation"
+      },
+      "parameters": [
+        {
+          "id": "db-host",
+          "label": "میزبان MySQL",
+          "type": "text",
+          "required": true,
+          "default": "127.0.0.1",
+          "secret": false,
+          "validation": { "notBlank": true },
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.host" }
+        },
+        {
+          "id": "db-port",
+          "label": "درگاه MySQL",
+          "type": "number",
+          "required": false,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.port" }
+        },
+        {
+          "id": "db-name",
+          "label": "نام پایگاه دادهٔ آزمایشی دورریختنی",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db_test",
+          "secret": false,
+          "validation": { "notBlank": true },
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.database" }
+        },
+        {
+          "id": "db-username",
+          "label": "نام کاربری MySQL",
+          "type": "text",
+          "required": true,
+          "default": "root",
+          "secret": false,
+          "validation": { "notBlank": true },
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.username" }
+        },
+        {
+          "id": "db-password",
+          "label": "گذرواژهٔ MySQL",
+          "type": "password",
+          "required": false,
+          "allowEmpty": true,
+          "secret": true,
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.password" }
+        }
+      ],
+      "report": { "type": "gradle-html", "path": "build/reports/tests/test" }
+    },
+    {
+      "id": "migration-executor-state-store-mysql-integration",
+      "title": "SystemMigrationStateStoreIntegrationTest.kt — وضعیت Migration روی MySQL",
+      "description": "راه‌اندازی و خواندن تاریخچهٔ Migration روی پایگاه دادهٔ اختصاصی؛ جدول system_migration باید از قبل وجود نداشته باشد.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.migration.executor.internal.system_migration.SystemMigrationStateStoreIntegrationTest.bootstrapsReadsAndRecordsAgainstRealMySql"
+      },
+      "parameters": [
+        {
+          "id": "db-host",
+          "label": "میزبان MySQL",
+          "type": "text",
+          "required": true,
+          "default": "127.0.0.1",
+          "secret": false,
+          "validation": { "notBlank": true },
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.host" }
+        },
+        {
+          "id": "db-port",
+          "label": "درگاه MySQL",
+          "type": "number",
+          "required": false,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.port" }
+        },
+        {
+          "id": "db-name",
+          "label": "نام پایگاه دادهٔ آزمایشی دورریختنی",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db_test",
+          "secret": false,
+          "validation": { "notBlank": true },
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.database" }
+        },
+        {
+          "id": "db-username",
+          "label": "نام کاربری MySQL",
+          "type": "text",
+          "required": true,
+          "default": "root",
+          "secret": false,
+          "validation": { "notBlank": true },
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.username" }
+        },
+        {
+          "id": "db-password",
+          "label": "گذرواژهٔ MySQL",
+          "type": "password",
+          "required": false,
+          "allowEmpty": true,
+          "secret": true,
+          "binding": { "type": "gradle-project-property", "name": "help.migration.mysql.password" }
+        }
+      ],
+      "report": { "type": "gradle-html", "path": "build/reports/tests/test" }
+    }
+  ]
+}

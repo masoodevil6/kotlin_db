@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.v2.queries.select
 
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.ast.enums.DataType
@@ -14,9 +15,17 @@ import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 class A7ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
-            addColumn { column(UserModelV2::class, UserModelV2::id) }
-            addColumn { column { tableAttribute("concat( uu.name , '-' , uu.family )") }; alias("user_full_name"); execute(DataType.STRING) }
-            addColumn { column(UserModelV2::class, UserModelV2::age) }
+            addColumn {
+                column(UserModelV2::class, UserModelV2::id)
+            }
+            addColumn {
+                column { tableAttribute("concat( uu.name , '-' , uu.family )") };
+                alias("user_full_name");
+                execute(DataType.STRING)
+            }
+            addColumn {
+                column(UserModelV2::class, UserModelV2::age)
+            }
         }
         .from { model(UserModelV2::class) }
 
@@ -27,6 +36,9 @@ class A7ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             .queryBuilder(query)
             .sql { (queryText, params) ->
                 println("\n=============================================\nV2-Ex7: Query table attribute\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
             }
             .execute()
             .success { rows ->

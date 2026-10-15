@@ -5,7 +5,7 @@ import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.column_insert.IQueryColumnInsertApi
 import gog.my_project.data_base.query.ast.interfaces.insert_interface.columns_insert.IQueryColumnInsertAst
 import gog.my_project.data_base.query.ast.schema.insert_schema.column.QueryColumnInsertAst
-import gog.my_project.data_base.query.builder.ast.select_builder.metadata.QueryBuilderMetadata
+import gog.my_project.data_base.query.meta_data.models.ModelMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
 
@@ -19,10 +19,10 @@ class QueryColumnInsertBuilder(
         property: KProperty1<T, R>,
         columnValue: R,
     ): IQueryColumnInsertApi {
-        QueryBuilderMetadata.requireTable(table)
-        val columnMetadata = QueryBuilderMetadata.requireColumn(table, property)
+        ModelMetadataResolver.requireTable(table)
+        ModelMetadataResolver.requireColumn(table, property)
 
-        val columnName = QueryBuilderMetadata.columnName(table, property, columnMetadata)
+        val columnName = ModelMetadataResolver.columnName(table, property)
         ast.columnName = columnName
         ast.columnTag = columnName
         val parameter = SqlParameter.of(columnName, columnValue)

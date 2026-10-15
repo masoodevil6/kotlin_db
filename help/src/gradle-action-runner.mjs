@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { readGradleTestResults, snapshotGradleTestResultFiles } from './gradle-test-runner.mjs';
+import { resolveReportDirectory } from './path-safety.mjs';
 
 const MAX_OUTPUT_CHARS_PER_STREAM = 512 * 1024;
 const CONSOLE_MODES = new Set(['plain', 'auto', 'rich', 'verbose']);
@@ -79,11 +81,20 @@ export async function executeGradleAction({ buildRoot, module, action, bindings 
     args.push('--console=plain');
   }
   args.push(taskPath);
+  const testResultsDirectory = action.id === 'test' && typeof module.helpProjectRoot === 'string'
+    ? resolveReportDirectory(module.helpProjectRoot, 'build/test-results/test')
+    : undefined;
+  const previousTestResults = testResultsDirectory
+    ? snapshotGradleTestResultFiles(testResultsDirectory, module.helpProjectRoot)
+    : undefined;
   const startedAt = Date.now();
   try {
     const env = { ...process.env };
     for (const [name, value] of Object.entries(bindings)) env[`ORG_GRADLE_PROJECT_${name}`] = String(value);
     const result = await launchProcess(javaExecutable(), args, { cwd: buildRoot, env, onOutput });
+    const testResults = testResultsDirectory
+      ? readGradleTestResults(testResultsDirectory, module.helpProjectRoot, previousTestResults)
+      : undefined;
     return {
       status: result.code === 0 ? 'Passed' : 'Failed',
       exitCode: result.code,
@@ -92,6 +103,14 @@ export async function executeGradleAction({ buildRoot, module, action, bindings 
       stdout: result.stdout ?? '',
       stderr: result.stderr ?? '',
       outputTruncated: result.outputTruncated ?? false,
+      ...(action.id === 'test' ? {
+        testResults: testResults ?? null,
+        testResultsMessage: testResults
+          ? undefined
+          : testResultsDirectory
+            ? 'برای اجرای فعلی فایل XML تازه و خوانای JUnit تولید نشد؛ نتایج اجرای قبلی نمایش داده نشده‌اند.'
+            : 'مسیر امن ریشهٔ ماژول برای خواندن نتیجه‌های JUnit در دسترس نیست.',
+      } : {}),
       message: result.code === 0 ? undefined : `Gradle task failed with exit code ${result.code ?? `signal ${result.signal}`}`,
     };
   } catch (error) {

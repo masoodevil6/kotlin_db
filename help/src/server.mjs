@@ -149,6 +149,10 @@ export function createHelpServer({ registry, projects = [...registry.values()], 
           stdout: result.stdout ?? '',
           stderr: result.stderr ?? '',
           outputTruncated: result.outputTruncated ?? false,
+          ...(selected.action.id === 'test' ? {
+            testResults: result.testResults ?? null,
+            testResultsMessage: result.testResultsMessage,
+          } : {}),
           message: result.message,
         };
         if (wantsStream) {

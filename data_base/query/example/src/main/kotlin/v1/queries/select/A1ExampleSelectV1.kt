@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.example.v1.queries.select
 
+import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.builder.ast.select_builder.requireResultOutputAliases
@@ -73,6 +74,9 @@ class A1ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
             .queryBuilder(query)
             .sql { (queryText, params) ->
                 println("\n=============================================\nV1-Ex1: Smart select with join\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
             }
             .execute()
             .success { rows ->

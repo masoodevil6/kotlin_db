@@ -7,7 +7,7 @@
   <title>راهنمای پروژه</title>
   <link rel="stylesheet" href="/vendor/bootstrap.rtl.min.css">
   <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js?v=module-test-command-preview" defer></script>
+  <script src="/app.js?v=module-test-result-report-ai" defer></script>
 </head>
 <body>
   <header class="app-header">
@@ -155,6 +155,13 @@
             </div>
           </div>
           <div id="build-output" class="action-output-view mt-4" aria-live="polite"></div>
+          <div id="module-test-summary" class="run-summary mt-4" aria-live="polite" hidden></div>
+          <div id="module-test-ai-actions" class="result-copy-actions mt-3" hidden>
+            <button id="module-test-explain-ai" type="button" class="btn btn-outline-primary">کپی تحلیل نتیجهٔ تست‌های ماژول برای AI</button>
+            <p id="module-test-explain-ai-status" class="small text-secondary mb-0" role="status" aria-live="polite"></p>
+            <textarea id="module-test-ai-text" class="form-control ai-report-fallback" aria-label="پرامپت و گزارش تست ماژول برای کپی دستی" hidden readonly></textarea>
+            <p class="small text-secondary mb-0">با کلیک، پرامپت تحلیل و اطلاعات اجرای همین task کپی می‌شود؛ آن را در سرویس AI دلخواه الصاق کنید.</p>
+          </div>
         </section>
 
         <section data-step-panel="results" hidden>
@@ -164,6 +171,8 @@
           </div>
           <div id="run-summary" class="run-summary mt-4" aria-live="polite"></div>
           <div class="result-copy-actions">
+            <button id="explain-test-with-ai" type="button" class="btn btn-outline-primary" hidden>کپی پرامپت تحلیل تست برای AI</button>
+            <p id="explain-test-with-ai-status" class="small text-secondary mb-0" role="status" aria-live="polite"></p>
             <button id="copy-ai-report" type="button" class="btn btn-primary">کپی گزارش Markdown برای AI</button>
             <p id="copy-ai-report-status" class="small text-secondary mb-0" role="status" aria-live="polite"></p>
             <textarea id="ai-report-text" class="form-control ai-report-fallback" aria-label="متن گزارش Markdown برای کپی دستی" hidden readonly></textarea>

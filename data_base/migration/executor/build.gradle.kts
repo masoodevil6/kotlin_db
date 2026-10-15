@@ -35,6 +35,19 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+
+    val integrationTestEnvironment = mapOf(
+        "KOTLIN_DB_MIGRATION_TEST_HOST" to "help.migration.mysql.host",
+        "KOTLIN_DB_MIGRATION_TEST_PORT" to "help.migration.mysql.port",
+        "KOTLIN_DB_MIGRATION_TEST_DATABASE" to "help.migration.mysql.database",
+        "KOTLIN_DB_MIGRATION_TEST_USERNAME" to "help.migration.mysql.username",
+        "KOTLIN_DB_MIGRATION_TEST_PASSWORD" to "help.migration.mysql.password",
+    )
+    integrationTestEnvironment.forEach { (environmentName, propertyName) ->
+        providers.gradleProperty(propertyName).orNull?.let { value ->
+            environment(environmentName, value)
+        }
+    }
 }
 kotlin {
     jvmToolchain(24)
