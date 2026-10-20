@@ -8,25 +8,38 @@ import gog.my_project.data_base.query.ast.enums.DataType
 
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.builder.cte.modules.users.CteInfoUser
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-class A6ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
+class A7ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
-        .withs {
-            addWith { with("cte_info_user", CteInfoUser(1)) }
-        }
         .select {
-            addColumn { column { cteColumn("ciu", "cte_user_id") }; alias("cte_user_id"); execute(DataType.LONG) }
-            addColumn { column { cteColumn("ciu", "cte_user_name") }; alias("cte_user_name"); execute(DataType.STRING) }
-            addColumn { column { cteColumn("ciu", "cte_user_family") }; alias("cte_user_family"); execute(DataType.STRING) }
-            addColumn { column { cteColumn("ciu", "cte_user_age") }; alias("cte_user_age"); execute(DataType.INT) }
-            addColumn { column { cteColumn("ciu", "cte_user_phone") }; alias("cte_user_phone"); execute(DataType.STRING) }
+            addColumn {
+                column {
+                    sqlColumn("uu", "id")
+                }
+                alias("user_id")
+                execute(DataType.LONG)
+            }
+            addColumn {
+                column {
+                    tableAttribute("concat( uu.name , '-' , uu.family )")
+                }
+                alias("user_full_name")
+                execute(DataType.STRING)
+            }
+            addColumn {
+                column {
+                    sqlColumn("uu", "age")
+                }
+                alias("user_age")
+                execute(DataType.INT)
+            }
         }
-        .from { cte("cte_info_user").alias("ciu") }
-        .limit { setOptionLimit(2) }
-        .offset { setOptionOffset(0) }
+        .from {
+            table("user_users")
+            alias("uu")
+        }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         val query = query()
@@ -35,7 +48,7 @@ class A6ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
         queryManager
             .queryBuilder(query)
             .sql { (queryText, params) ->
-                println("\n=============================================\nV1-Ex6: Smart select with CTE\nquery: $queryText\nparams: $params")
+                println("\n=============================================\nV1-Ex7: Smart select with table attribute\nquery: $queryText\nparams: $params")
             }
             .details { metadata ->
                 println(formatEffectiveQueryMetadata(metadata))

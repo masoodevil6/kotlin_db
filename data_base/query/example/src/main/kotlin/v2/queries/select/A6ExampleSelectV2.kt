@@ -3,47 +3,43 @@ package gog.my_project.data_base.query.example.v2.queries.select
 import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
 import gog.my_project.data_base.query.executer.result.success
 import gog.my_project.data_base.query.executer.result.error
-import gog.my_project.data_base.query.builder.ast.select_builder.requireResultOutputAliases
 import gog.my_project.data_base.query.ast.enums.DataType
 
+import gog.my_project.data_base.query.example.v2.queries.models.UserModelV2
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.example.v2.queries.IExampleV2
 
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
+class A7ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
-        .withs {
-            addWith { with("cte_info_user", gog.my_project.data_base.query.builder.cte.modules.users.CteInfoUser(1)) }
-        }
         .select {
             addColumn {
-                column { cteColumn("ciu", "cte_user_id") }
-                alias("cte_user_id")
-                execute(DataType.LONG)
+                column(UserModelV2::class, UserModelV2::id)
             }
             addColumn {
-                column { cteColumn("ciu", "cte_user_name") };
-                alias("cte_user_name");
+                column {
+                    tableAttribute("concat( uu.name , '-' , uu.family )")
+                };
+                alias("user_full_name");
                 execute(DataType.STRING)
             }
-            addColumn { column { cteColumn("ciu", "cte_user_family") }; alias("cte_user_family"); execute(DataType.STRING) }
-            addColumn { column { cteColumn("ciu", "cte_user_age") }; alias("cte_user_age"); execute(DataType.INT) }
-            addColumn { column { cteColumn("ciu", "cte_user_phone") }; alias("cte_user_phone"); execute(DataType.STRING) }
+            addColumn {
+                column(UserModelV2::class, UserModelV2::age)
+            }
         }
-        .from { cte("cte_info_user").alias("ciu") }
-        .limit { setOptionLimit(2) }
-        .offset { setOptionOffset(0) }
+        .from {
+            model(UserModelV2::class)
+        }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         val query = query()
-        val aliases = query.requireResultOutputAliases()
 
         queryManager
             .queryBuilder(query)
             .sql { (queryText, params) ->
-                println("\n=============================================\nV2-Ex6: Query with CTE\nquery: $queryText\nparams: $params")
+                println("\n=============================================\nV2-Ex7: Query table attribute\nquery: $queryText\nparams: $params")
             }
             .details { metadata ->
                 println(formatEffectiveQueryMetadata(metadata))
@@ -51,7 +47,11 @@ class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             .execute()
             .success { rows ->
                 rows.forEach { row ->
-                    println(aliases.joinToString(prefix = "row: ") { alias -> "$alias=${row.getValue(alias)}" })
+                    println(
+                        "row: user_id=${row.getValue(UserModelV2::id)}, " +
+                            "user_full_name=${row["user_full_name"]}, " +
+                            "user_age=${row.getValue(UserModelV2::age)}",
+                    )
                 }
                 rows
             }
