@@ -1,0 +1,4 @@
+package gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.min
+
+interface IQeuryColumnMethodMinApi {
+}
