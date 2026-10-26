@@ -1,10 +1,10 @@
 package gog.my_project.data_base.query.renderer.interfaces
 
 /**
- * Opt-in contract for renderers used by identity-aware dual rendering.
+ * Opt-in contract for renderers used by parameter-aware rendering.
  *
- * Implementations must route every emitted [gog.my_project.data_base.core.query.reader.SqlParameter]
- * through [IParameterRenderContext.renderParameter] and render the same AST/configuration
- * deterministically in the named and positional passes.
+ * Implementations must route every emitted parameter occurrence and legacy placeholder source
+ * through [IParameterRenderContext], and render the same AST/configuration deterministically in
+ * the named and positional passes.
  */
 interface IParameterOccurrenceAwareRenderer

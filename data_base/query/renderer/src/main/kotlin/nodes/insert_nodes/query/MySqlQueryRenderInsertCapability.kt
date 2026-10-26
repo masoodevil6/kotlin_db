@@ -32,16 +32,12 @@ class MySqlQueryRenderInsertCapability() : IQueryRenderInsertCapability, IParame
                         QueryColumnInsertData()
                     );
 
-                val columnTag =
-                    ctx.registry.render(
-                        column ,
-                        ctx.dialect ,
-                        QueryColumnInsertData(_getTag = true)
-                    );
-
                 if (columnName != null){
                     columnsReferenceStr +=  " $columnName ";
-                    val placeholder = column.parameter?.let(ctx::renderParameter) ?: ":$columnTag"
+                    val parameter = checkNotNull(column.parameterAst) {
+                        "INSERT column '$columnName' is missing required parameterAst metadata"
+                    }
+                    val placeholder = ctx.renderParameter(parameter)
                     columnsValuesStr +=  " $placeholder ";
 
                     if (index < columnsList.size - 1){

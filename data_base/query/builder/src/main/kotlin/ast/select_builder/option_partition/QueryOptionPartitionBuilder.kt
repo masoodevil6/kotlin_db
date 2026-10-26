@@ -8,7 +8,7 @@ import gog.my_project.data_base.query.ast.schema.select_schema.option_partition.
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
 
-class QueryOptionPartitionAstBuilder(
+class QueryOptionPartitionBuilder(
     override var ast: IQueryOptionPartitionAst = QueryOptionPartitionAst()
 ) : IQueryOptionPartitionApi {
 

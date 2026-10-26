@@ -9,10 +9,31 @@ import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleInsertV1 : IExampleV1<IQueryRenderInsertApi> {
     override fun query(): IQueryRenderInsertApi = QueryRenderInsertBuilder()
-        .table { table("user_users").alias("uu") }
-        .addValue { column("name", "Ali") }
-        .addValue { column("family", "Sadegi") }
-        .addValue { column("age", 50) }
+        .table {
+            table("user_users")
+            alias("uu")
+        }
+        .addValue {
+            column("name")
+            setValue {
+                paramName("name")
+                paramValue("Ali")
+            }
+        }
+        .addValue {
+            column("family")
+            setValue {
+                paramName("family")
+                paramValue("Sadegi")
+            }
+        }
+        .addValue {
+            column("age")
+            setValue {
+                paramName("age")
+                paramValue("50")
+            }
+        }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         val consumer = queryManager

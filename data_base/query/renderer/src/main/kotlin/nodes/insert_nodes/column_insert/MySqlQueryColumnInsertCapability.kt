@@ -15,8 +15,8 @@ class MySqlQueryColumnInsertCapability : IQueryColumnInsertCapability, IParamete
         dataClass: QueryColumnInsertData?
     ): String? {
 
-        val columnName = ast.columnName;
-        val columnTag = ast.columnTag;
+        val columnName = ast.metadata.columnName;
+        val columnTag = ast.metadata.columnTag;
 
         if (dataClass?._getTag == true){
             return columnTag;

@@ -16,7 +16,7 @@ class MySqlQueryRenderDeleteCapability : IQueryRenderDeleteCapability, IParamete
         dataClass: QueryRenderDeleteData?
     ): String? {
 
-        val targets =  ast.targets;
+        val targets =  ast.metadata.targets;
         val queryBuilderTable =  ast.table;
         val queryBuilderWhere =  ast.where;
 

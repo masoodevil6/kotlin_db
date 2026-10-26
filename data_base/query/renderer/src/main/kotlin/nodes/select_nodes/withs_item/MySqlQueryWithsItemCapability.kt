@@ -17,7 +17,7 @@ class MySqlQueryWithsItemCapability:
         dataClass:  QueryWithsItemData?
     ): String? {
 
-        val withName : String? = ast.withName;
+        val withName : String? = ast.metadata.withName;
         val withBody:  IQueryRenderSelectAst? = ast.withBody;
         val withBodyStr =
             ctx.registry.render(

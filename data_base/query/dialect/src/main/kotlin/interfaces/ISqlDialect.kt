@@ -9,22 +9,34 @@ import gog.my_project.data_base.query.renderer.interfaces.IRendererRegistry
 
 interface ISqlDialect {
 
-    val _prefixWiths:   String;
-    val _prefixSelect:  String;
-    val _prefixTable:   String;
-    val _prefixWhere:   String;
-    val _prefixGroup:   String;
-    val _prefixLimit:   String;
-    val _prefixOrder:   String;
-    val _prefixOffset:  String;
-    val _prefixInsert:  String;
-    val _prefixUpdate:  String;
-    val _prefixDelete:  String;
+    val _prefixWiths:         String;
+    val _prefixSelect:        String;
+    val _prefixTable:         String;
+    val _prefixWhere:         String;
+    val _prefixGroup:         String;
+    val _prefixLimit:         String;
+    val _prefixOrder:         String;
+    val _prefixOffset:        String;
+    val _prefixInsert:        String;
+    val _prefixUpdate:        String;
+    val _prefixDelete:        String;
+
+    val _prefixDistinct:      String
+    val _prefixOver:          String
+    val _prefixPartitionBy:   String
+
+    val _prefixMethodCount:   String;
+    val _prefixMethodConcat:  String;
+    val _prefixMethodMin:     String;
+    val _prefixMethodMax:     String;
+    val _prefixMethodSum:     String;
+    val _prefixMethodAvg:     String;
+
 
     val _registry: IRendererRegistry;
 
     fun registerRenders();
 
-    fun <Ast: IQueryAst> render(ast: Ast) : String?;
+    fun <Ast: IQueryAst<*>> render(ast: Ast) : String?;
 
 }

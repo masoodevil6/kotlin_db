@@ -1,22 +1,19 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.table
 
 import gog.my_project.data_base.core.managers.models.IModelBase
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
-import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQueryTableAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.table.QueryTableAst
 import gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
-import gog.my_project.data_base.query.meta_data.models.ModelMetadataResolver
+import gog.my_project.data_base.query.builder.metadata.models.ModelMetadataResolver
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import kotlin.reflect.KClass
 
 class QueryTableBuilder internal constructor(
-    override var params: MutableList<SqlParameter<*>>,
     override var ast: IQueryTableAst,
     private val modelAliasContext: ModelTableAliasContext,
     private val allowSelectQuerySources: Boolean = false,
@@ -27,22 +24,20 @@ class QueryTableBuilder internal constructor(
     private var configuredModel: KClass<*>? = null
     private var derivedSelectConfigured = false
 
-    internal var selectedQueryRelation: Cte? = null
+    internal var selectedCteSource: Cte? = null
         private set
 
     internal val selectedOccurrenceAlias: String?
         get() = configuredAlias
 
     constructor(
-        params: MutableList<SqlParameter<*>> = mutableListOf(),
         ast: IQueryTableAst = QueryTableAst(),
-    ) : this(params, ast, ModelTableAliasContext())
+    ) : this(ast, ModelTableAliasContext())
 
     internal constructor(
-        params: MutableList<SqlParameter<*>>,
         ast: IQueryTableAst,
         parameterBindingScope: ParameterBindingScope,
-    ) : this(params, ast, ModelTableAliasContext(), parameterBindingScope = parameterBindingScope)
+    ) : this(ast, ModelTableAliasContext(), parameterBindingScope = parameterBindingScope)
 
     override fun <T : IModelBase> table(
         table: KClass<T>,
@@ -51,29 +46,67 @@ class QueryTableBuilder internal constructor(
     override fun <T : IModelBase> model(
         model: KClass<T>,
     ): IQueryTableApi {
-        check(selectedQueryRelation == null && !derivedSelectConfigured) {
+        check(selectedCteSource == null && ast.derivedQuery == null && !derivedSelectConfigured) {
             "A model source cannot be combined with a Query or nested SELECT source"
         }
         ModelMetadataResolver.requireTable(model)
-
         val effectiveAlias = configuredAlias ?: ModelMetadataResolver.tableAlias(model)
+
+        configuredModel?.takeIf { it != model }?.let { modelAliasContext.unregisterTable(it) }
+        modelAliasContext.unregisterNamedSource(ast)
+        val metadata = ast.metadata
+        metadata.cteRuntimeName = null
+        metadata.logicalQueryName = null
+        metadata.isCteObjectSource = false
+        metadata.nameFromModel = ModelMetadataResolver.tableNameFromModel(model)
+        metadata.nameFromAnnotation = ModelMetadataResolver.tableNameFromAnnotation(model)
+        metadata.nameFromAst = null
+        metadata.aliasFromModel = ModelMetadataResolver.tableAliasFromModel(model)
+        metadata.aliasFromAnnotation = ModelMetadataResolver.tableAliasFromAnnotation(model)
+        metadata.aliasFromAst = configuredAlias
+
         configuredModel = model
-        this.ast.table = ModelMetadataResolver.tableName(model)
-        // The current renderer uses the empty string as its no-alias sentinel.
-        this.ast.tableAlias = effectiveAlias
-        modelAliasContext.registerTable(model, effectiveAlias)
+        modelAliasContext.registerTable(
+            model,
+            metadata.aliasFromModel,
+            metadata.aliasFromAnnotation,
+            metadata.aliasFromAst,
+        )
+        modelAliasContext.registerNamedSource(
+            ast,
+            ModelMetadataResolver.tableName(model),
+            effectiveAlias,
+            metadata.aliasFromModel,
+            metadata.aliasFromAnnotation,
+            metadata.aliasFromAst,
+        )
         return this;
     }
 
     override fun table(
         table: String,
     ): IQueryTableApi {
-        check(selectedQueryRelation == null && !derivedSelectConfigured) {
+        check(selectedCteSource == null && ast.derivedQuery == null && !derivedSelectConfigured) {
             "A table source cannot be combined with a Query or nested SELECT source"
         }
+        modelAliasContext.unregisterNamedSource(ast)
+        configuredModel?.let { modelAliasContext.unregisterTable(it) }
         configuredModel = null
-        this.ast.table = table
-        this.ast.tableAlias = configuredAlias ?: ""
+        ast.metadata.cteRuntimeName = null
+        ast.metadata.logicalQueryName = null
+        ast.metadata.isCteObjectSource = false
+        ast.metadata.nameFromModel = null
+        ast.metadata.nameFromAnnotation = null
+        ast.metadata.nameFromAst = table
+        ast.metadata.aliasFromModel = null
+        ast.metadata.aliasFromAnnotation = null
+        ast.metadata.aliasFromAst = configuredAlias
+        modelAliasContext.registerNamedSource(
+            ast,
+            table,
+            configuredAlias ?: table,
+            aliasFromAst = configuredAlias,
+        )
         return this;
     }
 
@@ -83,57 +116,99 @@ class QueryTableBuilder internal constructor(
         check(allowSelectQuerySources) {
             "A nested SELECT source is only available in a SELECT FROM block"
         }
-        check(selectedQueryRelation == null && ast.table == null && ast.cte == null && !derivedSelectConfigured) {
+        check(selectedCteSource == null && ast.metadata.resolveName() == null && !derivedSelectConfigured) {
             "Only one source can be configured in a SELECT FROM block"
         }
 
         val nestedAst = QueryRenderSelectAst()
-        val nestedParams = mutableListOf<SqlParameter<*>>()
         val nestedBuilder = parameterBindingScope?.let {
-            QueryRenderSelectBuilder(nestedParams, nestedAst, it)
-        } ?: QueryRenderSelectBuilder(nestedParams, nestedAst)
+            QueryRenderSelectBuilder( nestedAst, it)
+        } ?: QueryRenderSelectBuilder( nestedAst)
         nestedBuilder.apply(blockQuery)
-        params.addAll(nestedParams)
-        ast.table = null
-        ast.cte = null
+        modelAliasContext.unregisterNamedSource(ast)
         ast.derivedQuery = nestedAst
-        ast.tableAlias = configuredAlias ?: ""
-        ast.cteAlias = null
+        ast.metadata.nameFromModel = null
+        ast.metadata.nameFromAnnotation = null
+        ast.metadata.nameFromAst = null
+        ast.metadata.aliasFromModel = null
+        ast.metadata.aliasFromAnnotation = null
+        ast.metadata.aliasFromAst = configuredAlias
         configuredModel = null
         derivedSelectConfigured = true
+        ast.metadata.cteRuntimeName = null
+        ast.metadata.logicalQueryName = null
+        ast.metadata.isCteObjectSource = false
+        configuredAlias?.let {
+            modelAliasContext.registerNamedSource(ast, it, it, aliasFromAst = it)
+        }
         return this
     }
 
-    override fun <P> cte(
-        declaration: ICteDeclaration<P>,
-    ): IQueryTableApi {
+    override fun cte(cte: Cte): IQueryTableApi {
         check(allowSelectQuerySources) {
-            "A Query declaration source is only available in a SELECT FROM block"
+            "A Cte object source is only available in a SELECT FROM block"
         }
-        check(selectedQueryRelation == null && ast.table == null && ast.cte == null && !derivedSelectConfigured) {
+        check(selectedCteSource == null && ast.metadata.resolveName() == null && !derivedSelectConfigured) {
             "Only one source can be configured in a SELECT FROM block"
         }
-        selectedQueryRelation = declaration.createCte(declaration.params)
+        modelAliasContext.unregisterNamedSource(ast)
+        configuredModel?.let { modelAliasContext.unregisterTable(it) }
+        configuredModel = null
+        selectedCteSource = cte
         return this
     }
 
     override fun cte(
         cte: String,
     ): IQueryTableApi {
-        check(selectedQueryRelation == null && !derivedSelectConfigured) {
+        check(selectedCteSource == null && ast.derivedQuery == null && !derivedSelectConfigured) {
             "A CTE source cannot be combined with a Query or nested SELECT source"
         }
+        modelAliasContext.unregisterNamedSource(ast)
+        configuredModel?.let { modelAliasContext.unregisterTable(it) }
         configuredModel = null
-        this.ast.cte = cte
-        this.ast.cteAlias = configuredAlias ?: ""
+        ast.metadata.cteRuntimeName = cte
+        ast.metadata.logicalQueryName = null
+        ast.metadata.isCteObjectSource = false
+        ast.metadata.nameFromModel = null
+        ast.metadata.nameFromAnnotation = null
+        ast.metadata.nameFromAst = cte
+        ast.metadata.aliasFromModel = null
+        ast.metadata.aliasFromAnnotation = null
+        ast.metadata.aliasFromAst = configuredAlias
+        modelAliasContext.registerNamedSource(
+            ast,
+            cte,
+            configuredAlias ?: cte,
+            aliasFromAst = configuredAlias,
+        )
         return this;
     }
 
     override fun alias(alias: String): IQueryTableApi {
         configuredAlias = alias
-        ast.tableAlias = alias
-        ast.cteAlias = alias
-        configuredModel?.let { modelAliasContext.registerTable(it, alias) }
+        ast.metadata.aliasFromAst = alias
+        configuredModel?.let { model ->
+            modelAliasContext.registerTable(
+                model,
+                ast.metadata.aliasFromModel,
+                ast.metadata.aliasFromAnnotation,
+                ast.metadata.aliasFromAst,
+            )
+        }
+        val sourceName = ast.metadata.resolveName()
+        if (sourceName != null) {
+            modelAliasContext.registerNamedSource(
+                ast,
+                sourceName,
+                alias,
+                ast.metadata.aliasFromModel,
+                ast.metadata.aliasFromAnnotation,
+                ast.metadata.aliasFromAst,
+            )
+        } else if (derivedSelectConfigured) {
+            modelAliasContext.registerNamedSource(ast, alias, alias, aliasFromAst = alias)
+        }
         return this
     }
 

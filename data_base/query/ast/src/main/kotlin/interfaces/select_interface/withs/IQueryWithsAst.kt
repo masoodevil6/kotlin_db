@@ -1,9 +1,10 @@
 package gog.my_project.data_base.query.ast.interfaces.select_interface.withs
+import gog.my_project.data_base.query.ast.metadata.select.withs.QueryWithsAstMetadata
 
 import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
 
-interface IQueryWithsAst : IQueryAst {
+interface IQueryWithsAst : IQueryAst<QueryWithsAstMetadata> {
 
     var withs: MutableList<IQueryWithsItemAst>;
 

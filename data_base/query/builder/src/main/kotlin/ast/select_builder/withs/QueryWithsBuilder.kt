@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.withs
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQueryWithsApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs_item.IQueryWithsItemApi
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
@@ -11,17 +10,15 @@ import gog.my_project.data_base.query.builder.ast.select_builder.withs_item.Quer
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
 
 class QueryWithsBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryWithsAst = QueryWithsAst(),
 ) : IQueryWithsApi {
 
     private var parameterBindingScope = ParameterBindingScope()
 
     internal constructor(
-        params: MutableList<SqlParameter<*>>,
         ast: IQueryWithsAst,
         parameterBindingScope: ParameterBindingScope,
-    ) : this(params, ast) {
+    ) : this(ast) {
         this.parameterBindingScope = parameterBindingScope
     }
 
@@ -35,7 +32,6 @@ class QueryWithsBuilder(
     {
         val ast = QueryWithsItemAst();
         val itemBuilder = QueryWithsItemBuilder(
-            params,
             ast,
             parameterBindingScope,
         ).apply(blockWith)

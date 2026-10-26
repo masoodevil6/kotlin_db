@@ -6,7 +6,7 @@ import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.meta_data.queries.QueryMetadataResolver
+import gog.my_project.data_base.query.builder.metadata.queries.QueryMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -42,7 +42,6 @@ private fun buildCteDefinition(
     val logicalQueryName = declarationOwner?.let { QueryMetadataResolver.queryName(it) }
 
     val builder = QueryRenderSelectBuilder(
-        params = mutableListOf(),
         ast = gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst(),
     ).apply {
         requireCteOutputAliases(name, declarationOwner)
@@ -75,7 +74,7 @@ private fun validateUniqueLogicalOutputNames(
     ast: IQueryRenderSelectAst,
 ) {
     val logicalNames = ast.select?.columns.orEmpty().mapNotNull { output ->
-        val property = output.PropertyReference ?: return@mapNotNull null
+        val property = output.metadata.PropertyReference ?: return@mapNotNull null
         val receiverType = property.parameters.singleOrNull()
             ?.takeIf { it.kind == KParameter.Kind.INSTANCE }
             ?.type?.classifier as? KClass<*>

@@ -16,42 +16,30 @@ class MySqlQueryTableCapability :
         dataClass:   QueryTableData?
     ): String? {
 
-        val table: String? = ast.table;
-        val tableAlias: String? = ast.tableAlias;
-
-        val cte:   String? = ast.cte;
-        val cteAlias:   String? = ast.cteAlias
+        val sourceName = ast.metadata.resolveName()
+        val sourceAlias = ast.metadata.resolveAlias()
 
         ast.derivedQuery?.let { nestedQuery ->
-            require(table == null && cte == null) {
+            require(sourceName == null) {
                 "A table source cannot combine a derived SELECT with a table or CTE"
             }
             val nestedSql = ctx.registry.render(nestedQuery, ctx.dialect, IQueryRenderSelectData())
                 ?: error("Could not render nested SELECT source")
-            require(!tableAlias.isNullOrBlank()) {
+            require(!sourceAlias.isNullOrBlank()) {
                 "A nested SELECT source requires a non-empty alias"
             }
             val prefix = if (dataClass?._withPrefix == true) "${ctx.dialect._prefixTable} " else ""
-            return " $prefix ( $nestedSql ) As $tableAlias "
+            return " $prefix ( $nestedSql ) As $sourceAlias "
         }
 
         var queryTemp: String = "";
-        if (table != null) {
+        if (sourceName != null) {
             if (dataClass?._withPrefix == true){
                 queryTemp = " ${ctx.dialect._prefixTable} ";
             }
-            queryTemp += " ${table} ";
-            if (tableAlias != "" && dataClass?._withAlias == true) {
-                queryTemp += " As ${tableAlias} ";
-            }
-        }
-        if (cte != null) {
-            if (dataClass?._withPrefix == true){
-                queryTemp = " FROM ";
-            }
-            queryTemp += " ${cte} ";
-            if (cteAlias != "" && dataClass?._withAlias == true) {
-                queryTemp += " As ${cteAlias} ";
+            queryTemp += " ${sourceName} ";
+            if (!sourceAlias.isNullOrEmpty() && dataClass?._withAlias == true) {
+                queryTemp += " As ${sourceAlias} ";
             }
         }
 

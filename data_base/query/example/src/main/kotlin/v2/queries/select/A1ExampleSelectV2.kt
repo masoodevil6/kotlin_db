@@ -14,11 +14,36 @@ import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 class A1ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
-            addColumn { column(UserModelV2::class, UserModelV2::id) }
-            addColumn { column(UserModelV2::class, UserModelV2::name) }
-            addColumn { column(UserModelV2::class, UserModelV2::family) }
-            addColumn { column(UserModelV2::class, UserModelV2::age) }
-            addColumn { column(UserPhoneModelV2::class, UserPhoneModelV2::phone) }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::name)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::family)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::age)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserPhoneModelV2::class)
+                    columnSelector(UserPhoneModelV2::phone)
+                }
+            }
         }
         .from { model(UserModelV2::class) }
         .joins {
@@ -28,9 +53,15 @@ class A1ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
                 condition {
                     logicalOn()
                     addCondition {
-                        sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                        sideSelector {
+                            tableSelector(UserModelV2::class)
+                            columnSelector(UserModelV2::id)
+                        }
                         operationEqual()
-                        sideValue { tableColumn(UserPhoneModelV2::class, UserPhoneModelV2::userId, "up") }
+                        sideValueColumn {
+                            tableSelector(UserPhoneModelV2::class)
+                            columnSelector(UserPhoneModelV2::userId)
+                        }
                     }
                 }
             }
@@ -39,9 +70,14 @@ class A1ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
             conditions {
                 addCondition {
                     logicalAnd()
-                    sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                    sideSelector {
+                        tableSelector("uu"); columnSelector(UserModelV2::class, UserModelV2::id)
+                    }
                     operationEqual()
-                    sideValue("id1", 1)
+                    sideValueParam {
+                        paramName("id1")
+                        paramValue(1)
+                    }
                 }
             }
         }

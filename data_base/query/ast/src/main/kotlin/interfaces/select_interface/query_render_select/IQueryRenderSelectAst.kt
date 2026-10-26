@@ -1,4 +1,5 @@
 package gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select
+import gog.my_project.data_base.query.ast.metadata.select.query_render_select.QueryRenderSelectAstMetadata
 
 import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.joins.IQueryJoinsAst
@@ -11,7 +12,7 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQue
 import gog.my_project.data_base.query.ast.interfaces.select_interface.where.IQueryWhereAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQueryWithsAst
 
-interface IQueryRenderSelectAst : IQueryAst  {
+interface IQueryRenderSelectAst : IQueryAst<QueryRenderSelectAstMetadata>  {
 
     var withs :           IQueryWithsAst?;
     var select :          IQuerySelectAst?;

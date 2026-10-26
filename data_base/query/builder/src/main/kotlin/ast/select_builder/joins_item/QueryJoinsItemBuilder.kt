@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.joins_item
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_group.IQueryConditionsGroupsApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.joins_item.IQueryJoinsItemApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi
@@ -12,20 +11,39 @@ import gog.my_project.data_base.query.ast.schema.select_schema_ast.table.QueryTa
 import gog.my_project.data_base.query.builder.ast.select_builder.conditions_group.QueryConditionsGroupsBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.table.QueryTableBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
+import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 
 class QueryJoinsItemBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryJoinsItemAst = QueryJoinsItemAst(),
 )  : IQueryJoinsItemApi {
 
     private var parameterBindingScope = ParameterBindingScope()
+    private var modelAliasContext = ModelTableAliasContext()
+    private var querySourceContext = CteSourceContext()
 
     internal constructor(
-        params: MutableList<SqlParameter<*>>,
         ast: IQueryJoinsItemAst,
         parameterBindingScope: ParameterBindingScope,
-    ) : this(params, ast) {
+    ) : this(ast) {
         this.parameterBindingScope = parameterBindingScope
+    }
+
+    internal constructor(
+        ast: IQueryJoinsItemAst,
+        parameterBindingScope: ParameterBindingScope,
+        modelAliasContext: ModelTableAliasContext,
+    ) : this(ast, parameterBindingScope) {
+        this.modelAliasContext = modelAliasContext
+    }
+
+    internal constructor(
+        ast: IQueryJoinsItemAst,
+        parameterBindingScope: ParameterBindingScope,
+        modelAliasContext: ModelTableAliasContext,
+        querySourceContext: CteSourceContext,
+    ) : this(ast, parameterBindingScope, modelAliasContext) {
+        this.querySourceContext = querySourceContext
     }
 
 
@@ -34,7 +52,7 @@ class QueryJoinsItemBuilder(
     structure [join]
     ============================================================== */
     override fun typeJoin(type: SqlTypeJoin): IQueryJoinsItemApi {
-        this.ast.joinType = type.value;
+        this.ast.metadata.joinType = type.value;
         return this;
     }
 
@@ -63,9 +81,9 @@ class QueryJoinsItemBuilder(
     {
         val ast = QueryTableAst();
         QueryTableBuilder(
-            params,
             ast,
-            parameterBindingScope,
+            modelAliasContext,
+            parameterBindingScope = parameterBindingScope,
         ).apply(blockTable)
         this.ast.joinTable = ast;
         return this;
@@ -83,9 +101,10 @@ class QueryJoinsItemBuilder(
     {
         val ast = QueryConditionsGroupsAst();
         QueryConditionsGroupsBuilder(
-            params,
             ast,
             parameterBindingScope,
+            modelAliasContext,
+            querySourceContext,
         ).apply(blockCondition)
         this.ast.joinConditions = ast;
         return this;

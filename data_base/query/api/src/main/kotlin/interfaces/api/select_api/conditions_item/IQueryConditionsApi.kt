@@ -2,6 +2,7 @@ package gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_
 
 import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
+import gog.my_project.data_base.query.api.interfaces.api.parameter.IQueryParameterApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_item_collection.IQueryConditionsCollectionApi
 import gog.my_project.data_base.query.api.tools.enums.SqlConditionOperation
 import gog.my_project.data_base.query.api.tools.enums.SqlLogical
@@ -34,13 +35,13 @@ interface IQueryConditionsApi : IQueryApi<IQueryConditionsAst> {
     fun operationIsNot(): IQueryConditionsApi;
     fun operationContains(): IQueryConditionsApi;
 
-    fun sideValue(blockColumn: IQueryColumnsBaseApi.() -> Unit): IQueryConditionsApi
+    /** Right-hand column expression. */
+    fun sideValueColumn(blockColumn: IQueryColumnsBaseApi.() -> Unit): IQueryConditionsApi
 
-    //fun <T> sideValue( paramValue: T): IQueryConditionsApi
-    fun <T> sideValue(paramName: String , paramValue: T): IQueryConditionsApi
+    /** Right-hand parameter AST definition; named separately to keep the column DSL unambiguous. */
+    fun sideValueParam(blockParameter: IQueryParameterApi<Any?>.() -> Unit): IQueryConditionsApi
 
-    //    fun sideValueCollection( blockParamsCollection: IQueryConditionCollectionApi.() -> Unit): IQueryConditionsApi
-    fun sideValueCollection(paramName: String , blockParamsCollection: IQueryConditionsCollectionApi.() -> Unit): IQueryConditionsApi
-
+    /** Defines a collection using independent parameter AST nodes. */
+    fun sideValueCollection(blockParamsCollection: IQueryConditionsCollectionApi.() -> Unit): IQueryConditionsApi
 
 }

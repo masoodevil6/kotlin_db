@@ -21,7 +21,7 @@ internal class RenderSessionRegistry(
         renderer: IAstRenderer<A, D>,
     ) {
         check(!session.requireOccurrenceAwareRenderers) {
-            "Renderer registration is disabled during identity-aware rendering"
+            "Renderer registration is disabled during parameter-aware rendering"
         }
         delegate.register(renderClass, renderer)
     }
@@ -44,17 +44,26 @@ internal class RenderSessionRegistry(
         val renderer = rendererEntry.value as IAstRenderer<Any, QueryDataClass?>
         if (session.requireOccurrenceAwareRenderers && renderer !is IParameterOccurrenceAwareRenderer) {
             throw UnsupportedOperationException(
-                "Identity-aware rendering does not support unverified renderer ${renderer::class.qualifiedName} " +
+                "Parameter-aware rendering does not support unverified renderer ${renderer::class.qualifiedName} " +
                     "for ${rendererEntry.key.qualifiedName}"
             )
         }
-        val occurrenceStart = session.occurrences.size
-        val rendered = renderer.render(
-            ast,
-            RenderContext(dialect, this, session),
-            dataClass,
-        )
-        if (rendered == null) session.rollbackTo(occurrenceStart)
-        return rendered
+        val eventStart = session.eventCount
+        return try {
+            renderer.render(
+                ast,
+                RenderContext(dialect, this, session),
+                dataClass,
+            ).also { rendered ->
+                if (rendered == null) session.rollbackToEvent(eventStart)
+            }
+        } catch (failure: Throwable) {
+            try {
+                session.rollbackToEvent(eventStart)
+            } catch (rollbackFailure: Throwable) {
+                failure.addSuppressed(rollbackFailure)
+            }
+            throw failure
+        }
     }
 }

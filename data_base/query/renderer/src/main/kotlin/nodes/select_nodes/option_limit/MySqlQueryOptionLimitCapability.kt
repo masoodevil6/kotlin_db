@@ -15,7 +15,7 @@ class MySqlQueryOptionLimitCapability :
         dataClass:  QueryOptionLimitData?
     ): String? {
 
-        val limitNumber = ast.pageLimit;
+        val limitNumber = ast.metadata.pageLimit;
         if (limitNumber != null) {
             return " ${ctx.dialect._prefixLimit} $limitNumber "
         }

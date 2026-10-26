@@ -65,7 +65,7 @@ val query = QueryRenderSelectBuilder()
                 addCondition {
                     sideSelector { tableColumn("uu", "id") }
                     operationEqual()
-                    sideValue { tableColumn("up", "user_id") }
+                    sideValueColumn { tableColumn("up", "user_id") }
                 }
             }
         }
@@ -76,7 +76,10 @@ val query = QueryRenderSelectBuilder()
                 logicalAnd()
                 sideSelector { tableColumn("uu", "id") }
                 operationEqual()
-                sideValue("id1", 1)
+                sideValueParam {
+                    paramName("id1")
+                    paramValue(1)
+                }
             }
         }
     }
@@ -132,14 +135,34 @@ SELECT item #0 + user_id + LONG
     → QueryRow["user_id"] = Long
 ~~~
 
+Executor نتیجه را پیش از بسته‌شدن `ResultSet` به‌صورت eager می‌سازد. تعداد ستون‌ها و label هر ستون باید با خروجی SELECT و `ColumnAlias` متناظر برابر باشد؛ `ExecutionType` نوع خواندن JDBC را تعیین می‌کند. `QueryRow` با SQL aliasها کلیدگذاری می‌شود و دسترسی typed با `getValue(property)` از `PropertyReference` و alias همان خروجی استفاده می‌کند.
+
 #### INSERT
 
 ~~~kotlin
 val query = QueryRenderInsertBuilder()
     .table { table("user_users") }
-    .addValue { column("name", "Ali") }
-    .addValue { column("family", "Sadegi") }
-    .addValue { column("age", 50) }
+    .addValue {
+        column("name")
+        setValue {
+            paramName("name")
+            paramValue("Ali")
+        }
+    }
+    .addValue {
+        column("family")
+        setValue {
+            paramName("family")
+            paramValue("Sadegi")
+        }
+    }
+    .addValue {
+        column("age")
+        setValue {
+            paramName("age")
+            paramValue(50)
+        }
+    }
 
 queryManager.queryBuilder(query)
     .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
@@ -162,14 +185,23 @@ VALUES (:name, :family, :age)
 ~~~kotlin
 val query = QueryRenderUpdateBuilder()
     .table { table("user_users").alias("uu") }
-    .addValue { column("uu", "name", "--changed--") }
+    .addValue {
+        column("uu", "name")
+        setValue {
+            paramName("uu_name")
+            paramValue("--changed--")
+        }
+    }
     .where {
         conditions {
             addCondition {
                 logicalAnd()
                 sideSelector { tableColumn("uu", "id") }
                 operationEqual()
-                sideValue("id1", 5)
+                sideValueParam {
+                    paramName("id1")
+                    paramValue(5)
+                }
             }
         }
     }
@@ -202,7 +234,10 @@ val query = QueryRenderDeleteBuilder()
                 logicalAnd()
                 sideSelector { tableColumn("", "id") }
                 operationEqual()
-                sideValue("id1", 5)
+                sideValueParam {
+                    paramName("id1")
+                    paramValue(5)
+                }
             }
         }
     }
@@ -267,18 +302,43 @@ UserModelV2::age → column age، SELECT output alias user_age، Kotlin type Int
 UserPhoneModelV2::phone → column phone، SELECT output alias user_phone، Kotlin type String?
 ~~~
 
-در declaration، table(UserModelV2::class) و column(UserModelV2::class, UserModelV2::id) از همین metadata استفاده می‌کنند. annotation alias، alias خروجی SELECT برای property-backed item فراهم می‌کند؛ alias صریح در خود SELECT می‌تواند آن خروجی را override کند.
+در declaration، `model(UserModelV2::class)` منبع را انتخاب می‌کند و `column { tableSelector(...); columnSelector(...) }` ستون property-backed را برمی‌گزیند. Annotation، alias خروجی SELECT و نوع استخراج پیش‌فرض را فراهم می‌کند؛ alias و نوع صریح در خود SELECT می‌توانند آن خروجی‌ها را override کنند. overload قدیمی `column(KClass, property)` همچنان برای سازگاری وجود دارد، اما deprecated است.
 
 #### SELECT
 
 ~~~kotlin
 val query = QueryRenderSelectBuilder()
     .select {
-        addColumn { column(UserModelV2::class, UserModelV2::id) }
-        addColumn { column(UserModelV2::class, UserModelV2::name) }
-        addColumn { column(UserModelV2::class, UserModelV2::family) }
-        addColumn { column(UserModelV2::class, UserModelV2::age) }
-        addColumn { column(UserPhoneModelV2::class, UserPhoneModelV2::phone) }
+        addColumn {
+            column {
+                tableSelector(UserModelV2::class)
+                columnSelector(UserModelV2::id)
+            }
+        }
+        addColumn {
+            column {
+                tableSelector(UserModelV2::class)
+                columnSelector(UserModelV2::name)
+            }
+        }
+        addColumn {
+            column {
+                tableSelector(UserModelV2::class)
+                columnSelector(UserModelV2::family)
+            }
+        }
+        addColumn {
+            column {
+                tableSelector(UserModelV2::class)
+                columnSelector(UserModelV2::age)
+            }
+        }
+        addColumn {
+            column {
+                tableSelector(UserPhoneModelV2::class)
+                columnSelector(UserPhoneModelV2::phone)
+            }
+        }
     }
     .from { model(UserModelV2::class) }
     .joins {
@@ -288,9 +348,15 @@ val query = QueryRenderSelectBuilder()
             condition {
                 logicalOn()
                 addCondition {
-                    sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                    sideSelector {
+                        tableSelector(UserModelV2::class)
+                        columnSelector(UserModelV2::id)
+                    }
                     operationEqual()
-                    sideValue { tableColumn(UserPhoneModelV2::class, UserPhoneModelV2::userId, "up") }
+                    sideValueColumn {
+                        tableSelector(UserPhoneModelV2::class)
+                        columnSelector(UserPhoneModelV2::userId)
+                    }
                 }
             }
         }
@@ -299,9 +365,15 @@ val query = QueryRenderSelectBuilder()
         conditions {
             addCondition {
                 logicalAnd()
-                sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                sideSelector {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
                 operationEqual()
-                sideValue("id1", 1)
+                sideValueParam {
+                    paramName("id1")
+                    paramValue(1)
+                }
             }
         }
     }
@@ -351,9 +423,27 @@ UserPhoneModelV2::phone  user_phone    STRING
 ~~~kotlin
 val query = QueryRenderInsertBuilder()
     .table { table(UserModelV2::class) }
-    .addValue { column(UserModelV2::class, UserModelV2::name, "Ali") }
-    .addValue { column(UserModelV2::class, UserModelV2::family, "Sadegi") }
-    .addValue { column(UserModelV2::class, UserModelV2::age, 50) }
+    .addValue {
+        column(UserModelV2::class, UserModelV2::name)
+        setValue {
+            paramName("name")
+            paramValue("Ali")
+        }
+    }
+    .addValue {
+        column(UserModelV2::class, UserModelV2::family)
+        setValue {
+            paramName("family")
+            paramValue("Sadegi")
+        }
+    }
+    .addValue {
+        column(UserModelV2::class, UserModelV2::age)
+        setValue {
+            paramName("age")
+            paramValue(50)
+        }
+    }
 
 queryManager.queryBuilder(query)
     .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }
@@ -369,14 +459,26 @@ SQL ساختاری: INSERT INTO user_users (name, family, age) VALUES (...). پ�
 ~~~kotlin
 val query = QueryRenderUpdateBuilder()
     .table { table(UserModelV2::class) }
-    .addValue { column(UserModelV2::class, UserModelV2::name, "--changed--") }
+    .addValue {
+        column(UserModelV2::class, UserModelV2::name)
+        setValue {
+            paramName("name")
+            paramValue("--changed--")
+        }
+    }
     .where {
         conditions {
             addCondition {
                 logicalAnd()
-                sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                sideSelector {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
                 operationEqual()
-                sideValue("id1", 5)
+                sideValueParam {
+                    paramName("id1")
+                    paramValue(5)
+                }
             }
         }
     }
@@ -400,9 +502,15 @@ val query = QueryRenderDeleteBuilder()
         conditions {
             addCondition {
                 logicalAnd()
-                sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                sideSelector {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
                 operationEqual()
-                sideValue("id1", 5)
+                sideValueParam {
+                    paramName("id1")
+                    paramValue(5)
+                }
             }
         }
     }
@@ -568,17 +676,61 @@ class UserStatsQueryV3(
     override fun createCte(params: RelationFilters): Cte =
         buildCte {
             select {
-                addColumn { column(UserModelV3::class, UserModelV3::id).alias(UserStatsQueryV3::id) }
-                addColumn { column(UserModelV3::class, UserModelV3::name).alias(UserStatsQueryV3::name) }
-                addColumn { column(UserModelV3::class, UserModelV3::family).alias(UserStatsQueryV3::family) }
-                addColumn { column(UserModelV3::class, UserModelV3::age).alias(UserStatsQueryV3::age) }
+                addColumn {
+                    column {
+                        tableSelector(UserModelV3::class)
+                        columnSelector(UserModelV3::id)
+                    }
+                    alias(UserStatsQueryV3::id)
+                }
+                addColumn {
+                    column {
+                        tableSelector(UserModelV3::class)
+                        columnSelector(UserModelV3::name)
+                    }
+                    alias(UserStatsQueryV3::name)
+                }
+                addColumn {
+                    column {
+                        tableSelector(UserModelV3::class)
+                        columnSelector(UserModelV3::family)
+                    }
+                    alias(UserStatsQueryV3::family)
+                }
+                addColumn {
+                    column {
+                        tableSelector(UserModelV3::class)
+                        columnSelector(UserModelV3::age)
+                    }
+                    alias(UserStatsQueryV3::age)
+                }
             }
             from { model(UserModelV3::class) }
         }
 }
 ~~~
 
-در کد V3، سه declaration مستقیماً `ICteDeclaration<...>` را پیاده می‌کنند و `UserDisplayQueryV3` از کلاس پایهٔ اختیاری `CteDeclaration<...>` استفاده می‌کند. `alias(Query::property)` خروجی SELECT را به property typed متصل می‌کند، `cteOutput(Query::property, qualifier)` آن خروجی را از CTE فعال می‌خواند و `row.getValue(Query::property)` مقدار materialize‌شده را برمی‌گرداند. Getter propertyهای خروجی اجرا نمی‌شوند.
+در سورس فعلی V3، سه declaration مستقیماً `ICteDeclaration<...>` را پیاده می‌کنند و `UserDisplayQueryV3` از کلاس پایهٔ اختیاری `CteDeclaration<...>` استفاده می‌کند. این توضیح، وضعیت فعلی سورس را ثبت می‌کند. `alias(Query::property)` خروجی SELECT را به property typed متصل می‌کند، `cteOutput(Query::property, qualifier)` آن خروجی را از CTE فعال می‌خواند و `row.getValue(Query::property)` مقدار materialize‌شده را برمی‌گرداند؛ resolver getter را برای خواندن metadata اجرا نمی‌کند.
+
+##### قرارداد مقصد قطعی V3.0 برای Query و پارامترها
+
+در معماری مقصد، خود Query با constructor بدون آرگومان ساخته می‌شود و پارامترهای اجرایی روی آن ذخیره نمی‌شوند. `UserStatsQueryV3` که اجرای مستقل نیاز دارد از `CteDeclaration<RelationFilters>()` ارث می‌برد و `createCte(params)` ورودی را صریح می‌گیرد. برای هر row، mapper نمونهٔ تازهٔ همین کلاس را می‌سازد و فقط propertyهای خروجی دارای getter/setter واقعی را مقدار می‌دهد.
+
+نمونهٔ مرجع برای declaration و composition در `A2ExampleSelectV3` پس از migration:
+
+~~~kotlin
+val cte = UserStatsQueryV3()
+val cteParams = UserStatsQueryV3.RelationFilters(userId = 5)
+val withName = "active_user_stats_v3"
+
+val withQuery = QueryRenderSelectBuilder().withs {
+    addWith { with(withName, cte(cteParams)) }
+}
+
+val directResult = cte.execute(queryManager, cteParams)
+~~~
+
+`cte(cteParams)` از operator factory استفاده می‌کند و یک `Cte` می‌سازد؛ overload موجود `with(String, Cte)` composition را انجام می‌دهد. برای FROM، معادل آن `from { cte(declaration(params)) }` است که از overload موجود `cte(Cte)` استفاده می‌کند. هر دو مسیر، params را فقط در همان ساخت/اجرا مصرف می‌کنند؛ `cte` هیچ property پارامتری ندارد. `directResult` همچنان قرارداد legacy یعنی `ExecuteResult<List<QueryRow>>` را دارد.
 
 `QBQuerySelect.name` نام منطقی خروجی است و `QBQuerySelect.alias` نام منتشرشدهٔ SQL است. برای نمونه، در `UserPhoneQueryV3`، `id` نام منطقی دارد ولی با alias `user_id` منتشر می‌شود؛ reference typed هم از metadata همین alias استفاده می‌کند.
 
@@ -731,9 +883,27 @@ queryManager
     .queryBuilder { operations ->
         operations.queryInsert {
             table { table(UserModelV3::class) }
-            addValue { column(UserModelV3::class, UserModelV3::name, "Ali") }
-            addValue { column(UserModelV3::class, UserModelV3::family, "Sadegi") }
-            addValue { column(UserModelV3::class, UserModelV3::age, 50) }
+            addValue {
+                column(UserModelV3::class, UserModelV3::name)
+                setValue {
+                    paramName("name")
+                    paramValue("Ali")
+                }
+            }
+            addValue {
+                column(UserModelV3::class, UserModelV3::family)
+                setValue {
+                    paramName("family")
+                    paramValue("Sadegi")
+                }
+            }
+            addValue {
+                column(UserModelV3::class, UserModelV3::age)
+                setValue {
+                    paramName("age")
+                    paramValue(50)
+                }
+            }
         }
     }
     .sql { (queryText, params) -> println(queryText + "\n" + params) }
@@ -751,14 +921,26 @@ queryManager
     .queryBuilder { operations ->
         operations.queryUpdate {
             table { table(UserModelV3::class) }
-            addValue { column(UserModelV3::class, UserModelV3::name, "--changed--") }
+            addValue {
+                column(UserModelV3::class, UserModelV3::name)
+                setValue {
+                    paramName("name")
+                    paramValue("--changed--")
+                }
+            }
             where {
                 conditions {
                     addCondition {
                         logicalAnd()
-                        sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
+                        sideSelector {
+                            tableSelector(UserModelV3::class)
+                            columnSelector(UserModelV3::id)
+                        }
                         operationEqual()
-                        sideValue("id1", 5)
+                        sideValueParam {
+                            paramName("id1")
+                            paramValue(5)
+                        }
                     }
                 }
             }
@@ -784,9 +966,15 @@ queryManager
                 conditions {
                     addCondition {
                         logicalAnd()
-                        sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
+                        sideSelector {
+                            tableSelector(UserModelV3::class)
+                            columnSelector(UserModelV3::id)
+                        }
                         operationEqual()
-                        sideValue("id1", 5)
+                        sideValueParam {
+                            paramName("id1")
+                            paramValue(5)
+                        }
                     }
                 }
             }
@@ -810,7 +998,11 @@ SQL ساختاری: DELETE uu FROM user_users AS uu WHERE (uu.id = ...). نتی�
 | V2 | Model property؛ خواندن با Model::property | Model | Model | Model |
 | V3 | Query property و SQL alias اعلام‌شده؛ خواندن با `Query::property` | Model V3 | Model V3 | Model V3 |
 
-`SELECT.execute()` همهٔ ردیف‌ها را به‌صورت eager و با نوع `ExecuteResult<List<QueryRow>>` برمی‌گرداند. Consumer متد `first()` نیز برای دریافت اولین ردیف دارد. INSERT/UPDATE/DELETE فقط پس از فعال‌کردن گزینهٔ مربوط به اجرا اجرا می‌شوند.
+`QueryConsumer.execute()` همهٔ ردیف‌ها را به‌صورت eager و با نوع `ExecuteResult<List<QueryRow>>` برمی‌گرداند؛ `first()` فقط ردیف اول را می‌خواند. متد `execute()` در Consumerهای INSERT، UPDATE و DELETE نیز همان لحظه عملیات را اجرا می‌کند و به‌ترتیب `ExecuteResult<Long>` یا `ExecuteResult<Int>` می‌دهد. متد `sql()` فقط SQL و bindingهای آن را می‌سازد و Query را اجرا نمی‌کند.
+
+پارامترهای جدید به‌صورت AST تعریف می‌شوند: شرط‌ها از `sideValueParam { paramName(...); paramValue(...) }`، مقدارهای INSERT/UPDATE از `setValue { ... }` و مجموعه‌ها از `sideValueCollection { addParam { ... } }` استفاده می‌کنند. اگر `paramName` داده نشود، Builder نام تعیین می‌کند؛ نوع SQL از مقدار پارامتر resolve می‌شود. تعریف‌های هم‌نام فقط وقتی مقدار و SQL type یکسان داشته باشند در scope مشترک reuse می‌شوند؛ تفاوت مقدار یا نوع به binding مستقل می‌انجامد. Renderer پارامترمحور، SQL نمایشی با نام‌هایی مانند `:id1` و SQL JDBC با `?` تولید می‌کند و binding هر placeholder را در ترتیب ظهور SQL نگه می‌دارد. Executor این دنباله را از طریق `BoundQuery` به‌صورت positional bind می‌کند؛ بنابراین ترتیب نهایی SQL، از جمله برای SELECT تو‌در‌تو و CTE، مرجع ترتیب binding است. مسیر قدیمی `BuiltQuery` با placeholder نام‌دار نیز برای ورودی‌های legacy حفظ شده است.
+
+پیش از اجرای SELECT، alias و `ExecutionType` تمام خروجی‌ها اعتبارسنجی می‌شوند. هنگام materialization نیز تعداد خروجی‌های ResultSet و label هر ستون با SELECT تطبیق داده می‌شود؛ مقدار هر خانه با `ExecutionType` متناظر خوانده می‌شود و `QueryRow` برای دسترسی رشته‌ای از SQL alias و برای دسترسی typed از `PropertyReference` همان خروجی استفاده می‌کند.
 
 #### مشاهدهٔ Metadata مؤثر SELECT با `details`
 
@@ -832,6 +1024,18 @@ queryManager.queryBuilder(query)
 فراخوانی `details` به‌تنهایی SQL را render نمی‌کند و Query را اجرا نمی‌کند. اگر SELECT سفارشی Provider مربوط به `EffectiveQueryMetadata` را نداشته باشد، `details()` با `IllegalStateException` روشن خطا می‌دهد؛ این محدودیت بر `.sql()` و `.execute()` اثری ندارد. این API متعلق به SELECT است و برای Consumerهای INSERT، UPDATE و DELETE ارائه نشده است.
 
 ### Rules
+
+#### ساختار Metadata در AST فعلی
+
+Metadata منبع، selector ستون پایه و خروجی SELECT در ساختارهای جدا نگه‌داری می‌شوند:
+
+| ساختار | مقادیر | ترتیب Resolve یا کاربرد |
+|---|---|---|
+| `QueryTableAstMetadata` | `nameFromModel`، `nameFromAnnotation`، `nameFromAst`؛ و فیلدهای مشابه `aliasFrom...` | `resolveName()` و `resolveAlias()` هر دو AST ← Annotation ← Model |
+| `QueryColumnsBaseAstMetadata` | `tableAliasFrom...`، `columnNameFrom...`، `columnAliasFromModel` و `columnAliasFromAnnotation` | alias منبع و نام ستون: AST ← Annotation ← Model؛ alias پیش‌فرض ستون: Annotation ← Model |
+| `QueryColumnsAstMetadata` | `ColumnAlias`، `ExecutionType`، `IsExecutionTypeExplicit`، `PropertyReference` و `ColumnMethod` | alias/نوع/هویت خروجی SELECT؛ مستقل از نام و alias منبع |
+
+در منبع derived SELECT، AST نگه‌دارندهٔ `derivedQuery` است و فیلدهای نام منبع خالی می‌مانند؛ alias occurrence جداگانه Resolve می‌شود. `cte(String)` نام CTE را در Metadata منبع می‌گذارد، درحالی‌که `cte(declaration)` هویت relation را در context composition نگه می‌دارد. در API فعلی `execute(DataType)` روی خروجی SELECT (`IQueryColumnsApi`) اعمال می‌شود، نه روی selector ستون پایه؛ مقدار صریح آن فقط `ExecutionType` خروجی را override می‌کند و نوع Property یا Metadata منبع را تغییر نمی‌دهد.
 
 <a id="rules-model"></a>
 #### Model
@@ -950,7 +1154,10 @@ columnDataType = INT
 
 ```kotlin
 addColumn {
-    column(UserModel::class, UserModel::id)
+    column {
+        tableSelector(UserModel::class)
+        columnSelector(UserModel::id)
+    }
     alias("user_id_out")
     execute(DataType.LONG)
 }
@@ -1236,12 +1443,12 @@ Engine همچنین نباید Getter مربوط به `fullName` را برای R
 
 #### ۵. سازگاری و محدوده تغییرات
 
-این سند قرارداد Resolve کردن و اولویت‌بندی Metadata را مشخص می‌کند و به‌خودی‌خود مجوز تغییر سایر بخش‌های معماری Query Builder نیست.
+این سند قرارداد Resolve کردن و اولویت‌بندی Metadata را مشخص می‌کند. محدودیت‌های این بخش فقط دامنهٔ تغییرات Metadata را مشخص می‌کنند؛ مسیر AST-based پارامتر و اجرای positional که جداگانه در بالای سند آمده، بخشی مستقل از این قرارداد است.
 
 مگر اینکه یک مانع فنی مشخص، تغییر دیگری را ضروری کند:
 
-- AST، Executor، `QueryRow`، Materializer و امضاهای API عمومی تغییر نکنند.
-- قرارداد `Cte`، `ICteDeclaration<P>` و مسیر composition آن‌ها حفظ شود؛ نام صریح `with(withName, cte)` فقط نام SQL همان WITH را override کند.
+- برای تغییرات محدود به Metadata، AST، Executor، `QueryRow`، Materializer و امضاهای API عمومیِ نامرتبط تغییر نکنند.
+- در تغییرات محدود به Metadata، قرارداد `Cte` و semantics composition آن تغییر نکند. مهاجرت مستقل و تأییدشدهٔ V3.0 عمداً `ICteDeclaration.params`، constructor پارامترپذیر `CteDeclaration`، `execute(queryManager)` و overload `cte(declaration)` را به ورودی صریح منتقل می‌کند؛ overloadهای `with(Cte)` و `with(withName, Cte)` و معنای نام CTE/alias occurrence حفظ می‌شوند.
 - صرفاً برای یکسان‌سازی ظاهری Metadataهای Model و Query، abstraction عمومی جدیدی اضافه نشود.
 - رفتار فعلی رشته خالی در Annotationهای Model تغییر نکند.
 - وجود `QBQuery.name` نباید نام صریحی را که caller به factory ساخت CTE داده است بازنویسی کند.

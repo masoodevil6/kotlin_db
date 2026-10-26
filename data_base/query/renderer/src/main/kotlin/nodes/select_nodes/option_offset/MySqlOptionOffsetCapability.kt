@@ -15,7 +15,7 @@ class MySqlOptionOffsetCapability :
         dataClass:   QueryOptionOffsetData?
     ): String? {
 
-        val offsetNumber = ast.pageOffset;
+        val offsetNumber = ast.metadata.pageOffset;
         if (offsetNumber != null) {
             return " ${ctx.dialect._prefixOffset} $offsetNumber "
         }

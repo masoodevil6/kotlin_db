@@ -1,5 +1,6 @@
 package gog.my_project.data_base.query.renderer.interfaces
 
+import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
 import gog.my_project.data_base.query.dialect.interfaces.ISqlDialect
 
 interface IRenderContext {
@@ -7,6 +8,6 @@ interface IRenderContext {
     val dialect:   ISqlDialect;
 
     /** Ordered parameter references captured by an opt-in render session. */
-    val parameterOccurrences: MutableList<Any>?
+    val parameterOccurrences: MutableList<IQueryParameterBinding>?
         get() = null
 }

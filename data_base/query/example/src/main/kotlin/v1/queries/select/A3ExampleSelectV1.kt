@@ -14,38 +14,93 @@ import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 class A3ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
-            addColumn { column { tableColumn("uu", "id") }; alias("user_id"); execute(DataType.LONG) }
-            addColumn { column { tableColumn("uu", "name") }; alias("user_name"); execute(DataType.STRING) }
-            addColumn { column { tableColumn("uu", "family") }; alias("user_family"); execute(DataType.STRING) }
-            addColumn { column { tableColumn("uu", "age") }; alias("user_age"); execute(DataType.INT) }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("id")
+                }
+                alias("user_id")
+                execute(DataType.LONG)
+            }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("name")
+                }
+                alias("user_name")
+                execute(DataType.STRING)
+            }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("family")
+                }
+                alias("user_family")
+                execute(DataType.STRING)
+            }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("age")
+                }
+                alias("user_age")
+                execute(DataType.INT)
+            }
         }
-        .from { table("user_users").alias("uu") }
+        .from {
+            table("user_users")
+            alias("uu")
+        }
         .where {
             conditions {
                 addGroup {
                     addCondition {
                         logicalAnd()
-                        sideSelector { tableColumn("uu", "name") }
+                        sideSelector {
+                            tableSelector("uu")
+                            columnSelector("name")
+                        }
                         operationLike()
-                        sideValue("user_name1", "Meh")
+                        sideValueParam{
+                            paramName("user_name1")
+                            paramValue("Meh")
+                        }
                     }
                     addCondition {
                         logicalOr()
-                        sideSelector { tableColumn("uu", "name") }
+                        sideSelector {
+                            tableSelector("uu")
+                            columnSelector("name")
+                        }
                         operationLike()
-                        sideValue("user_name2", "Meh%")
+                        sideValueParam{
+                            paramName("user_name2")
+                            paramValue("Meh%")
+                        }
                     }
                     addCondition {
                         logicalOr()
-                        sideSelector { tableColumn("uu", "name") }
+                        sideSelector {
+                            tableSelector("uu")
+                            columnSelector("name")
+                        }
                         operationLike()
-                        sideValue("user_name3", "%Meh")
+                        sideValueParam{
+                            paramName("user_name3")
+                            paramValue("%Meh")
+                        }
                     }
                     addCondition {
                         logicalOr()
-                        sideSelector { tableColumn("uu", "name") }
+                        sideSelector {
+                            tableSelector("uu")
+                            columnSelector("name")
+                        }
                         operationLike()
-                        sideValue("user_name4", "%Meh%")
+                        sideValueParam{
+                            paramName("user_name4")
+                            paramValue("%Meh%")
+                        }
                     }
                 }
             }

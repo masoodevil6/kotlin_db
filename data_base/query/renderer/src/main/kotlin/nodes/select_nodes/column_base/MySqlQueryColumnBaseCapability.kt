@@ -15,34 +15,17 @@ class MySqlQueryColumnBaseCapability :
         dataClass:  QueryColumnBaseData?
     ): String? {
 
-        val tableAttribute = ast.tableAttribute;
 
-        val tableAlias = ast.tableAlias;
-        val column = ast.column;
-
-        val cteAlias = ast.cteAlias;
-        val select = ast.select;
+        val tableAlias = ast.metadata.resolveTableAlias()
+        val column = ast.metadata.resolveColumnName()
 
         var columnStr = ""
 
-
-        if (tableAttribute != null){
-            columnStr += "${tableAttribute} ";
-
-        }
-        else if (column != null){
-            if (tableAlias != "") {
-                columnStr = " ${tableAlias}.";
+        if (column != null) {
+            if (!tableAlias.isNullOrEmpty()) {
+                columnStr = " $tableAlias."
             }
-            columnStr += "${column} ";
-
-        }
-        else if (select != null){
-            if (cteAlias != "") {
-                columnStr = " ${cteAlias}.";
-            }
-            columnStr += "${select} ";
-
+            columnStr += "$column "
         }
 
         return columnStr;

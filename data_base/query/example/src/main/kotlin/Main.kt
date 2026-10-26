@@ -7,6 +7,7 @@ import gog.my_project.data_base.query.example.managers.IManagerExample
 import gog.my_project.data_base.query.example.managers.ManagerExampleV1
 import gog.my_project.data_base.query.example.managers.ManagerExampleV2
 import gog.my_project.data_base.query.example.managers.ManagerExampleV3
+import gog.my_project.data_base.query.example.managers.ManagerExampleV31
 import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
@@ -33,6 +34,10 @@ fun main(args: Array<String>) {
     val statusRunInsert = configuredRunOption("query.example.run.insert", false)
     val statusRunUpdate = configuredRunOption("query.example.run.update", false)
     val statusRunDelete = configuredRunOption("query.example.run.delete", false)
+    if (selectedVersion == "v3.1") {
+        ManagerExampleV31(statusRunSelect = statusRunSelect).renderExamples(queryManager)
+        return
+    }
     val manager: IManagerExample<*, *, *, *> = when (selectedVersion) {
         "v1" -> ManagerExampleV1(
             statusRunSelect = statusRunSelect,
@@ -52,7 +57,7 @@ fun main(args: Array<String>) {
             statusRunUpdate = statusRunUpdate,
             statusRunDelete = statusRunDelete,
         )
-        else -> throw IllegalArgumentException("Unsupported example version '$selectedVersion'. Choose v1, v2, or v3.")
+        else -> throw IllegalArgumentException("Unsupported example version '$selectedVersion'. Choose v1, v2, v3, or v3.1.")
     }
     manager.readyListExamples()
     manager.renderExamples(queryManager)

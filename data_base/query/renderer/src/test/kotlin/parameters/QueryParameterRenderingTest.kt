@@ -1,13 +1,19 @@
-package gog.my_project.data_base.query.renderer.parameters
+﻿package gog.my_project.data_base.query.renderer.parameters
 
 import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
+import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item.IQueryConditionsAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_group.IQueryConditionsGroupsAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item_collection.IQueryConditionsCollectionAst
+import gog.my_project.data_base.query.ast.interfaces.parameter.IQueryParameterAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_item.QueryConditionsData
+import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_group.QueryConditionsGroupsData
 import gog.my_project.data_base.query.dialect.manager.BaseSqlDialect
 import gog.my_project.data_base.query.renderer.dialects.MariaDbDialect
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
@@ -21,23 +27,24 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private data class InlineFilters(val value: Int)
 
 private class InlineParameterDeclaration(
-    override val params: InlineFilters,
     private val cteName: String,
     private val parameterName: String,
-    private val nested: InlineParameterDeclaration? = null,
+    private val nested: Cte? = null,
 ) : ICteDeclaration<InlineFilters> {
     override fun createCte(params: InlineFilters): Cte = cte(cteName) {
         val sourceAlias = if (nested == null) "leaf_source" else "nested_source"
         if (nested == null) {
             from { table("leaf_table").alias(sourceAlias) }
         } else {
-            from { cte(nested).alias(sourceAlias) }
+            withs { addWith { with(nested) } }
+            from { cte(nested.name).alias(sourceAlias) }
         }
 
         select {
@@ -55,7 +62,10 @@ private class InlineParameterDeclaration(
                 addCondition {
                     sideSelector { tableAttribute("1") }
                     operationEqual()
-                    sideValue(parameterName, params.value)
+                    sideValueParam {
+                        paramName(parameterName)
+                        paramValue(params.value)
+                    }
                 }
             }
         }
@@ -75,7 +85,12 @@ class QueryParameterRenderingTest {
         assertEquals(dialect.render(scalar.ast), scalarResult.displaySql)
         assertTrue(scalarResult.displaySql.contains(":minimum_age"), scalarResult.displaySql)
         assertTrue(scalarResult.jdbcSql.contains("?"), scalarResult.jdbcSql)
-        assertSame(scalar.params.single(), scalarResult.parameterOccurrences.single())
+        assertEquals(scalarResult.displaySql.replace(":minimum_age", "?"), scalarResult.jdbcSql)
+        val scalarParameter = condition(scalar.ast).conditionSideRight as IQueryParameterAst<*>
+        assertEquals(scalarParameter.metadata.name, scalarResult.parameterOccurrences.single().name)
+        assertEquals(scalarParameter.metadata.value, scalarResult.parameterOccurrences.single().value)
+        assertEquals(scalarParameter.metadata.sqlType, scalarResult.parameterOccurrences.single().sqlType)
+        assertIs<QueryParameterBinding>(scalarResult.parameterOccurrences.single())
 
         val collection = QueryRenderSelectBuilder()
         collection.select { addColumn { column { tableAttribute("1") }; alias("value") } }
@@ -85,9 +100,15 @@ class QueryParameterRenderingTest {
                 addCondition {
                     sideSelector { tableColumn("u", "id") }
                     operationIn()
-                    sideValueCollection("user_id") {
-                        addParam(11)
-                        addParam(22)
+                    sideValueCollection {
+                        addParam {
+                            paramName("user_id0")
+                            paramValue(11)
+                        }
+                        addParam {
+                            paramName("user_id1")
+                            paramValue(22)
+                        }
                     }
                 }
             }
@@ -100,8 +121,37 @@ class QueryParameterRenderingTest {
         assertTrue(collectionResult.displaySql.contains(":user_id0"), collectionResult.displaySql)
         assertTrue(collectionResult.displaySql.contains(":user_id1"), collectionResult.displaySql)
         assertTrue(collectionResult.jdbcSql.lowercase().contains("in"), collectionResult.jdbcSql)
+        assertEquals(
+            collectionResult.displaySql.replace(":user_id0", "?").replace(":user_id1", "?"),
+            collectionResult.jdbcSql,
+        )
         assertEquals(listOf(11, 22), collectionResult.parameterOccurrences.map { it.value })
-        collection.params.indices.forEach { assertSame(collection.params[it], collectionResult.parameterOccurrences[it]) }
+        val collectionParameters =
+            (condition(collection.ast).conditionSideRight as IQueryConditionsCollectionAst)
+                .paramsCollection.map { it as IQueryParameterAst<*> }
+        assertEquals(listOf("user_id0", "user_id1"), collectionParameters.map { it.metadata.name })
+        assertEquals(listOf(11, 22), collectionParameters.map { it.metadata.value })
+    }
+
+    @Test
+    fun `missing AST parameter name or SQL type still fails metadata validation`() {
+        val dialect = MySqlDialect()
+
+        val missingNameQuery = simpleQuery("valid_name", 10)
+        val missingNameParameter = condition(missingNameQuery.ast).conditionSideRight as IQueryParameterAst<*>
+        missingNameParameter.metadata.name = null
+        val nameFailure = assertFailsWith<IllegalArgumentException> {
+            QueryParameterRendering.render(missingNameQuery.ast, dialect)
+        }
+        assertTrue(nameFailure.message.orEmpty().contains("Parameter AST metadata name is missing"))
+
+        val missingSqlTypeQuery = simpleQuery("valid_type", 11)
+        val missingSqlTypeParameter = condition(missingSqlTypeQuery.ast).conditionSideRight as IQueryParameterAst<*>
+        missingSqlTypeParameter.metadata.sqlType = null
+        val sqlTypeFailure = assertFailsWith<IllegalArgumentException> {
+            QueryParameterRendering.render(missingSqlTypeQuery.ast, dialect)
+        }
+        assertTrue(sqlTypeFailure.message.orEmpty().contains("Parameter AST metadata SQL type is missing"))
     }
 
     @Test
@@ -115,22 +165,31 @@ class QueryParameterRenderingTest {
                     addCondition {
                         sideSelector { tableColumn("u", "id") }
                         operationEqual()
-                        sideValue("shared", 7)
+                        sideValueParam {
+                            paramName("shared")
+                            paramValue(7)
+                        }
                     }
                 }
             }
         }
 
-        val firstAstParameter = condition(query.ast, 0).conditionSideRight as SqlParameter<*>
-        val secondAstParameter = condition(query.ast, 1).conditionSideRight as SqlParameter<*>
+        val firstAstParameter = condition(query.ast, 0).conditionSideRight as IQueryParameterAst<*>
+        condition(query.ast, 1).conditionSideRight = firstAstParameter
+        val secondAstParameter = condition(query.ast, 1).conditionSideRight as IQueryParameterAst<*>
         assertSame(firstAstParameter, secondAstParameter)
-
         val result = assertIs<IdentityAwareQueryRenderResult>(
             QueryParameterRendering.render(query.ast, MySqlDialect()),
         )
         assertEquals(2, result.parameterOccurrences.size)
-        assertSame(firstAstParameter, result.parameterOccurrences[0])
-        assertSame(firstAstParameter, result.parameterOccurrences[1])
+        assertSame(result.parameterOccurrences[0], result.parameterOccurrences[1])
+        assertEquals(firstAstParameter.metadata.name, result.parameterOccurrences[0].name)
+        assertEquals(firstAstParameter.metadata.value, result.parameterOccurrences[0].value)
+        assertEquals(firstAstParameter.metadata.sqlType, result.parameterOccurrences[0].sqlType)
+        assertIs<QueryParameterBinding>(result.parameterOccurrences[0])
+        assertEquals(listOf("shared", "shared"), result.parameterOccurrences.map { it.name })
+        assertEquals(listOf(7, 7), result.parameterOccurrences.map { it.value })
+        assertEquals(result.displaySql.replace(":shared", "?"), result.jdbcSql)
         assertTrue(result.jdbcSql.contains("?"), result.jdbcSql)
     }
 
@@ -142,23 +201,25 @@ class QueryParameterRenderingTest {
         condition(query.ast, 0).conditionSideRight = integerParameter
         condition(query.ast, 1).conditionSideRight = stringParameter
 
-        val result = assertIs<IdentityAwareQueryRenderResult>(
-            QueryParameterRendering.render(query.ast, MySqlDialect()),
+        val dialect = MySqlDialect()
+        val rendered = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, dialect),
         )
+        val occurrences = rendered.parameterOccurrences
 
-        assertEquals(listOf("shared_value", "shared_value"), result.parameterOccurrences.map { it.name })
-        assertEquals(listOf(11, "22"), result.parameterOccurrences.map { it.value })
-        assertEquals(listOf(Types.INTEGER, Types.VARCHAR), result.parameterOccurrences.map { it.sqlType })
-        assertSame(integerParameter, result.parameterOccurrences[0])
-        assertSame(stringParameter, result.parameterOccurrences[1])
+        assertEquals(listOf("shared_value", "shared_value"), occurrences.map { it.name })
+        assertEquals(listOf(11, "22"), occurrences.map { it.value })
+        assertEquals(listOf(Types.INTEGER, Types.VARCHAR), occurrences.map { it.sqlType })
+        assertSame(integerParameter, occurrences[0])
+        assertSame(stringParameter, occurrences[1])
     }
 
     @Test
-    fun `nested CTE declarations render inline in SQL order for both clause call orders and dialects`() {
+    fun `nested parameterized CTE relations render in dependency-first SQL order for both clause call orders and dialects`() {
         val dialects: List<BaseSqlDialect> = listOf(MySqlDialect(), MariaDbDialect())
         for (dialect in dialects) {
-            val whereFirst = threeLevelInlineQuery(whereBeforeFrom = true)
-            val fromFirst = threeLevelInlineQuery(whereBeforeFrom = false)
+            val whereFirst = threeLevelRelationQuery(whereBeforeFrom = true)
+            val fromFirst = threeLevelRelationQuery(whereBeforeFrom = false)
             val whereFirstResult = assertIs<IdentityAwareQueryRenderResult>(
                 QueryParameterRendering.render(whereFirst.ast, dialect),
             )
@@ -170,21 +231,26 @@ class QueryParameterRenderingTest {
             assertEquals(dialect.render(fromFirst.ast), fromFirstResult.displaySql)
             assertEquals(whereFirstResult.displaySql, fromFirstResult.displaySql)
             assertEquals(whereFirstResult.jdbcSql, fromFirstResult.jdbcSql)
-            assertTrue(whereFirstResult.displaySql.lowercase().contains("from  ("), whereFirstResult.displaySql)
-            assertTrue(whereFirstResult.jdbcSql.lowercase().contains("from  ("), whereFirstResult.jdbcSql)
-            assertFalse(whereFirstResult.displaySql.lowercase().contains("with"), whereFirstResult.displaySql)
+            assertTrue(whereFirstResult.displaySql.lowercase().contains("with"), whereFirstResult.displaySql)
+            val normalizedSql = whereFirstResult.displaySql.replace(Regex("\\s+"), " ").lowercase()
+            assertTrue(normalizedSql.contains("from parent_cte"), whereFirstResult.displaySql)
             assertEquals(listOf(11, 22, 33), whereFirstResult.parameterOccurrences.map { it.value })
             assertEquals(listOf(11, 22, 33), fromFirstResult.parameterOccurrences.map { it.value })
 
-            val whereFirstParent = whereFirst.ast.table!!.derivedQuery!!
-            val whereFirstNested = whereFirstParent.table!!.derivedQuery!!
+            val whereFirstRelations = whereFirst.ast.withs!!.withs
+            val whereFirstNested = whereFirstRelations.first().withBody!!
+            val whereFirstParent = whereFirstRelations.last().withBody!!
             val expectedWhereFirst = listOf(
                 condition(whereFirstNested).conditionSideRight,
                 condition(whereFirstParent).conditionSideRight,
                 condition(whereFirst.ast).conditionSideRight,
             )
             expectedWhereFirst.indices.forEach { index ->
-                assertSame(expectedWhereFirst[index], whereFirstResult.parameterOccurrences[index])
+                val expected = expectedWhereFirst[index] as IQueryParameterAst<*>
+                val actual = whereFirstResult.parameterOccurrences[index]
+                assertEquals(expected.metadata.name, actual.name)
+                assertEquals(expected.metadata.value, actual.value)
+                assertEquals(expected.metadata.sqlType, actual.sqlType)
             }
         }
     }
@@ -206,7 +272,8 @@ class QueryParameterRenderingTest {
             assertEquals(whereFirstResult.displaySql, fromFirstResult.displaySql)
             assertEquals(whereFirstResult.jdbcSql, fromFirstResult.jdbcSql)
             assertTrue(whereFirstResult.displaySql.contains("with"), whereFirstResult.displaySql)
-            assertTrue(whereFirstResult.displaySql.lowercase().contains("from  ("), whereFirstResult.displaySql)
+            val normalizedSql = whereFirstResult.displaySql.replace(Regex("\\s+"), " ").lowercase()
+            assertTrue(normalizedSql.contains("from ("), whereFirstResult.displaySql)
             assertEquals(listOf("cte_value", "derived_value", "outer_value"),
                 whereFirstResult.parameterOccurrences.map { it.name })
             assertEquals(listOf(11, 22, 33), whereFirstResult.parameterOccurrences.map { it.value })
@@ -227,7 +294,10 @@ class QueryParameterRenderingTest {
                     addCondition {
                         sideSelector { tableColumn("d", "owner_id") }
                         operationEqual()
-                        sideValue("join_owner", 11)
+                        sideValueParam {
+                            paramName("join_owner")
+                            paramValue(11)
+                        }
                     }
                 }
             }
@@ -237,7 +307,10 @@ class QueryParameterRenderingTest {
                 addCondition {
                     sideSelector { tableColumn("u", "id") }
                     operationGreaterThan()
-                    sideValue("minimum_id", 22)
+                    sideValueParam {
+                        paramName("minimum_id")
+                        paramValue(22)
+                    }
                 }
             }
         }
@@ -262,7 +335,10 @@ class QueryParameterRenderingTest {
                 addCondition {
                     sideSelector { tableColumn("u", "id") }
                     operationEqual()
-                    sideValue("present", 11)
+                    sideValueParam {
+                        paramName("present")
+                        paramValue(11)
+                    }
                 }
                 addCondition {
                     sideSelector { tableColumn("u", "id") }
@@ -277,7 +353,7 @@ class QueryParameterRenderingTest {
         )
         assertEquals(listOf("present"), result.parameterOccurrences.map { it.name })
         assertEquals(listOf(11), result.parameterOccurrences.map { it.value })
-        assertTrue(result.displaySql.contains(":present"), result.displaySql)
+        assertFalse(result.displaySql.contains(":param1"), result.displaySql)
     }
 
     @Test
@@ -317,8 +393,9 @@ class QueryParameterRenderingTest {
     }
 
     @Test
-    fun `occurrence outside inspected AST is rejected`() {
+    fun `emitted legacy binding mixed with AST binding is rejected at render time`() {
         val query = simpleQuery("defined_parameter", 10)
+        val parameterNode = condition(query.ast).conditionSideRight as IQueryParameterAst<*>
         val injected = SqlParameter("unexpected_parameter", 99, Types.INTEGER)
         val dialect = MySqlDialect()
         dialect._registry.register(
@@ -329,20 +406,29 @@ class QueryParameterRenderingTest {
                     ast: IQueryConditionsAst,
                     ctx: IRenderContext,
                     dataClass: QueryConditionsData?,
-                ): String = " ${(ctx as IParameterRenderContext).renderParameter(injected)} "
+                ): String {
+                    val parameterContext = ctx as IParameterRenderContext
+                    return " ${parameterContext.renderParameter(parameterNode)} " +
+                        " ${parameterContext.renderParameter(injected)} "
+                }
             },
         )
 
-        val failure = assertFailsWith<IllegalArgumentException> {
+        val failure = assertFailsWith<UnsupportedOperationException> {
             QueryParameterRendering.render(query.ast, dialect)
         }
-        assertTrue(failure.message.orEmpty().contains("not defined in the inspected query AST"))
+        assertTrue(failure.message.orEmpty().contains("cannot mix independent parameter AST nodes"))
     }
 
     @Test
     fun `collector mutation without parameter emission fails the occurrence count check`() {
         val query = simpleQuery("defined_parameter", 10)
-        val definedParameter = condition(query.ast).conditionSideRight as SqlParameter<*>
+        val definedNode = condition(query.ast).conditionSideRight as IQueryParameterAst<*>
+        val definedParameter = QueryParameterBinding(
+            name = requireNotNull(definedNode.metadata.name),
+            value = definedNode.metadata.value,
+            sqlType = requireNotNull(definedNode.metadata.sqlType),
+        )
         val dialect = MySqlDialect()
         dialect._registry.register(
             IQueryConditionsAst::class,
@@ -367,6 +453,114 @@ class QueryParameterRenderingTest {
     }
 
     @Test
+    fun `partial parameter occurrence is rolled back when a renderer returns null`() {
+        val query = simpleQuery("rolled_back", 10)
+        val parameter = condition(query.ast).conditionSideRight as IQueryParameterAst<*>
+        val dialect = MySqlDialect()
+        var occurrences: MutableList<IQueryParameterBinding>? = null
+        dialect._registry.register(
+            IQueryConditionsAst::class,
+            object : IAstRenderer<IQueryConditionsAst, QueryConditionsData?>,
+                IParameterOccurrenceAwareRenderer {
+                override fun render(
+                    ast: IQueryConditionsAst,
+                    ctx: IRenderContext,
+                    dataClass: QueryConditionsData?,
+                ): String? {
+                    occurrences = ctx.parameterOccurrences
+                    (ctx as IParameterRenderContext).renderParameter(parameter)
+                    return null
+                }
+            },
+        )
+
+        val rendered = assertIs<LegacyQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, dialect),
+        )
+
+        assertTrue(occurrences!!.isEmpty())
+        assertFalse(requireNotNull(rendered.sql).contains(":rolled_back"), rendered.sql)
+    }
+
+    @Test
+    fun `nested null rollback preserves occurrences emitted before its checkpoint`() {
+        val query = twoConditionQuery()
+        val conditions = query.ast.where!!.condition!!.conditions
+        val first = (conditions[0] as IQueryConditionsAst).conditionSideRight as IQueryParameterAst<*>
+        val secondCondition = conditions[1] as IQueryConditionsAst
+        val second = secondCondition.conditionSideRight as IQueryParameterAst<*>
+        val dialect = MySqlDialect()
+        dialect._registry.register(
+            IQueryConditionsAst::class,
+            object : IAstRenderer<IQueryConditionsAst, QueryConditionsData?>,
+                IParameterOccurrenceAwareRenderer {
+                override fun render(
+                    ast: IQueryConditionsAst,
+                    ctx: IRenderContext,
+                    dataClass: QueryConditionsData?,
+                ): String? {
+                    (ctx as IParameterRenderContext).renderParameter(second)
+                    return null
+                }
+            },
+        )
+        dialect._registry.register(
+            IQueryConditionsGroupsAst::class,
+            object : IAstRenderer<IQueryConditionsGroupsAst, QueryConditionsGroupsData?>,
+                IParameterOccurrenceAwareRenderer {
+                override fun render(
+                    ast: IQueryConditionsGroupsAst,
+                    ctx: IRenderContext,
+                    dataClass: QueryConditionsGroupsData?,
+                ): String {
+                    val firstPlaceholder = (ctx as IParameterRenderContext).renderParameter(first)
+                    assertEquals(null, ctx.registry.render(secondCondition, ctx.dialect, QueryConditionsData()))
+                    assertEquals(first.metadata.name, ctx.parameterOccurrences?.singleOrNull()?.name)
+                    return " ( $firstPlaceholder ) "
+                }
+            },
+        )
+
+        val rendered = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, dialect),
+        )
+
+        assertEquals(listOf(first.metadata.name), rendered.parameterOccurrences.map { it.name })
+        assertEquals(listOf(first.metadata.value), rendered.parameterOccurrences.map { it.value })
+    }
+
+    @Test
+    fun `renderer exception rolls back partial occurrences and rethrows the same failure`() {
+        val query = simpleQuery("exception_value", 10)
+        val parameter = condition(query.ast).conditionSideRight as IQueryParameterAst<*>
+        val dialect = MySqlDialect()
+        val expected = IllegalStateException("renderer failed after emitting a parameter")
+        var occurrences: MutableList<IQueryParameterBinding>? = null
+        dialect._registry.register(
+            IQueryConditionsAst::class,
+            object : IAstRenderer<IQueryConditionsAst, QueryConditionsData?>,
+                IParameterOccurrenceAwareRenderer {
+                override fun render(
+                    ast: IQueryConditionsAst,
+                    ctx: IRenderContext,
+                    dataClass: QueryConditionsData?,
+                ): String? {
+                    occurrences = ctx.parameterOccurrences
+                    (ctx as IParameterRenderContext).renderParameter(parameter)
+                    throw expected
+                }
+            },
+        )
+
+        val actual = assertFailsWith<IllegalStateException> {
+            QueryParameterRendering.render(query.ast, dialect)
+        }
+
+        assertSame(expected, actual)
+        assertTrue(occurrences!!.isEmpty())
+    }
+
+    @Test
     fun `render sessions do not leak occurrences between queries`() {
         val dialect = MySqlDialect()
         val first = simpleQuery("first_value", 11)
@@ -381,7 +575,11 @@ class QueryParameterRenderingTest {
 
         assertEquals(listOf(11), firstResult.parameterOccurrences.map { it.value })
         assertEquals(listOf(22), secondResult.parameterOccurrences.map { it.value })
-        assertSame(second.params.single(), secondResult.parameterOccurrences.single())
+        val secondParameter = condition(second.ast).conditionSideRight as IQueryParameterAst<*>
+        assertEquals(secondParameter.metadata.name, secondResult.parameterOccurrences.single().name)
+        assertEquals(secondParameter.metadata.value, secondResult.parameterOccurrences.single().value)
+        assertIs<QueryParameterBinding>(secondResult.parameterOccurrences.single())
+        assertNotSame(firstResult.parameterOccurrences.single(), secondResult.parameterOccurrences.single())
         assertFalse(secondResult.displaySql.contains(":first_value"), secondResult.displaySql)
     }
 
@@ -394,7 +592,10 @@ class QueryParameterRenderingTest {
                     addCondition {
                         sideSelector { tableColumn("u", "id") }
                         operationEqual()
-                        sideValue(name, value)
+                        sideValueParam {
+                            paramName(name)
+                            paramValue(value)
+                        }
                     }
                 }
             }
@@ -409,21 +610,24 @@ class QueryParameterRenderingTest {
                     addCondition {
                         sideSelector { tableColumn("u", "id") }
                         operationEqual()
-                        sideValue("initial_$index", index)
+                        sideValueParam {
+                            paramName("initial_$index")
+                            paramValue(index)
+                        }
                     }
                 }
             }
         }
     }
 
-    private fun threeLevelInlineQuery(whereBeforeFrom: Boolean): QueryRenderSelectBuilder {
-        val leaf = InlineParameterDeclaration(InlineFilters(11), "leaf_cte", "shared_value")
+    private fun threeLevelRelationQuery(whereBeforeFrom: Boolean): QueryRenderSelectBuilder {
+        val leaf = InlineParameterDeclaration("leaf_cte", "shared_value")
+            .createCte(InlineFilters(11))
         val parent = InlineParameterDeclaration(
-            InlineFilters(22),
             "parent_cte",
             "shared_value",
             nested = leaf,
-        )
+        ).createCte(InlineFilters(22))
         val query = QueryRenderSelectBuilder()
         val whereBlock: QueryRenderSelectBuilder.() -> Unit = {
             where {
@@ -431,13 +635,17 @@ class QueryParameterRenderingTest {
                     addCondition {
                         sideSelector { tableAttribute("1") }
                         operationEqual()
-                        sideValue("shared_value", 33)
+                        sideValueParam {
+                            paramName("shared_value")
+                            paramValue(33)
+                        }
                     }
                 }
             }
         }
         val fromBlock: QueryRenderSelectBuilder.() -> Unit = {
-            from { cte(parent).alias("outer_source") }
+            withs { addWith { with(parent) } }
+            from { cte(parent.name).alias("outer_source") }
         }
         if (whereBeforeFrom) {
             query.whereBlock()
@@ -466,7 +674,10 @@ class QueryParameterRenderingTest {
                             addCondition {
                                 sideSelector { tableAttribute("1") }
                                 operationEqual()
-                                sideValue("cte_value", 11)
+                                sideValueParam {
+                                    paramName("cte_value")
+                                    paramValue(11)
+                                }
                             }
                         }
                     }
@@ -480,7 +691,10 @@ class QueryParameterRenderingTest {
                     addCondition {
                         sideSelector { tableAttribute("1") }
                         operationEqual()
-                        sideValue("outer_value", 33)
+                        sideValueParam {
+                            paramName("outer_value")
+                            paramValue(33)
+                        }
                     }
                 }
             }
@@ -500,7 +714,10 @@ class QueryParameterRenderingTest {
                             addCondition {
                                 sideSelector { tableAttribute("1") }
                                 operationEqual()
-                                sideValue("derived_value", 22)
+                                sideValueParam {
+                                    paramName("derived_value")
+                                    paramValue(22)
+                                }
                             }
                         }
                     }
@@ -522,6 +739,33 @@ class QueryParameterRenderingTest {
             }
         }
         return query
+    }
+
+    @Test
+    fun `concat renders its column parts with column renderer data`() {
+        val query = QueryRenderSelectBuilder()
+        query.from { table("user_users").alias("uu") }
+        query.select {
+            addColumn {
+                methodConcat {
+                    column {
+                        tableSelector("uu")
+                        columnSelector("name")
+                    }
+                    string("-")
+                    column {
+                        tableSelector("uu")
+                        columnSelector("family")
+                    }
+                }
+                alias("user_full_name")
+            }
+        }
+
+        val sql = requireNotNull(MySqlDialect().render(query.ast))
+
+        assertTrue(sql.contains("concat( uu.name , '-',  uu.family )"), sql)
+        assertTrue(sql.contains("As user_full_name"), sql)
     }
 
     private fun condition(ast: IQueryRenderSelectAst, index: Int = 0): IQueryConditionsAst =

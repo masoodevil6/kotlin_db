@@ -24,10 +24,10 @@ class TypedSelectOutputContractTest {
         }
 
         val outputs = query.ast.select!!.columns
-        assertEquals("user_id", outputs[0].ColumnAlias)
-        assertEquals(DataType.LONG, outputs[0].ExecutionType)
-        assertEquals("user_name", outputs[1].ColumnAlias)
-        assertEquals(DataType.STRING, outputs[1].ExecutionType)
+        assertEquals("user_id", outputs[0].metadata.ColumnAlias)
+        assertEquals(DataType.LONG, outputs[0].metadata.ExecutionType)
+        assertEquals("user_name", outputs[1].metadata.ColumnAlias)
+        assertEquals(DataType.STRING, outputs[1].metadata.ExecutionType)
     }
 
     @Test
@@ -39,6 +39,6 @@ class TypedSelectOutputContractTest {
             }
         }
 
-        assertNull(query.ast.select!!.columns.single().ExecutionType)
+        assertNull(query.ast.select!!.columns.single().metadata.ExecutionType)
     }
 }

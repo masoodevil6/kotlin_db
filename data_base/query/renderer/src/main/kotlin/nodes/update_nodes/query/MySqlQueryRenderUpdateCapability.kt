@@ -33,15 +33,11 @@ class MySqlQueryRenderUpdateCapability : IQueryRenderUpdateCapability, IParamete
                         ctx.dialect ,
                         QueryColumnUpdateData()
                     );
-                val columnTag =
-                    ctx.registry.render(
-                        column ,
-                        ctx.dialect ,
-                        QueryColumnUpdateData(_getTag = true)
-                    );
-
                 if (columnName != null){
-                    val placeholder = column.parameter?.let(ctx::renderParameter) ?: ":$columnTag"
+                    val parameter = checkNotNull(column.parameterAst) {
+                        "UPDATE column '$columnName' is missing required parameterAst metadata"
+                    }
+                    val placeholder = ctx.renderParameter(parameter)
                     columnsStr +=  " $columnName = $placeholder ";
 
                     if (index < columnsList.size - 1){

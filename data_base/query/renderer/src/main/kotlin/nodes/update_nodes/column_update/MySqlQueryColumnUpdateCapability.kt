@@ -13,15 +13,19 @@ class MySqlQueryColumnUpdateCapability : IQueryColumnUpdateCapability, IParamete
         ctx: IRenderContext,
         dataClass: QueryColumnUpdateData?
     ): String? {
-        val columnAlias = ast.columnAlias;
-        val columnName = ast.columnName;
-        val columnTag = ast.columnTag;
+        val columnAlias = ast.metadata.columnAlias;
+        val columnName = ast.metadata.columnName;
+        val columnTag = ast.metadata.columnTag;
 
         if (dataClass?._getTag == true){
             return columnTag;
         }
 
-        return  "${columnAlias}.${columnName}";
+        return if (columnAlias == "") {
+            columnName
+        } else {
+            "${columnAlias}.${columnName}"
+        }
     }
 
 }

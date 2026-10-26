@@ -1,27 +1,41 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.column
 
-import gog.my_project.data_base.core.managers.models.IModelBase
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column.IQueryColumnsApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
-import gog.my_project.data_base.query.api.interfaces.relations.Cte
+import gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.concat.IQueryColumnMethodConcatApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.avg.IQueryColumnMethodAvgApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.count.IQueryColumnMethodCountApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.max.IQueryColumnMethodMaxApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.min.IQueryColumnMethodMinApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.column_method.sum.IQueryColumnMethodSumApi
 import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.tools.enums.SqlMethodColumn
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.ast.schema.select_schema.column.QueryColumnsAst
+import gog.my_project.data_base.query.ast.schema.select_schema.column_method.concat.QueryColumnMethodConcatAst
+import gog.my_project.data_base.query.ast.schema.select_schema.column_method.avg.QueryColumnMethodAvgAst
+import gog.my_project.data_base.query.ast.schema.select_schema.column_method.count.QueryColumnMethodCountAst
+import gog.my_project.data_base.query.ast.schema.select_schema.column_method.max.QueryColumnMethodMaxAst
+import gog.my_project.data_base.query.ast.schema.select_schema.column_method.min.QueryColumnMethodMinAst
+import gog.my_project.data_base.query.ast.schema.select_schema.column_method.sum.QueryColumnMethodSumAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
 import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
-import gog.my_project.data_base.query.meta_data.models.ModelMetadataResolver
-import gog.my_project.data_base.query.meta_data.queries.QueryMetadataResolver
+import gog.my_project.data_base.query.builder.ast.select_builder.column_method.concat.QueryColumnMethodConcatBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.column_method.avg.QueryColumnMethodAvgBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.column_method.count.QueryColumnMethodCountBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.column_method.max.QueryColumnMethodMaxBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.column_method.min.QueryColumnMethodMinBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.column_method.sum.QueryColumnMethodSumBuilder
+import gog.my_project.data_base.query.builder.metadata.models.ModelMetadataResolver
+import gog.my_project.data_base.query.builder.metadata.queries.QueryMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
 
 class QueryColumnsBuilder internal constructor(
-    override var params: MutableList<SqlParameter<*>>,
     override var ast: IQueryColumnsAst,
     private val modelAliasContext: ModelTableAliasContext,
     private val querySourceContext: CteSourceContext,
@@ -30,48 +44,82 @@ class QueryColumnsBuilder internal constructor(
 ) : IQueryColumnsApi {
 
     constructor(
-        params: MutableList<SqlParameter<*>> = mutableListOf(),
         ast: IQueryColumnsAst = QueryColumnsAst(),
-    ) : this(params, ast, ModelTableAliasContext(), CteSourceContext(), null, null)
+    ) : this( ast, ModelTableAliasContext(), CteSourceContext(), null, null)
 
     private var explicitAliasWasSet = false
     internal val hasExplicitAlias: Boolean get() = explicitAliasWasSet
-    private var explicitExecutionTypeWasSet = ast.ExecutionType != null
+    private var explicitExecutionTypeWasSet = ast.metadata.ExecutionType != null
 
 
     /* ==============================================================
     structure [method]
     ============================================================== */
 
-    override fun method(method: SqlMethodColumn): IQueryColumnsApi {
-        this.ast.ColumnMethod = method.value;
-        clearPropertyReferenceAndInferredExecutionType()
-        return this;
+    override fun methodCount(blockMethodCount: IQueryColumnMethodCountApi.() -> Unit): IQueryColumnsApi {
+        this.ast.metadata.ColumnMethod = SqlMethodColumn.Count.value;
+        val columnMethodCountAst = QueryColumnMethodCountAst();
+        QueryColumnMethodCountBuilder(
+            columnMethodCountAst,
+        ).apply(blockMethodCount)
+        this.ast.ColumnMethodCount =columnMethodCountAst
+        return this
     }
 
-    override fun sum(): IQueryColumnsApi {
-        return this.method(SqlMethodColumn.Sum);
+    override fun methodConcat(blockMethodConcat: IQueryColumnMethodConcatApi.() -> Unit): IQueryColumnsApi {
+        this.ast.metadata.ColumnMethod = SqlMethodColumn.Concat.value;
+        val columnMethodConcatAst = QueryColumnMethodConcatAst();
+        QueryColumnMethodConcatBuilder(
+            columnMethodConcatAst,
+        ).apply(blockMethodConcat)
+        this.ast.ColumnMethodConcat =columnMethodConcatAst
+        return this
     }
 
-    override fun count(): IQueryColumnsApi {
-        return this.method(SqlMethodColumn.Count);
+    override fun methodMin(blockMethodMin: IQueryColumnMethodMinApi.() -> Unit): IQueryColumnsApi {
+        this.ast.metadata.ColumnMethod = SqlMethodColumn.Min.value;
+        val columnMethodMinAst = QueryColumnMethodMinAst();
+        QueryColumnMethodMinBuilder(
+            columnMethodMinAst,
+        ).apply(blockMethodMin)
+        this.ast.ColumnMethodMin =columnMethodMinAst
+        return this
     }
 
-    override fun avg(): IQueryColumnsApi {
-        return this.method(SqlMethodColumn.Avg);
+    override fun methodMax(blockMethodMax: IQueryColumnMethodMaxApi.() -> Unit): IQueryColumnsApi {
+        this.ast.metadata.ColumnMethod = SqlMethodColumn.Max.value;
+        val columnMethodMaxAst = QueryColumnMethodMaxAst();
+        QueryColumnMethodMaxBuilder(
+            columnMethodMaxAst,
+        ).apply(blockMethodMax)
+        this.ast.ColumnMethodMax =columnMethodMaxAst
+        return this
     }
 
-    override fun min(): IQueryColumnsApi {
-        return this.method(SqlMethodColumn.Min);
+    override fun methodSum(blockMethodSum: IQueryColumnMethodSumApi.() -> Unit): IQueryColumnsApi {
+        this.ast.metadata.ColumnMethod = SqlMethodColumn.Sum.value
+        val columnMethodSumAst = QueryColumnMethodSumAst()
+        QueryColumnMethodSumBuilder(columnMethodSumAst).apply(blockMethodSum)
+        this.ast.ColumnMethodSum = columnMethodSumAst
+        return this
     }
 
-    override fun max(): IQueryColumnsApi {
-        return this.method(SqlMethodColumn.Max);
+    override fun methodAvg(blockMethodAvg: IQueryColumnMethodAvgApi.() -> Unit): IQueryColumnsApi {
+        this.ast.metadata.ColumnMethod = SqlMethodColumn.Avg.value
+        val columnMethodAvgAst = QueryColumnMethodAvgAst()
+        QueryColumnMethodAvgBuilder(columnMethodAvgAst).apply(blockMethodAvg)
+        this.ast.ColumnMethodAvg = columnMethodAvgAst
+        return this
     }
+
+
+    /* ==============================================================
+    structure [Execute]
+    ============================================================== */
 
     override fun execute(dataType: DataType): IQueryColumnsApi {
-        ast.ExecutionType = dataType
-        ast.IsExecutionTypeExplicit = true
+        ast.metadata.ExecutionType = dataType
+        ast.metadata.IsExecutionTypeExplicit = true
         explicitExecutionTypeWasSet = true
         return this
     }
@@ -83,53 +131,65 @@ class QueryColumnsBuilder internal constructor(
     ============================================================== */
 
     override fun column(blockColumn: IQueryColumnsBaseApi.() -> Unit): IQueryColumnsApi {
-        var ast = QueryColumnsBaseAst();
-        QueryColumnsBaseBuilder(
-            params,
-            ast
-        ).apply(blockColumn);
-        this.ast.Column = ast;
-        this.ast.PropertyReference = null
+        val baseAst = QueryColumnsBaseAst()
+        val baseBuilder = QueryColumnsBaseBuilder(
+            baseAst,
+            modelAliasContext,
+            querySourceContext,
+        ).apply(blockColumn)
+        this.ast.Column = baseAst
+        this.ast.metadata.PropertyReference = null
+        this.ast.metadata.logicalOutputName = null
         clearInferredExecutionType()
         if (!explicitAliasWasSet) {
-            this.ast.ColumnAlias = null
+            this.ast.metadata.ColumnAlias = null
+        }
+
+        val modelProperty = baseBuilder.modelProperty
+        val cteProperty = baseBuilder.cteProperty
+        when {
+            modelProperty != null -> {
+                val isPropertyBacked = ast.metadata.ColumnMethod == null
+                ast.metadata.PropertyReference = modelProperty.takeIf { isPropertyBacked }
+                ast.metadata.logicalOutputName = modelProperty.takeIf { isPropertyBacked }
+                    ?.let(QueryMetadataResolver::queryLogicalOutputName)
+                if (isPropertyBacked) {
+                    inferExecutionType(modelProperty)
+                } else {
+                    clearInferredExecutionType()
+                }
+                if (!explicitAliasWasSet) {
+                    ast.metadata.ColumnAlias = ModelMetadataResolver.columnAlias(modelProperty)
+                }
+            }
+            cteProperty != null -> {
+                val isPropertyBacked = ast.metadata.ColumnMethod == null
+                ast.metadata.PropertyReference = cteProperty.takeIf { isPropertyBacked }
+                ast.metadata.logicalOutputName = cteProperty.takeIf { isPropertyBacked }
+                    ?.let(QueryMetadataResolver::queryLogicalOutputName)
+                if (isPropertyBacked) {
+                    inferExecutionType(cteProperty)
+                } else {
+                    clearInferredExecutionType()
+                }
+                if (!explicitAliasWasSet) {
+                    ast.metadata.ColumnAlias = QueryMetadataResolver.queryPublishedAlias(cteProperty)
+                        .takeIf { isPropertyBacked }
+                }
+            }
         }
         return this;
     }
 
-    override fun <T : IModelBase, R> column(
-        table: KClass<T>,
-        property: KProperty1<T, R>,
-    ): IQueryColumnsApi {
-        ModelMetadataResolver.requireTable(table)
-        ModelMetadataResolver.requireColumn(table, property)
 
-        val baseAst = QueryColumnsBaseAst().apply {
-            tableAlias = ModelMetadataResolver.tableAlias(table)
-            column = ModelMetadataResolver.columnName(table, property)
-        }
-        modelAliasContext.registerColumn(table, baseAst)
-        this.ast.Column = baseAst
 
-        if (ast.ColumnMethod == null) {
-            ast.PropertyReference = property
-            inferExecutionType(property)
-        } else {
-            ast.PropertyReference = null
-            clearInferredExecutionType()
-        }
 
-        if (!explicitAliasWasSet) {
-            this.ast.ColumnAlias = ModelMetadataResolver.columnAlias(property)
-        }
-        return this
-    }
 
     private fun inferExecutionType(property: KProperty1<*, *>) {
         if (explicitExecutionTypeWasSet) return
 
         val propertyType = property.returnType.classifier as? KClass<*>
-        ast.ExecutionType = when (propertyType) {
+        ast.metadata.ExecutionType = when (propertyType) {
             Int::class -> DataType.INT
             Long::class -> DataType.LONG
             String::class -> DataType.STRING
@@ -139,64 +199,8 @@ class QueryColumnsBuilder internal constructor(
 
     private fun clearInferredExecutionType() {
         if (!explicitExecutionTypeWasSet) {
-            ast.ExecutionType = null
+            ast.metadata.ExecutionType = null
         }
-    }
-
-    private fun clearPropertyReferenceAndInferredExecutionType() {
-        ast.PropertyReference = null
-        clearInferredExecutionType()
-    }
-
-    override fun cteOutput(
-        relation: Cte,
-        sqlOutputName: String,
-    ): IQueryColumnsApi {
-        clearPropertyReferenceAndInferredExecutionType()
-        val (alias, sqlName) = querySourceContext.resolve(relation, sqlOutputName)
-        ast.Column = QueryColumnsBaseAst().apply {
-            cteAlias = alias
-            select = sqlName
-        }
-        if (!explicitAliasWasSet) {
-            ast.ColumnAlias = null
-        }
-        return this
-    }
-
-    override fun <T, R> cteOutput(
-        property: KProperty1<T, R>,
-        qualifier: String?,
-    ): IQueryColumnsApi {
-        val isPropertyBacked = ast.ColumnMethod == null
-        val ownerType = typedPropertyOwner(property)
-        val canonicalRelationName = if (ICteDeclaration::class.java.isAssignableFrom(ownerType.java)) {
-            null
-        } else {
-            resolveTypedRelationProperty(property)
-        }
-        val (resolvedRelationName, sqlOutputName) = querySourceContext.validateTypedOutput(
-            ownerType,
-            property,
-            canonicalRelationName,
-        )
-        require(qualifier == null || qualifier.isNotBlank()) {
-            "Relation source qualifier must not be blank"
-        }
-        ast.Column = QueryColumnsBaseAst().apply {
-            cteAlias = qualifier ?: resolvedRelationName
-            select = sqlOutputName
-        }
-        ast.PropertyReference = property.takeIf { isPropertyBacked }
-        if (isPropertyBacked) {
-            inferExecutionType(property)
-        } else {
-            clearInferredExecutionType()
-        }
-        if (!explicitAliasWasSet) {
-            ast.ColumnAlias = QueryMetadataResolver.queryPublishedAlias(property).takeIf { isPropertyBacked }
-        }
-        return this
     }
 
 
@@ -206,7 +210,8 @@ class QueryColumnsBuilder internal constructor(
     ============================================================== */
     override fun alias(alias: String): IQueryColumnsApi {
         explicitAliasWasSet = true
-        this.ast.ColumnAlias = alias.takeIf { it.isNotEmpty() };
+        this.ast.metadata.ColumnAlias = alias.takeIf { it.isNotEmpty() }
+        this.ast.metadata.IsColumnAliasExplicit = true
         return this;
     }
 
@@ -234,9 +239,11 @@ class QueryColumnsBuilder internal constructor(
             else -> throw IllegalArgumentException("Typed CTE alias requires an ICteDeclaration property owner")
         }
         explicitAliasWasSet = true
-        ast.ColumnAlias = outputName
-        val isPropertyBacked = ast.ColumnMethod == null
-        ast.PropertyReference = property.takeIf { isPropertyBacked }
+        ast.metadata.ColumnAlias = outputName
+        ast.metadata.IsColumnAliasExplicit = true
+        val isPropertyBacked = ast.metadata.ColumnMethod == null
+        ast.metadata.PropertyReference = property
+        ast.metadata.logicalOutputName = QueryMetadataResolver.queryLogicalOutputName(property)
         if (isPropertyBacked) {
             inferExecutionType(property)
         } else {

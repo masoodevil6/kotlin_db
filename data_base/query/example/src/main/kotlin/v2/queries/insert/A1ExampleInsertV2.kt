@@ -10,15 +10,35 @@ import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleInsertV2 : IExampleV2<IQueryRenderInsertApi> {
     override fun query(): IQueryRenderInsertApi = QueryRenderInsertBuilder()
-        .table { table(UserModelV2::class) }
-        .addValue { column(UserModelV2::class, UserModelV2::name, "Ali") }
-        .addValue { column(UserModelV2::class, UserModelV2::family, "Sadegi") }
-        .addValue { column(UserModelV2::class, UserModelV2::age, 50) }
+        .table {
+            table(UserModelV2::class)
+        }
+        .addValue {
+            column(UserModelV2::class, UserModelV2::name)
+            setValue {
+                paramName("name")
+                paramValue("Ali")
+            }
+        }
+        .addValue {
+            column(UserModelV2::class, UserModelV2::family)
+            setValue {
+                paramName("family")
+                paramValue("Sadegi")
+            }
+        }
+        .addValue {
+            column(UserModelV2::class, UserModelV2::age)
+            setValue {
+                paramName("age")
+                paramValue(50)
+            }
+        }
 
     override fun execute(queryManager: IQueryBuilderExecutor) {
         queryManager
             .queryBuilder(query())
-            .sql { builtQuery -> println("V2-Insert query: ${builtQuery.query}; params: ${builtQuery.params}") }
+            .sql { builtQuery -> println("\n=============================================\nV2-Insert query: ${builtQuery.query}; params: ${builtQuery.params}") }
             .execute()
             .success { generatedKey ->
                 println("V2-Insert: $generatedKey")

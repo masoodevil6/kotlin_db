@@ -47,9 +47,13 @@ bin/
 ### From Chat GPT ###
 /build/
 /.gradle/
+.gradle-user-home-test/
+/PATH_TO_WRITABLE_CACHE/
+**/build/
 local.properties
 *.iml
 .idea/
 .gradle-home/
 .g/
 *.hprof
+

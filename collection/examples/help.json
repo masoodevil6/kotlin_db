@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "module": {
+    "title": "نمونه‌های Collection",
+    "description": "اجرای انتخابی مثال‌های add، forEach، filter، size، map، firstOrNull، toList و get برای Collection.",
+    "icon": "code",
+    "actions": [
+      {
+        "title": "اجرای مثال‌ها",
+        "description": "هر مثال را می‌توانید جداگانه برای اجرا فعال یا غیرفعال کنید.",
+        "task": "run",
+        "id": "run",
+        "parameters": [
+          {
+            "id": "run-add",
+            "label": "اجرای مثال add",
+            "description": "افزودن UserModelها به Collection.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.add"
+            }
+          },
+          {
+            "id": "run-foreach",
+            "label": "اجرای مثال forEach",
+            "description": "پیمایش عناصر و چاپ اطلاعات هر کاربر.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.foreach"
+            }
+          },
+          {
+            "id": "run-filter",
+            "label": "اجرای مثال filter",
+            "description": "فیلتر کاربران بر اساس نام.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.filter"
+            }
+          },
+          {
+            "id": "run-size",
+            "label": "اجرای مثال size",
+            "description": "نمایش تعداد عناصر Collection.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.size"
+            }
+          },
+          {
+            "id": "run-map",
+            "label": "اجرای مثال map",
+            "description": "تبدیل Collection از UserModel به نام کاربران.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.map"
+            }
+          },
+          {
+            "id": "run-first-or-null",
+            "label": "اجرای مثال firstOrNull",
+            "description": "پیدا کردن اولین کاربر منطبق بر شرط نام.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.first-or-null"
+            }
+          },
+          {
+            "id": "run-to-list",
+            "label": "اجرای مثال toList",
+            "description": "تبدیل Collection از UserModel به List.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.to-list"
+            }
+          },
+          {
+            "id": "run-get",
+            "label": "اجرای مثال get",
+            "description": "دسترسی اندیسی به نام اولین کاربر.",
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "secret": false,
+            "binding": {
+              "type": "gradle-project-property",
+              "name": "collection.example.run.get"
+            }
+          }
+        ]
+      },
+      {
+        "title": "ساخت ماژول",
+        "description": "اجرای Gradle build برای Collection Examples.",
+        "task": "build",
+        "id": "build"
+      }
+    ],
+    "projectDependencies": [
+      {
+        "path": ":collection:core",
+        "scope": "implementation"
+      }
+    ]
+  },
+  "tests": []
+}

@@ -3,7 +3,6 @@ package gog.my_project.data_base.query.executer.manager
 import gog.my_project.data_base.core.annotations.models.QBColumn
 import gog.my_project.data_base.core.annotations.models.QBTable
 import gog.my_project.data_base.core.managers.models.IModelBase
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
@@ -11,6 +10,9 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
+import gog.my_project.data_base.query.renderer.parameters.IdentityAwareQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.QueryParameterRendering
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte as buildCteDefinition
 import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
@@ -51,7 +53,7 @@ private class UnsupportedMaterializedUser : IModelBase {
     val enabled: Boolean = false
 }
 
-private class MaterializedRelation(override val params: Unit) : ICteDeclaration<Unit> {
+private class MaterializedRelation : ICteDeclaration<Unit> {
     val fullName: String?
         get() = error("Typed Relation output getter must not be invoked")
 
@@ -292,7 +294,7 @@ class SmartQueryResultTest {
         val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
         val query = QueryRenderSelectBuilder().select {
             addColumn {
-                column(MaterializedUser::class, MaterializedUser::id)
+                column { tableSelector(MaterializedUser::class); columnSelector(MaterializedUser::class, MaterializedUser::id) }
                 alias("userOutId")
                 execute(DataType.LONG)
             }
@@ -318,10 +320,10 @@ class SmartQueryResultTest {
             rows = listOf(listOf(null)),
         )
         val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
-        val declaration = MaterializedRelation(Unit)
-        val query = QueryRenderSelectBuilder().from { cte(declaration) }.select {
+        val relation = MaterializedRelation().createCte(Unit)
+        val query = QueryRenderSelectBuilder().from { cte(relation) }.select {
             addColumn {
-                cteOutput(MaterializedRelation::fullName)
+                column { tableSelector(MaterializedRelation::class); columnSelector(MaterializedRelation::fullName) }
                 alias("display_name")
             }
         }
@@ -346,14 +348,14 @@ class SmartQueryResultTest {
         val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
         val query = QueryRenderSelectBuilder().select {
             addColumn {
-                column(MaterializedUser::class, MaterializedUser::id)
+                column { tableSelector(MaterializedUser::class); columnSelector(MaterializedUser::class, MaterializedUser::id) }
                 alias("userId")
             }
             addColumn {
-                column(MaterializedUser::class, MaterializedUser::id)
+                column { tableSelector(MaterializedUser::class); columnSelector(MaterializedUser::class, MaterializedUser::id) }
                 alias("userOutId")
             }
-            addColumn { column(MaterializedUser::class, MaterializedUser::name) }
+            addColumn { column { tableSelector(MaterializedUser::class); columnSelector(MaterializedUser::class, MaterializedUser::name) } }
         }
         var row: QueryRow? = null
 
@@ -378,8 +380,8 @@ class SmartQueryResultTest {
         )
         val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
         val query = QueryRenderSelectBuilder().select {
-            addColumn { column(MaterializedUser::class, MaterializedUser::id) }
-            addColumn { column(OtherMaterializedUser::class, OtherMaterializedUser::id) }
+            addColumn { column { tableSelector(MaterializedUser::class); columnSelector(MaterializedUser::class, MaterializedUser::id) } }
+            addColumn { column { tableSelector(OtherMaterializedUser::class); columnSelector(OtherMaterializedUser::class, OtherMaterializedUser::id) } }
         }
         var row: QueryRow? = null
 
@@ -396,7 +398,7 @@ class SmartQueryResultTest {
         val script = resultSet(listOf("enabled"), listOf(listOf(true)))
         val executor = RecordingExecutor(ExecuteResult.Success(script.resultSet))
         val unsupportedQuery = QueryRenderSelectBuilder().select {
-            addColumn { column(UnsupportedMaterializedUser::class, UnsupportedMaterializedUser::enabled) }
+            addColumn { column { tableSelector(UnsupportedMaterializedUser::class); columnSelector(UnsupportedMaterializedUser::class, UnsupportedMaterializedUser::enabled) } }
         }
         var unsupportedResult: ExecuteResult<QueryRow>? = null
 
@@ -408,7 +410,7 @@ class SmartQueryResultTest {
 
         val explicitlyTypedQuery = QueryRenderSelectBuilder().select {
             addColumn {
-                column(UnsupportedMaterializedUser::class, UnsupportedMaterializedUser::enabled)
+                column { tableSelector(UnsupportedMaterializedUser::class); columnSelector(UnsupportedMaterializedUser::class, UnsupportedMaterializedUser::enabled) }
                 execute(DataType.INT)
             }
         }
@@ -420,8 +422,7 @@ class SmartQueryResultTest {
 
     @Test
     fun `sql renders without substituting or changing bound parameters`() {
-        val parameters = mutableListOf<SqlParameter<*>>()
-        val query = QueryRenderSelectBuilder(params = parameters).select {
+        val query = QueryRenderSelectBuilder().select {
             addColumn {
                 column { tableColumn("u", "id") }
                 alias("user_id")
@@ -433,33 +434,62 @@ class SmartQueryResultTest {
                     logicalAnd()
                     sideSelector { tableColumn("u", "id") }
                     operationEqual()
-                    sideValue("id", 931)
+                    sideValueParam {
+                        paramName("id")
+                        paramValue(931)
+                    }
                 }
             }
         }
 
         val rendered = QueryBuilderExecutor().sql(query)
+        val parameterResult = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, MySqlDialect()),
+        )
 
         assertTrue(rendered.contains("user_id"))
         assertTrue(rendered.contains(":id"))
         assertFalse(rendered.contains("931"))
         assertFalse(rendered.contains("LONG"))
-        assertSame(parameters, query.params)
-        assertEquals(931, query.params.single().value)
+        assertEquals(rendered, parameterResult.displaySql)
+        assertEquals(listOf("id"), parameterResult.parameterOccurrences.map { it.name })
+        assertEquals(listOf(931), parameterResult.parameterOccurrences.map { it.value })
     }
 
     @Test
-    fun `first and get preserve bound parameter identity and ordering`() {
-        val firstParameter = SqlParameter.of("first", 11)
-        val secondParameter = SqlParameter.of("second", 22)
-        val parameters = mutableListOf<SqlParameter<*>>(firstParameter, secondParameter)
-        val query = QueryRenderSelectBuilder(params = parameters).select {
+    fun `first and get leave AST parameter definitions available in SQL order`() {
+        val query = QueryRenderSelectBuilder().select {
                 addColumn {
                     column { tableColumn("users", "id") }
                     alias("user_id")
                     execute(DataType.LONG)
                 }
+        }.where {
+            conditions {
+                addCondition {
+                    sideSelector { tableColumn("users", "id") }
+                    operationGreaterThan()
+                    sideValueParam {
+                        paramName("first")
+                        paramValue(11)
+                    }
+                }
+                addCondition {
+                    logicalAnd()
+                    sideSelector { tableColumn("users", "id") }
+                    operationLessThen()
+                    sideValueParam {
+                        paramName("second")
+                        paramValue(22)
+                    }
+                }
+            }
         }
+        val beforeExecution = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, MySqlDialect()),
+        )
+        assertEquals(listOf("first", "second"), beforeExecution.parameterOccurrences.map { it.name })
+        assertEquals(listOf(11, 22), beforeExecution.parameterOccurrences.map { it.value })
 
         RecordingExecutor(
             ExecuteResult.Success(resultSet(listOf("user_id"), listOf(listOf(11))).resultSet),
@@ -468,10 +498,13 @@ class SmartQueryResultTest {
             ExecuteResult.Success(resultSet(listOf("user_id"), listOf(listOf(11))).resultSet),
         ).get(query, blockExecute = { assertIs<ExecuteResult.Success<List<QueryRow>>>(it) })
 
-        assertSame(parameters, query.params)
-        assertEquals(listOf("first", "second"), query.params.map { it.name })
-        assertSame(firstParameter, query.params[0])
-        assertSame(secondParameter, query.params[1])
+        val afterExecution = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, MySqlDialect()),
+        )
+        assertEquals(beforeExecution.displaySql, afterExecution.displaySql)
+        assertEquals(beforeExecution.jdbcSql, afterExecution.jdbcSql)
+        assertEquals(listOf("first", "second"), afterExecution.parameterOccurrences.map { it.name })
+        assertEquals(listOf(11, 22), afterExecution.parameterOccurrences.map { it.value })
     }
 
     private data class Output(val alias: String?, val dataType: DataType?)

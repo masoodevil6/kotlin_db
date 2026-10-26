@@ -6,14 +6,16 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.fromCteInternal
 import gog.my_project.data_base.query.builder.ast.select_builder.cte.cte
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
+import gog.my_project.data_base.query.renderer.parameters.IdentityAwareQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.QueryParameterRendering
 import java.sql.DriverManager
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 
@@ -75,16 +77,20 @@ class QueryRelationMySqlIntegrationTest {
                             logicalAnd()
                             sideSelector { tableColumn("source_row", "id") }
                             operationGreaterThanOrEqual()
-                            sideValue("a", 5L)
+                            sideValueParam {
+                                paramName("a")
+                                paramValue(5L)
+                            }
                         }
                     }
                 }
             }
             val relationB = cte("live_relation_b") {
-                fromCteInternal(relationA)
+                withs { addWith { with(relationA) } }
+                from { cte(relationA.name) }
                 select {
                     addColumn {
-                        cteOutput(relationA, "a_id")
+                        column { cteColumn(relationA, "a_id") }
                         alias("b_id")
                     }
                 }
@@ -94,16 +100,20 @@ class QueryRelationMySqlIntegrationTest {
                             logicalAnd()
                             sideSelector { tableColumn(relationA.name, "a_id") }
                             operationLessThenOrEqual()
-                            sideValue("b", 20L)
+                            sideValueParam {
+                                paramName("b")
+                                paramValue(20L)
+                            }
                         }
                     }
                 }
             }
             val relationC = cte("live_relation_c") {
-                fromCteInternal(relationB)
+                withs { addWith { with(relationB) } }
+                from { cte(relationB.name) }
                 select {
                     addColumn {
-                        cteOutput(relationB, "b_id")
+                        column { cteColumn(relationB, "b_id") }
                         alias("id")
                     }
                 }
@@ -113,28 +123,38 @@ class QueryRelationMySqlIntegrationTest {
                             logicalAnd()
                             sideSelector { tableColumn(relationB.name, "b_id") }
                             operationEqual()
-                            sideValue("c", 10L)
+                            sideValueParam {
+                                paramName("c")
+                                paramValue(10L)
+                            }
                         }
                     }
                 }
             }
             val query = QueryRenderSelectBuilder()
-                .fromCteInternal(relationC, "consumer_c")
-                .select { addColumn { cteOutput(relationC, "id") } }
+                .withs { addWith { with(relationC) } }
+                .from { cte(relationC.name).alias("consumer_c") }
+                .select { addColumn { column { cteColumn(relationC, "id") } } }
                 .where {
                     conditions {
                         addCondition {
                             logicalAnd()
                             sideSelector { tableColumn("consumer_c", "id") }
                             operationLessThen()
-                            sideValue("d", 11L)
+                            sideValueParam {
+                                paramName("d")
+                                paramValue(11L)
+                            }
                         }
                     }
                 }
 
-            assertEquals(listOf("a", "b", "c", "d"), query.params.map { it.name })
-            assertEquals(listOf(5L, 20L, 10L, 11L), query.params.map { it.value })
-            val sql = MySqlDialect().render(query.ast)!!
+            val rendered = assertIs<IdentityAwareQueryRenderResult>(
+                QueryParameterRendering.render(query.ast, MySqlDialect()),
+            )
+            assertEquals(listOf("a", "b", "c", "d"), rendered.parameterOccurrences.map { it.name })
+            assertEquals(listOf(5L, 20L, 10L, 11L), rendered.parameterOccurrences.map { it.value })
+            val sql = rendered.displaySql
             assertFalse(Regex("\\b(null|undefined)\\b", RegexOption.IGNORE_CASE).containsMatchIn(sql), sql)
             val cteA = sql.indexOf("live_relation_a AS", ignoreCase = true)
             val cteB = sql.indexOf("live_relation_b AS", cteA + 1, ignoreCase = true)
@@ -143,7 +163,7 @@ class QueryRelationMySqlIntegrationTest {
             assertTrue(Regex("FROM\\s+live_relation_c\\s+As\\s+consumer_c", RegexOption.IGNORE_CASE).containsMatchIn(sql), sql)
             println("PLAN3_GENERATED_SQL=$sql")
 
-            val builtQuery = BuiltQuery(sql, query.params.toMutableList())
+            val builtQuery = BuiltQuery(sql, rendered.parameterOccurrences.toMutableList())
             var callbackCount = 0
             val rows = mutableListOf<Long>()
             QueryExecute().executeSelect(builtQuery) { result ->

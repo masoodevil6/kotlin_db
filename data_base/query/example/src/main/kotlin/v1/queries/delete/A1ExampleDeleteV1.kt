@@ -9,14 +9,22 @@ import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleDeleteV1 : IExampleV1<IQueryRenderDeleteApi> {
     override fun query(): IQueryRenderDeleteApi = QueryRenderDeleteBuilder()
-        .table { table("user_users") }
+        .table {
+            table("user_users")
+        }
         .where {
             conditions {
                 addCondition {
                     logicalAnd()
-                    sideSelector { tableColumn("", "id") }
+                    sideSelector {
+                        tableSelector("")
+                        columnSelector("id")
+                    }
                     operationEqual()
-                    sideValue("id1", 5)
+                    sideValueParam {
+                        paramName("id1")
+                        paramValue(5)
+                    }
                 }
             }
         }

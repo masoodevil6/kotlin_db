@@ -19,7 +19,7 @@ class MySqlQueryJoinsItemCapability :
         dataClass:   QueryJoinsItemData?
     ): String? {
 
-        var joinType: String? = ast.joinType;
+        var joinType: String? = ast.metadata.joinType;
         var joinTable: IQueryTableAst = ast.joinTable;
         var joinCondition: IQueryConditionsGroupsAst = ast.joinConditions;
 

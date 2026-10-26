@@ -14,19 +14,56 @@ import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 class A5ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
-            addColumn { column { tableColumn("uu", "id") }; alias("user_id"); execute(DataType.LONG) }
-            addColumn { column { tableColumn("uu", "name") }; alias("user_name"); execute(DataType.STRING) }
-            addColumn { column { tableColumn("uu", "family") }; alias("user_family"); execute(DataType.STRING) }
-            addColumn { column { tableColumn("uu", "age") }; alias("user_age"); execute(DataType.INT) }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("id")
+                }
+                alias("user_id")
+                execute(DataType.LONG)
+            }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("name")
+                }
+                alias("user_name")
+                execute(DataType.STRING)
+            }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("family")
+                }
+                alias("user_family")
+                execute(DataType.STRING)
+            }
+            addColumn {
+                column {
+                    tableSelector("uu")
+                    columnSelector("age")
+                }
+                alias("user_age")
+                execute(DataType.INT)
+            }
         }
-        .from { table("user_users").alias("uu") }
+        .from {
+            table("user_users")
+            alias("uu")
+        }
         .where {
             conditions {
                 addCondition {
                     logicalAnd()
-                    sideSelector { tableColumn("uu", "age") }
+                    sideSelector {
+                        tableSelector("uu")
+                        columnSelector("age")
+                    }
                     operationIs()
-                    sideValue("user_age", 1)
+                    sideValueParam {
+                        paramName("user_age")
+                        paramValue(1)
+                    }
                 }
             }
         }

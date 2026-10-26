@@ -14,33 +14,52 @@ import gog.my_project.data_base.query.executer.result.get
 class A1ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
+            distinct()
             addColumn {
-                column { tableColumn("uu", "id") };
+                column {
+                    tableSelector("uu")
+                    columnSelector("id")
+                };
                 alias("user_id");
                 execute(DataType.LONG)
             }
             addColumn {
-                column { tableColumn("uu", "name") };
+                column {
+                    tableSelector("uu")
+                    columnSelector("name")
+                };
                 alias("user_name");
                 execute(DataType.STRING)
             }
             addColumn {
-                column { tableColumn("uu", "family") };
+                column {
+                    tableSelector("uu")
+                    columnSelector("family")
+                };
                 alias("user_family");
                 execute(DataType.STRING)
             }
             addColumn {
-                column { tableColumn("uu", "age") };
+                column {
+                    tableSelector("uu")
+                    columnSelector("age")
+                };
                 alias("user_age");
                 execute(DataType.INT)
             }
             addColumn {
-                column { tableColumn("up", "phone") };
+                column {
+                    tableSelector("up")
+                    columnSelector("phone")
+                };
                 alias("user_phone");
                 execute(DataType.STRING)
             }
         }
-        .from { table("user_users").alias("uu") }
+        .from {
+            table("user_users")
+            alias("uu")
+        }
         .joins {
             addJoin {
                 innerJoin()
@@ -48,9 +67,15 @@ class A1ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
                 condition {
                     logicalOn()
                     addCondition {
-                        sideSelector { tableColumn("uu", "id") }
+                        sideSelector {
+                            tableSelector("uu")
+                            columnSelector("id")
+                        }
                         operationEqual()
-                        sideValue { tableColumn("up", "user_id") }
+                        sideValueColumn {
+                            tableSelector("up")
+                            columnSelector("user_id")
+                        }
                     }
                 }
             }
@@ -59,9 +84,14 @@ class A1ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
             conditions {
                 addCondition {
                     logicalAnd()
-                    sideSelector { tableColumn("uu", "id") }
+                    sideSelector {
+                        tableSelector("uu"); columnSelector("id")
+                    }
                     operationEqual()
-                    sideValue("id1", 1)
+                    sideValueParam{
+                        paramName("id1")
+                        paramValue(1)
+                    }
                 }
             }
         }

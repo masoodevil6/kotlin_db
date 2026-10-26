@@ -1,12 +1,12 @@
-package gog.my_project.data_base.query.ast.schema.update_schema.column_update
+﻿package gog.my_project.data_base.query.ast.schema.update_schema.column_update
+import gog.my_project.data_base.query.ast.metadata.update.column_update.QueryColumnUpdateAstMetadata
 
 import gog.my_project.data_base.query.ast.interfaces.update_interface.column_update.IQueryColumnUpdateAst
-import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.query.ast.interfaces.parameter.IQueryParameterAst
 
-class QueryColumnUpdateAst : IQueryColumnUpdateAst {
+class QueryColumnUpdateAst(
+    override var metadata: QueryColumnUpdateAstMetadata = QueryColumnUpdateAstMetadata()
+) : IQueryColumnUpdateAst {
 
-    override var columnAlias: String? = null
-    override var columnName:  String? = null
-    override var columnTag:   String? = null
-    override var parameter:   SqlParameter<*>? = null
+    override var parameterAst: IQueryParameterAst<*>? = null
 }

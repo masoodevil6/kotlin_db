@@ -4,13 +4,13 @@ import java.sql.PreparedStatement
 import java.sql.SQLException
 
 data class SqlParameter<T>(
-    val name: String,
-    val value: T?,
-    val sqlType: Int
-) {
+    override val name: String,
+    override val value: T?,
+    override val sqlType: Int
+) : IQueryParameterBinding {
 
     @Throws(SQLException::class)
-    fun bind(ps: PreparedStatement, index: Int) {
+    override fun bind(ps: PreparedStatement, index: Int) {
         if (value == null) {
             ps.setNull(index, sqlType)
         } else {

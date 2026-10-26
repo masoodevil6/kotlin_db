@@ -2,7 +2,6 @@ package gog.my_project.data_base.query.executer.interfaces
 
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
@@ -12,7 +11,11 @@ import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base.query.ast.interfaces.IQueryAst
+import gog.my_project.data_base.query.ast.interfaces.delete_interface.query_render_delete.IQueryRenderDeleteAst
+import gog.my_project.data_base.query.ast.interfaces.insert_interface.query_render_insert.IQueryRenderInsertAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column.IQueryColumnsAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
+import gog.my_project.data_base.query.ast.interfaces.update_interface.query_render_update.IQueryRenderUpdateAst
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.builder.ast.select_builder.requireResultOutputAliases
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
@@ -23,6 +26,9 @@ import gog.my_project.data_base.query.executer.result.InsertQueryConsumer
 import gog.my_project.data_base.query.executer.result.UpdateQueryConsumer
 import gog.my_project.data_base.query.executer.result.DeleteQueryConsumer
 import gog.my_project.data_base.query.renderer.manager.DialectSelector
+import gog.my_project.data_base.query.renderer.parameters.LegacyQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.IdentityAwareQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.QueryParameterRendering
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
 
@@ -76,8 +82,8 @@ interface IQueryBuilderExecutor  {
             queryBuilder.requireResultOutputAliases()
             val columns = queryBuilder.ast.select!!.columns
             columns.forEachIndexed { index, column ->
-                require(column.ExecutionType != null) {
-                    "SELECT output at index $index ('${column.ColumnAlias}') must declare an execution DataType"
+                require(column.metadata.ExecutionType != null) {
+                    "SELECT output at index $index ('${column.metadata.ColumnAlias}') must declare an execution DataType"
                 }
             }
             columns
@@ -126,8 +132,8 @@ interface IQueryBuilderExecutor  {
             queryBuilder.requireResultOutputAliases()
             val columns = queryBuilder.ast.select!!.columns
             columns.forEachIndexed { index, column ->
-                require(column.ExecutionType != null) {
-                    "SELECT output at index $index ('${column.ColumnAlias}') must declare an execution DataType"
+                require(column.metadata.ExecutionType != null) {
+                    "SELECT output at index $index ('${column.metadata.ColumnAlias}') must declare an execution DataType"
                 }
             }
             columns
@@ -195,7 +201,7 @@ interface IQueryBuilderExecutor  {
     )
 
 
-    fun <Ast: IQueryAst,Api :IQueryApi<Ast> > executeOut(
+    fun <Ast: IQueryAst<*>,Api :IQueryApi<Ast> > executeOut(
         queryBuilder:    Api,
         blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null,
         blockResult:     (db: IQueryExecute ,builtQuery: BuiltQuery) -> Unit
@@ -204,26 +210,47 @@ interface IQueryBuilderExecutor  {
 
         val dialect  = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
 
-        val query = dialect.render(queryBuilder.ast) ?: throw IllegalStateException("rendered sql is null")
-
-        val params: MutableList<SqlParameter<*>> = queryBuilder.params;
+        val builtQuery = renderBuiltQuery(queryBuilder.ast, dialect)
 
         if (blockQueryInfo != null){
-            val paramsMap: MutableMap<String , Any?> = params.associate { it -> it.name to it.value }.toMutableMap()
-            val queryString = StringTools.formatSql(query)
+            val paramsMap = linkedMapOf<String, Any?>()
+            builtQuery.params.forEach { parameter -> paramsMap.putIfAbsent(parameter.name, parameter.value) }
+            val queryString = StringTools.formatSql(requireNotNull(builtQuery.query) { "rendered sql is null" })
 
             blockQueryInfo(queryString , paramsMap)
         }
 
-        blockResult(db , BuiltQuery(query, params));
+        blockResult(db, builtQuery);
     }
 
 }
 
-private fun <Ast : IQueryAst> renderSql(queryBuilder: IQueryApi<Ast>): String {
+private fun <Ast : IQueryAst<*>> renderSql(queryBuilder: IQueryApi<Ast>): String {
     val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
     return dialect.render(queryBuilder.ast)
         ?: throw IllegalStateException("rendered sql is null")
+}
+
+private fun renderBuiltQuery(ast: IQueryAst<*>, dialect: gog.my_project.data_base.query.dialect.interfaces.ISqlDialect): BuiltQuery {
+    val result = when (ast) {
+        is IQueryRenderSelectAst -> QueryParameterRendering.render(ast, dialect)
+        is IQueryRenderInsertAst, is IQueryRenderUpdateAst, is IQueryRenderDeleteAst ->
+            QueryParameterRendering.renderDml(ast, dialect)
+        else -> return BuiltQuery(
+            requireNotNull(dialect.render(ast)) { "rendered sql is null" },
+            mutableListOf(),
+        )
+    }
+    return when (result) {
+        is LegacyQueryRenderResult -> BuiltQuery(
+            requireNotNull(result.sql) { "rendered sql is null" },
+            mutableListOf(),
+        )
+        is IdentityAwareQueryRenderResult -> BuiltQuery(
+            result.displaySql,
+            result.parameterOccurrences.toMutableList(),
+        )
+    }
 }
 
 private fun materializeQueryRow(
@@ -237,13 +264,13 @@ private fun materializeQueryRow(
 
     val values = (1..metadata.columnCount).map { index ->
         val outputColumn = outputColumns[index - 1]
-        val expectedAlias = requireNotNull(outputColumn.ColumnAlias)
+        val expectedAlias = requireNotNull(outputColumn.metadata.ColumnAlias)
         val label = metadata.getColumnLabel(index)
         check(label.isNotBlank()) { "ResultSet column $index has no SQL output alias" }
         check(label == expectedAlias) {
             "ResultSet column label '$label' does not match SELECT output alias '$expectedAlias'"
         }
-        val value = when (requireNotNull(outputColumn.ExecutionType)) {
+        val value = when (requireNotNull(outputColumn.metadata.ExecutionType)) {
             DataType.LONG -> resultSet.getLong(index).let { if (resultSet.wasNull()) null else it }
             DataType.INT -> resultSet.getInt(index).let { if (resultSet.wasNull()) null else it }
             DataType.STRING -> resultSet.getString(index)
@@ -251,8 +278,8 @@ private fun materializeQueryRow(
         label to value
     }
     val propertyAliases = outputColumns.mapNotNull { outputColumn ->
-        val property = outputColumn.PropertyReference ?: return@mapNotNull null
-        property to requireNotNull(outputColumn.ColumnAlias)
+        val property = outputColumn.metadata.PropertyReference ?: return@mapNotNull null
+        property to requireNotNull(outputColumn.metadata.ColumnAlias)
     }
     return QueryRow(values, propertyAliases)
 }

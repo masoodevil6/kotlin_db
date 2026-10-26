@@ -14,19 +14,47 @@ import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 class A5ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
-            addColumn { column(UserModelV2::class, UserModelV2::id) }
-            addColumn { column(UserModelV2::class, UserModelV2::name) }
-            addColumn { column(UserModelV2::class, UserModelV2::family) }
-            addColumn { column(UserModelV2::class, UserModelV2::age) }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::name)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::family)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::age)
+                }
+            }
         }
-        .from { model(UserModelV2::class) }
+        .from {
+            model(UserModelV2::class)
+        }
         .where {
             conditions {
                 addCondition {
                     logicalAnd()
-                    sideSelector { tableColumn(UserModelV2::class, UserModelV2::age, "uu") }
+                    sideSelector {
+                        tableSelector(UserModelV2::class)
+                        columnSelector(UserModelV2::age)
+                    }
                     operationIs()
-                    sideValue("user_age", 1)
+                    sideValueParam {
+                        paramName("user_age")
+                        paramValue(1)
+                    }
                 }
             }
         }

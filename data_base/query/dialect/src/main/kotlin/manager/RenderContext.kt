@@ -1,10 +1,12 @@
-package gog.my_project.data_base.query.renderer.manager
+﻿package gog.my_project.data_base.query.renderer.manager
 
 import gog.my_project.data_base.query.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
 import gog.my_project.data_base.query.renderer.interfaces.IParameterRenderContext
 import gog.my_project.data_base.query.renderer.interfaces.IRendererRegistry
 import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
+import gog.my_project.data_base.query.ast.interfaces.parameter.IQueryParameterAst
 
 class RenderContext(
     override val dialect: ISqlDialect,
@@ -13,7 +15,7 @@ class RenderContext(
 {
     private var renderSession: ParameterRenderSession? = null
 
-    override val parameterOccurrences: MutableList<Any>?
+    override val parameterOccurrences: MutableList<IQueryParameterBinding>?
         get() = renderSession?.occurrences
 
     internal constructor(
@@ -26,7 +28,7 @@ class RenderContext(
 
     override fun renderParameter(parameter: SqlParameter<*>): String {
         val session = renderSession
-        session?.record(parameter)
+        session?.recordLegacyBinding(parameter)
         return if (session?.placeholderMode == ParameterPlaceholderMode.Positional) {
             "?"
         } else {
@@ -34,10 +36,28 @@ class RenderContext(
         }
     }
 
+    override fun renderParameter(parameter: IQueryParameterAst<*>): String {
+        val session = renderSession
+            ?: return ":${requireNotNull(parameter.metadata.name) { "Parameter AST metadata name is missing" }}"
+        val binding = session.parameterFor(parameter)
+        session.recordAst(binding)
+        return if (session.placeholderMode == ParameterPlaceholderMode.Positional) "?" else ":${binding.name}"
+    }
+
+    override fun renderLegacyPlaceholder(name: String): String {
+        val session = renderSession
+        session?.recordLegacyPlaceholder()
+        return if (session?.placeholderMode == ParameterPlaceholderMode.Positional) "?" else ":$name"
+    }
+
+    override fun recordLegacyParameterSource() {
+        renderSession?.recordLegacyPlaceholder()
+    }
+
     override fun rollbackParameterOccurrences(startIndex: Int) {
         val session = renderSession
         if (session != null) {
-            session.rollbackTo(startIndex)
+            session.rollbackToOccurrenceCount(startIndex)
             return
         }
 

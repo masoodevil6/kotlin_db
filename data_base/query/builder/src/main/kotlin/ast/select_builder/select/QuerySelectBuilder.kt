@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.select
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column.IQueryColumnsApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.select.IQuerySelectApi
 import gog.my_project.data_base.query.ast.interfaces.select_interface.select.IQuerySelectAst
@@ -11,7 +10,6 @@ import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceCo
 import gog.my_project.data_base.query.builder.ast.select_builder.column.QueryColumnsBuilder
 
 class QuerySelectBuilder internal constructor(
-    override var params: MutableList<SqlParameter<*>>,
     override var ast: IQuerySelectAst,
     private val modelAliasContext: ModelTableAliasContext,
     private val querySourceContext: CteSourceContext,
@@ -20,9 +18,14 @@ class QuerySelectBuilder internal constructor(
 ) : IQuerySelectApi {
 
     constructor(
-        params: MutableList<SqlParameter<*>> = mutableListOf(),
         ast: IQuerySelectAst = QuerySelectAst(),
-    ) : this(params, ast, ModelTableAliasContext(), CteSourceContext(), null, null)
+    ) : this(ast, ModelTableAliasContext(), CteSourceContext(), null, null)
+
+
+    override fun distinct(isDistinct: Boolean): IQuerySelectApi {
+        this.ast.metadata.isDistinct = isDistinct;
+        return this;
+    }
 
     override fun addColumn(
         blockColumn: IQueryColumnsApi.() -> Unit
@@ -30,7 +33,6 @@ class QuerySelectBuilder internal constructor(
     {
         val ast = QueryColumnsAst();
         val builder = QueryColumnsBuilder(
-            params,
             ast,
             modelAliasContext,
             querySourceContext,

@@ -22,6 +22,9 @@
             <option value="$PROJECT_DIR$" />
             <option value="$PROJECT_DIR$/app" />
             <option value="$PROJECT_DIR$/buildSrc" />
+            <option value="$PROJECT_DIR$/collection" />
+            <option value="$PROJECT_DIR$/collection/core" />
+            <option value="$PROJECT_DIR$/collection/examples" />
             <option value="$PROJECT_DIR$/data_base" />
             <option value="$PROJECT_DIR$/data_base/core" />
             <option value="$PROJECT_DIR$/data_base/manager" />
@@ -42,6 +45,7 @@
             <option value="$PROJECT_DIR$/data_base/query/api" />
             <option value="$PROJECT_DIR$/data_base/query/ast" />
             <option value="$PROJECT_DIR$/data_base/query/builder" />
+            <option value="$PROJECT_DIR$/data_base/query/cte" />
             <option value="$PROJECT_DIR$/data_base/query/dialect" />
             <option value="$PROJECT_DIR$/data_base/query/example" />
             <option value="$PROJECT_DIR$/data_base/query/executor" />

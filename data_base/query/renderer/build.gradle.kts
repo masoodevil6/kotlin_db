@@ -15,7 +15,6 @@ dependencies {
     implementation(project(":data_base:query:api"))
     implementation(project(":data_base:query:ast"))
     implementation(project(":data_base:query:dialect"))
-    implementation(project(":data_base:query:meta_data"))
 
     testImplementation(kotlin("test"))
     testImplementation(project(":data_base:query:builder"))

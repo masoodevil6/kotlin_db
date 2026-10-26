@@ -18,9 +18,12 @@ class MySqlQuerySelectCapability :
 
         val columnsList = ast.columns;
         if (columnsList.size > 0) {
+            val isDistinct = ast.metadata.isDistinct;
+
             var selects = "";
             if (dataClass?._withPrefix == true){
                 selects = " ${ctx.dialect._prefixSelect} "
+                selects += " ${if (isDistinct) ctx.dialect._prefixDistinct else ""} "
             }
             for ((index, column) in columnsList.withIndex()){
                 val itemColumn =

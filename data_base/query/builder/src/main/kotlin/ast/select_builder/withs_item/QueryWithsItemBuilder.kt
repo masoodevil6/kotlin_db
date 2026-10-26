@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.withs_item
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs_item.IQueryWithsItemApi
 import gog.my_project.data_base.query.api.interfaces.cte.ICte
@@ -10,19 +9,18 @@ import gog.my_project.data_base.query.ast.schema.select_schema.query_render_sele
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs_item.QueryWithsItemAst
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.BuiltCteComposition
 
 class QueryWithsItemBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryWithsItemAst = QueryWithsItemAst(),
 ): IQueryWithsItemApi {
 
     private var parameterBindingScope = ParameterBindingScope()
 
     internal constructor(
-        params: MutableList<SqlParameter<*>>,
         ast: IQueryWithsItemAst,
         parameterBindingScope: ParameterBindingScope,
-    ) : this(params, ast) {
+    ) : this(ast) {
         this.parameterBindingScope = parameterBindingScope
     }
 
@@ -44,8 +42,10 @@ class QueryWithsItemBuilder(
 
         selectedCte = null
         selectedCteNameOverride = null
-        this.ast.withName = withName
-        this.ast.withBody = withClass.cteQuery(params).ast
+        this.ast.metadata.withName = withName
+        this.ast.metadata.cteRuntimeName = null
+        this.ast.metadata.logicalQueryName = null
+        this.ast.withBody = withClass.cteQuery().ast
 
         return this;
     }
@@ -54,7 +54,9 @@ class QueryWithsItemBuilder(
         require(cte.name.isNotBlank()) { "Cte name must not be blank" }
         selectedCte = cte
         selectedCteNameOverride = null
-        ast.withName = cte.name
+        ast.metadata.withName = cte.name
+        ast.metadata.cteRuntimeName = cte.name
+        ast.metadata.logicalQueryName = (cte as? BuiltCteComposition)?.logicalQueryName
         ast.withBody = cte.definition.ast
         return this
     }
@@ -63,7 +65,9 @@ class QueryWithsItemBuilder(
         require(withName.isNotBlank()) { "WITH CTE name must not be blank" }
         selectedCte = cte
         selectedCteNameOverride = withName
-        ast.withName = withName
+        ast.metadata.withName = withName
+        ast.metadata.cteRuntimeName = cte.name
+        ast.metadata.logicalQueryName = (cte as? BuiltCteComposition)?.logicalQueryName
         ast.withBody = cte.definition.ast
         return this
     }
@@ -76,11 +80,12 @@ class QueryWithsItemBuilder(
     ): IQueryWithsItemApi {
         selectedCte = null
         selectedCteNameOverride = null
-        this.ast.withName = withName;
+        this.ast.metadata.withName = withName;
+        this.ast.metadata.cteRuntimeName = null
+        this.ast.metadata.logicalQueryName = null
 
         val ast = QueryRenderSelectAst();
         QueryRenderSelectBuilder(
-            params,
             ast,
             parameterBindingScope,
         ).apply(blockWith);

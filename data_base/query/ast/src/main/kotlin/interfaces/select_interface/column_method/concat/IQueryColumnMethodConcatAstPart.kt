@@ -1,4 +1,4 @@
-package gog.my_project.data_base.query.ast.interfaces.select_interface.column_method
+package gog.my_project.data_base.query.ast.interfaces.select_interface.column_method.concat
 
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column_base.IQueryColumnsBaseAst
 

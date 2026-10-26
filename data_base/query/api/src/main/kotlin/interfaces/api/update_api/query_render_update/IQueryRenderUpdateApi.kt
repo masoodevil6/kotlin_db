@@ -11,6 +11,7 @@ interface IQueryRenderUpdateApi : IQueryApi<IQueryRenderUpdateAst>{
     fun addValue(blockColumn: IQueryColumnUpdateApi.() -> Unit): IQueryRenderUpdateApi;
 
     fun table(blockTable: IQueryTableApi.() -> Unit): IQueryRenderUpdateApi;
+
     fun where(blockGroup: IQueryWhereApi.() -> Unit): IQueryRenderUpdateApi;
 
 }

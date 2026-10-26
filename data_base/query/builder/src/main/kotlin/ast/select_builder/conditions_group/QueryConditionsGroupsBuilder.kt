@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.conditions_group
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_group.IQueryConditionsGroupsApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_item.IQueryConditionsApi
 import gog.my_project.data_base.query.api.tools.enums.SqlLogical
@@ -9,20 +8,32 @@ import gog.my_project.data_base.query.ast.schema.select_schema.conditions_group.
 import gog.my_project.data_base.query.ast.schema.select_schema.conditions_item.QueryConditionsAst
 import gog.my_project.data_base.query.builder.ast.select_builder.conditions_item.QueryConditionsBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
+import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
 
 class QueryConditionsGroupsBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryConditionsGroupsAst = QueryConditionsGroupsAst(),
 ): IQueryConditionsGroupsApi {
 
     private var parameterBindingScope = ParameterBindingScope()
+    private var modelAliasContext = ModelTableAliasContext()
+    private var querySourceContext = CteSourceContext()
 
     internal constructor(
-        params: MutableList<SqlParameter<*>>,
         ast: IQueryConditionsGroupsAst,
         parameterBindingScope: ParameterBindingScope,
-    ) : this(params, ast) {
+    ) : this( ast) {
         this.parameterBindingScope = parameterBindingScope
+    }
+
+    internal constructor(
+        ast: IQueryConditionsGroupsAst,
+        parameterBindingScope: ParameterBindingScope,
+        modelAliasContext: ModelTableAliasContext,
+        querySourceContext: CteSourceContext,
+    ) : this(ast, parameterBindingScope) {
+        this.modelAliasContext = modelAliasContext
+        this.querySourceContext = querySourceContext
     }
 
 
@@ -34,7 +45,7 @@ class QueryConditionsGroupsBuilder(
         logical: SqlLogical
     ): IQueryConditionsGroupsApi
     {
-        this.ast.conditionLogical = logical.value;
+        this.ast.metadata.conditionLogical = logical.value;
         return this;
     }
 
@@ -61,9 +72,10 @@ class QueryConditionsGroupsBuilder(
     {
         val ast = QueryConditionsGroupsAst();
         QueryConditionsGroupsBuilder(
-            params,
             ast,
             parameterBindingScope,
+            modelAliasContext,
+            querySourceContext,
         ).apply(blockGroup)
         this.ast.conditions.add(ast);
         return this;
@@ -75,9 +87,10 @@ class QueryConditionsGroupsBuilder(
     {
         var ast = QueryConditionsAst();
         QueryConditionsBuilder(
-            params,
             ast,
             parameterBindingScope,
+            modelAliasContext,
+            querySourceContext,
         ).apply(blockCondition)
         this.ast.conditions.add(ast);
         return this;

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { loadHelpDefinition } from '../src/help-file-loader.mjs';
 import { buildRegistry, findRegisteredAction, publicModules } from '../src/help-registry.mjs';
 import { validateParameters } from '../src/parameter-validator.mjs';
+import { executeGradleAction } from '../src/gradle-action-runner.mjs';
 import { resolveGradleTestRun } from '../src/runner-resolver.mjs';
 import { executionOutcome, prepareReportDirectory, executeGradleTest, isFreshReportAvailable } from '../src/gradle-test-runner.mjs';
 import { resolveContainedPath } from '../src/path-safety.mjs';
@@ -76,6 +77,32 @@ test('loads the real migration Help Definition without changing its Gradle test 
   assert.equal(loaded.schemaVersion, 2);
   assert.equal(loaded.tests[0].context.runtime.type, 'test-runtime-json');
   assert.equal(loaded.tests[1].context.expectedMigrations.length, 7);
+});
+
+test('Query Example helper exposes V3.1 and passes it to Gradle as the version property', async () => {
+  const repositoryRoot = path.resolve(import.meta.dirname, '../..');
+  const projectDir = path.join(repositoryRoot, 'data_base', 'query', 'example');
+  const loaded = loadHelpDefinition({ projectPath: ':data_base:query:example', projectDir });
+  const runAction = loaded.module.actions.find((action) => action.id === 'run');
+  const versionParameter = runAction.parameters.find((parameter) => parameter.id === 'version');
+
+  assert.ok(versionParameter.options.some((option) => option.value === 'v3.1'));
+  const bindings = validateParameters(runAction, { version: 'v3.1' });
+  let gradleEnvironment;
+  const result = await executeGradleAction({
+    buildRoot: repositoryRoot,
+    module: loaded,
+    action: runAction,
+    bindings,
+    launchProcess: async (_command, args, options) => {
+      assert.ok(args.includes(':data_base:query:example:run'));
+      gradleEnvironment = options.env;
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+
+  assert.equal(gradleEnvironment['ORG_GRADLE_PROJECT_query.example.version'], 'v3.1');
+  assert.equal(result.status, 'Passed');
 });
 
 test('keeps schema v1 compatible and validates schema v2 Context strictly', (t) => {

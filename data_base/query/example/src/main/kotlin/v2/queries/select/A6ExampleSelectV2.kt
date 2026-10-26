@@ -12,21 +12,35 @@ import gog.my_project.data_base.query.example.v2.queries.IExampleV2
 
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-class A7ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
+class A6ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
             addColumn {
-                column(UserModelV2::class, UserModelV2::id)
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
             }
             addColumn {
-                column {
-                    tableAttribute("concat( uu.name , '-' , uu.family )")
-                };
-                alias("user_full_name");
+                methodConcat {
+                    column {
+                        tableSelector(UserModelV2::class)
+                        columnSelector(UserModelV2::name)
+                    }
+                    string("-")
+                    column {
+                        tableSelector(UserModelV2::class)
+                        columnSelector(UserModelV2::family)
+                    }
+                }
+                alias("user_full_name")
                 execute(DataType.STRING)
             }
             addColumn {
-                column(UserModelV2::class, UserModelV2::age)
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::age)
+                }
             }
         }
         .from {
@@ -49,7 +63,7 @@ class A7ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
                 rows.forEach { row ->
                     println(
                         "row: user_id=${row.getValue(UserModelV2::id)}, " +
-                            "user_full_name=${row["user_full_name"]}, " +
+                           // "user_full_name=${row["user_full_name"]}, " +
                             "user_age=${row.getValue(UserModelV2::age)}",
                     )
                 }

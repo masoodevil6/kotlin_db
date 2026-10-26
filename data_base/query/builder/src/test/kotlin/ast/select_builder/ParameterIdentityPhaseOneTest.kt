@@ -1,15 +1,19 @@
-package gog.my_project.data_base.query.builder.ast.select_builder
+﻿package gog.my_project.data_base.query.builder.ast.select_builder
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
+import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base.query.ast.interfaces.select_interface.column_base.IQueryColumnsBaseAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_group.IQueryConditionsGroupsAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item.IQueryConditionsAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item_collection.IQueryConditionsCollectionAst
+import gog.my_project.data_base.query.ast.interfaces.parameter.IQueryParameterAst
 import gog.my_project.data_base.query.builder.ast.insert_builder.column_insert.QueryColumnInsertBuilder
 import gog.my_project.data_base.query.builder.ast.update_builder.column_update.QueryColumnUpdateBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.dialect.data_class.select_data.column_base.QueryColumnBaseData
 import gog.my_project.data_base.query.renderer.dialects.MySqlDialect
+import gog.my_project.data_base.query.renderer.parameters.IdentityAwareQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.QueryParameterRendering
 import gog.my_project.data_base.query.renderer.interfaces.IAstRenderer
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
 import java.sql.Types
@@ -23,24 +27,30 @@ import kotlin.test.assertTrue
 class ParameterIdentityPhaseOneTest {
 
     @Test
-    fun `insert and update column builders retain typed parameter references beside legacy tags`() {
+    fun `insert and update column builders keep parameter AST separate from column tags`() {
         val insertBuilder = QueryColumnInsertBuilder()
-        insertBuilder.column("email", "person@example.test")
+        insertBuilder.column("email").setValue {
+            paramValue("person@example.test")
+        }
 
-        assertEquals("email", insertBuilder.ast.columnTag)
-        assertSame(insertBuilder.params.single(), insertBuilder.ast.parameter)
-        assertEquals("person@example.test", insertBuilder.ast.parameter?.value)
+        assertEquals("email", insertBuilder.ast.metadata.columnTag)
+        val insertParameterAst = assertIs<IQueryParameterAst<*>>(insertBuilder.ast.parameterAst)
+        assertEquals("email", insertParameterAst.metadata.name)
+        assertEquals("person@example.test", insertParameterAst.metadata.value)
+        assertEquals(Types.VARCHAR, insertParameterAst.metadata.sqlType)
 
         val updateBuilder = QueryColumnUpdateBuilder()
-        updateBuilder.column("status", "active")
+        updateBuilder.column("status").setValue { paramValue("active") }
 
-        assertEquals("status", updateBuilder.ast.columnTag)
-        assertSame(updateBuilder.params.single(), updateBuilder.ast.parameter)
-        assertEquals("active", updateBuilder.ast.parameter?.value)
+        assertEquals("status", updateBuilder.ast.metadata.columnTag)
+        val updateParameterAst = assertIs<IQueryParameterAst<*>>(updateBuilder.ast.parameterAst)
+        assertEquals("status", updateParameterAst.metadata.name)
+        assertEquals("active", updateParameterAst.metadata.value)
+        assertEquals(Types.VARCHAR, updateParameterAst.metadata.sqlType)
     }
 
     @Test
-    fun `scalar condition stores and renders the original parameter reference`() {
+    fun `scalar condition stores an independent parameter node and preserves binding data`() {
         val query = QueryRenderSelectBuilder()
         query.select { addColumn { column { tableAttribute("1") }; alias("value") } }
         query.from { table("users").alias("u") }
@@ -49,14 +59,16 @@ class ParameterIdentityPhaseOneTest {
                 addCondition {
                     sideSelector { tableColumn("u", "age") }
                     operationGreaterThan()
-                    sideValue("minimum_age", 18)
+                    sideValueParam {
+                        paramName("minimum_age")
+                        paramValue(18)
+                    }
                 }
             }
         }
 
         val condition = whereCondition(query)
-        val parameter = assertIs<SqlParameter<*>>(condition.conditionSideRight)
-        assertSame(query.params.single(), parameter)
+        val parameterNode = assertIs<IQueryParameterAst<*>>(condition.conditionSideRight)
 
         val dialect = MySqlDialect()
         val ordinarySql = dialect.render(query.ast)
@@ -65,7 +77,19 @@ class ParameterIdentityPhaseOneTest {
         assertEquals(ordinarySql, trackedSql)
         assertTrue(requireNotNull(trackedSql).contains(":minimum_age"), trackedSql)
         assertEquals(1, occurrences.size)
-        assertSame(parameter, occurrences.single())
+        assertEquals(parameterNode.metadata.name, occurrences.single().name)
+        assertEquals(parameterNode.metadata.value, occurrences.single().value)
+        assertEquals(parameterNode.metadata.sqlType, occurrences.single().sqlType)
+        assertIs<QueryParameterBinding>(occurrences.single())
+
+        val rendered = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, dialect),
+        )
+        val renderedBinding = rendered.parameterOccurrences.single()
+        assertEquals(parameterNode.metadata.name, renderedBinding.name)
+        assertEquals(parameterNode.metadata.value, renderedBinding.value)
+        assertEquals(parameterNode.metadata.sqlType, renderedBinding.sqlType)
+        assertIs<QueryParameterBinding>(renderedBinding)
     }
 
     @Test
@@ -77,29 +101,39 @@ class ParameterIdentityPhaseOneTest {
                 addCondition {
                     sideSelector { tableColumn("u", "id") }
                     operationIn()
-                    sideValueCollection("user_id") {
-                        addParam(11)
-                        addParam(22)
+
+                    sideValueCollection {
+                        addParam {
+                            paramName("userId1")
+                            paramValue(11)
+                        }
+                        addParam {
+                            paramName("userId2")
+                            paramValue(22)
+                        }
                     }
                 }
             }
         }
 
         val collection = whereCondition(query).conditionSideRight as IQueryConditionsCollectionAst
-        val parameters = collection.paramsCollection.map { assertIs<SqlParameter<*>>(it) }
-        assertEquals(listOf("user_id0", "user_id1"), parameters.map { it.name })
-        assertEquals(listOf(11, 22), parameters.map { it.value })
-        assertEquals(2, query.params.size)
-        parameters.indices.forEach { assertSame(query.params[it], parameters[it]) }
+        val parameters = collection.paramsCollection.map { assertIs<IQueryParameterAst<*>>(it) }
+        assertEquals(listOf("userId1", "userId2"), parameters.map { it.metadata.name })
+        assertEquals(listOf(11, 22), parameters.map { it.metadata.value })
 
         val dialect = MySqlDialect()
         val ordinarySql = dialect.render(query.ast)
         val (trackedSql, occurrences) = dialect.renderWithBindings(query.ast)
 
         assertEquals(ordinarySql, trackedSql)
-        assertEquals(listOf("user_id0", "user_id1"), placeholderNames(requireNotNull(trackedSql)))
+        assertEquals(listOf("userId1", "userId2"), placeholderNames(requireNotNull(trackedSql)))
         assertEquals(parameters.size, occurrences.size)
-        parameters.indices.forEach { assertSame(parameters[it], occurrences[it]) }
+        parameters.indices.forEach { index ->
+            assertEquals(parameters[index].metadata.name, occurrences[index].name)
+            assertEquals(parameters[index].metadata.value, occurrences[index].value)
+            assertEquals(parameters[index].metadata.sqlType, occurrences[index].sqlType)
+            assertIs<QueryParameterBinding>(occurrences[index])
+        }
     }
 
     @Test
@@ -115,15 +149,19 @@ class ParameterIdentityPhaseOneTest {
                         logicalOn()
                         sideSelector { tableColumn("d", "owner_id") }
                         operationEqual()
-                        sideValue("owner_id", 7)
+                        sideValueParam {
+                            paramName("owner_id")
+                            paramValue(7)
+                        }
                     }
                 }
             }
         }
 
         val joinCondition = query.ast.joins!!.joins.single().joinConditions!!.conditions.single() as IQueryConditionsAst
-        val parameter = assertIs<SqlParameter<*>>(joinCondition.conditionSideRight)
-        assertSame(query.params.single(), parameter)
+        val parameter = assertIs<IQueryParameterAst<*>>(joinCondition.conditionSideRight)
+        assertEquals("owner_id", parameter.metadata.name)
+        assertEquals(7, parameter.metadata.value)
 
         val dialect = MySqlDialect()
         val ordinarySql = dialect.render(query.ast)
@@ -132,7 +170,10 @@ class ParameterIdentityPhaseOneTest {
         assertEquals(ordinarySql, trackedSql)
         assertTrue(requireNotNull(trackedSql).contains(":owner_id"), trackedSql)
         assertEquals(1, occurrences.size)
-        assertSame(parameter, occurrences.single())
+        val occurrence = assertIs<IQueryParameterBinding>(occurrences.single())
+        assertEquals(parameter.metadata.name, occurrence.name)
+        assertEquals(parameter.metadata.value, occurrence.value)
+        assertIs<QueryParameterBinding>(occurrence)
     }
 
     @Test
@@ -156,7 +197,10 @@ class ParameterIdentityPhaseOneTest {
                 addCondition {
                     sideSelector { tableColumn("u", "id") }
                     operationEqual()
-                    sideValue("unused", 33)
+                    sideValueParam {
+                        paramName("unused")
+                        paramValue(33)
+                    }
                 }
             }
         }
@@ -179,7 +223,10 @@ class ParameterIdentityPhaseOneTest {
                         addCondition {
                             sideSelector { tableAttribute("1") }
                             operationEqual()
-                            sideValue("shared", 11)
+                            sideValueParam {
+                                paramName("shared")
+                                paramValue(11)
+                            }
                         }
                     }
                 }
@@ -190,7 +237,10 @@ class ParameterIdentityPhaseOneTest {
                 addCondition {
                     sideSelector { tableAttribute("1") }
                     operationEqual()
-                    sideValue("shared", 11)
+                    sideValueParam {
+                        paramName("shared")
+                        paramValue(11)
+                    }
                 }
             }
         }
@@ -198,8 +248,12 @@ class ParameterIdentityPhaseOneTest {
         val nestedCondition = query.ast.table!!.derivedQuery!!.where!!.condition!!.conditions.single() as IQueryConditionsAst
         val ownerCondition = whereCondition(query)
         assertSame(nestedCondition.conditionSideRight, ownerCondition.conditionSideRight)
-        assertEquals(2, query.params.size)
-        assertSame(query.params[0], query.params[1])
+        val rendered = assertIs<IdentityAwareQueryRenderResult>(
+            QueryParameterRendering.render(query.ast, MySqlDialect()),
+        )
+        assertEquals(listOf("shared", "shared"), rendered.parameterOccurrences.map { it.name })
+        assertEquals(listOf(11, 11), rendered.parameterOccurrences.map { it.value })
+        assertSame(rendered.parameterOccurrences[0], rendered.parameterOccurrences[1])
     }
 
     private fun whereCondition(query: QueryRenderSelectBuilder): IQueryConditionsAst =

@@ -10,11 +10,11 @@ interface IQueryWithsItemApi : IQueryApi<IQueryWithsItemAst> {
 
     //fun with(with : ICte): IQueryWithsItemApi;
 
+    /// TODO: REMOVE
     fun with(
         withName: String,
         withClass : ICte
     ): IQueryWithsItemApi;
-
 
 
 
@@ -24,7 +24,6 @@ interface IQueryWithsItemApi : IQueryApi<IQueryWithsItemAst> {
         withName: String,
         cte: Cte
     ): IQueryWithsItemApi;
-
 
 
 

@@ -4,6 +4,7 @@ import gog.my_project.data_base.core.data_base.DatabaseConfig
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base.manager.execute.query.BoundQuery
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import java.lang.reflect.InvocationHandler
@@ -81,6 +82,30 @@ class QueryExecuteContractTest {
         assertSame(first, boundQuery.parameterOccurrences[0])
         assertSame(first, boundQuery.parameterOccurrences[3])
     }
+
+    @Test
+    fun `bound query executes independent AST parameter bindings without legacy SqlParameter`() =
+        withDatabase(Script()) { script ->
+            val binding = QueryParameterBinding("ast_value", 41, java.sql.Types.INTEGER)
+            var callbackCount = 0
+
+            QueryExecute().executeUpdate(
+                BoundQuery("UPDATE t SET value = ? WHERE id = ?", listOf(binding, binding)),
+            ) { result ->
+                callbackCount++
+                assertIs<ExecuteResult.Success<Int>>(result)
+            }
+
+            assertEquals(1, callbackCount)
+            assertEquals("UPDATE t SET value = ? WHERE id = ?", script.preparedSql)
+            assertEquals(
+                listOf<List<Any?>>(
+                    listOf(1, 41, java.sql.Types.INTEGER),
+                    listOf(2, 41, java.sql.Types.INTEGER),
+                ),
+                script.bindings,
+            )
+        }
 
     @Test
     fun mismatchesFailSynchronouslyBeforeConnectionAcquisition() = withDatabase(Script()) { script ->

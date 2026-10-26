@@ -11,26 +11,34 @@ import gog.my_project.data_base.query.builder.ast.select_builder.query_render_se
 import gog.my_project.data_base.query.example.v1.queries.IExampleV1
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
 
-class A7ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
+class A6ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
         .select {
             addColumn {
                 column {
-                    sqlColumn("uu", "id")
+                    tableSelector("uu"); columnSelector("id")
                 }
                 alias("user_id")
                 execute(DataType.LONG)
             }
             addColumn {
-                column {
-                    tableAttribute("concat( uu.name , '-' , uu.family )")
+                methodConcat {
+                    column {
+                        tableSelector("uu")
+                        columnSelector("name")
+                    }
+                    string("-")
+                    column {
+                        tableSelector("uu")
+                        columnSelector("family")
+                    }
                 }
                 alias("user_full_name")
                 execute(DataType.STRING)
             }
             addColumn {
                 column {
-                    sqlColumn("uu", "age")
+                    tableSelector("uu"); columnSelector("age")
                 }
                 alias("user_age")
                 execute(DataType.INT)
@@ -48,7 +56,7 @@ class A7ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
         queryManager
             .queryBuilder(query)
             .sql { (queryText, params) ->
-                println("\n=============================================\nV1-Ex7: Smart select with table attribute\nquery: $queryText\nparams: $params")
+                println("\n=============================================\nV1-Ex6: Smart select with CONCAT columns\nquery: $queryText\nparams: $params")
             }
             .details { metadata ->
                 println(formatEffectiveQueryMetadata(metadata))

@@ -6,6 +6,7 @@ import gog.my_project.data_base.query.executer.result.error
 
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.cte.mapper.CteQueryRowMapper
 import gog.my_project.data_base.query.example.v3.queries.IExampleV3
 import gog.my_project.data_base.query.example.v3.queries.relations.UserDisplayQueryV3
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
@@ -14,16 +15,26 @@ class A7ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = configureQuery(QueryRenderSelectBuilder())
 
     private fun configureQuery(query: IQueryRenderSelectApi): IQueryRenderSelectApi = query
-        .from { cte(UserDisplayQueryV3(UserDisplayQueryV3.RelationFilters())) }
+        .from {
+            cte(UserDisplayQueryV3()(UserDisplayQueryV3.RelationFilters()))
+        }
         .select {
             addColumn {
-                cteOutput(UserDisplayQueryV3::id)
+                column {
+                    tableSelector(UserDisplayQueryV3::class)
+                    columnSelector(UserDisplayQueryV3::id)
+                }
             }
             addColumn {
-                cteOutput(UserDisplayQueryV3::fullName)
+                column {
+                    tableSelector(UserDisplayQueryV3::class)
+                    columnSelector(UserDisplayQueryV3::fullName)
+                }
             }
             addColumn {
-                cteOutput(UserDisplayQueryV3::age)
+                column { tableSelector(UserDisplayQueryV3::class)
+                    columnSelector(UserDisplayQueryV3::age)
+                }
             }
         }
 
@@ -36,13 +47,13 @@ class A7ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
             .details { metadata ->
                 println(formatEffectiveQueryMetadata(metadata))
             }
-            .execute()
+            .executeAs { row -> CteQueryRowMapper.map(UserDisplayQueryV3::class, row) }
             .success { rows ->
                 rows.forEach { row ->
                     println(
-                        "row: id=${row.getValue(UserDisplayQueryV3::id)}, " +
-                            "fullName=${row.getValue(UserDisplayQueryV3::fullName)}, " +
-                            "age=${row.getValue(UserDisplayQueryV3::age)}",
+                        "row: id=${row.id}, " +
+                            "fullName=${row.fullName}, " +
+                            "age=${row.age}",
                     )
                 }
                 rows

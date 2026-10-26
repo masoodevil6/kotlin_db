@@ -1,33 +1,46 @@
 package gog.my_project.data_base.query.builder.ast.select_builder.conditions_item
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.column_base.IQueryColumnsBaseApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_item.IQueryConditionsApi
+import gog.my_project.data_base.query.api.interfaces.api.parameter.IQueryParameterApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.conditions_item_collection.IQueryConditionsCollectionApi
 import gog.my_project.data_base.query.api.tools.enums.SqlConditionOperation
 import gog.my_project.data_base.query.api.tools.enums.SqlLogical
 import gog.my_project.data_base.query.ast.interfaces.select_interface.condition_item.IQueryConditionsAst
+import gog.my_project.data_base.query.ast.schema.parameter.QueryParameterAst
 import gog.my_project.data_base.query.ast.schema.select_schema.conditions_item.QueryConditionsAst
 import gog.my_project.data_base.query.ast.schema.select_schema.conditions_item_collection.QueryConditionsCollectionAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.column_base.QueryColumnsBaseAst
 import gog.my_project.data_base.query.builder.ast.select_builder.column_base.QueryColumnsBaseBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.conditions_item_collection.QueryConditionsCollectionBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.ParameterBindingScope
-import kotlin.collections.plusAssign
+import gog.my_project.data_base.query.builder.ast.select_builder.ModelTableAliasContext
+import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteSourceContext
+import gog.my_project.data_base.query.builder.ast.parameter.QueryParameterBuilder
 
 class QueryConditionsBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryConditionsAst = QueryConditionsAst(),
 ): IQueryConditionsApi {
 
     private var parameterBindingScope = ParameterBindingScope()
+    private var modelAliasContext = ModelTableAliasContext()
+    private var querySourceContext = CteSourceContext()
 
     internal constructor(
-        params: MutableList<SqlParameter<*>>,
         ast: IQueryConditionsAst,
         parameterBindingScope: ParameterBindingScope,
-    ) : this(params, ast) {
+    ) : this( ast) {
         this.parameterBindingScope = parameterBindingScope
+    }
+
+    internal constructor(
+        ast: IQueryConditionsAst,
+        parameterBindingScope: ParameterBindingScope,
+        modelAliasContext: ModelTableAliasContext,
+        querySourceContext: CteSourceContext,
+    ) : this(ast, parameterBindingScope) {
+        this.modelAliasContext = modelAliasContext
+        this.querySourceContext = querySourceContext
     }
 
     /* ==============================================================
@@ -35,7 +48,7 @@ class QueryConditionsBuilder(
     ============================================================== */
 
     override fun logical(logical: SqlLogical): IQueryConditionsApi {
-        this.ast.conditionLogical = logical.value;
+        this.ast.metadata.conditionLogical = logical.value;
         return this;
     }
 
@@ -68,8 +81,9 @@ class QueryConditionsBuilder(
     {
         val ast = QueryColumnsBaseAst();
         QueryColumnsBaseBuilder(
-            params,
-            ast
+            ast,
+            modelAliasContext,
+            querySourceContext,
         ).apply(blockColumn)
         this.ast.conditionSideLeft = ast;
         return this;
@@ -82,7 +96,7 @@ class QueryConditionsBuilder(
     ============================================================== */
 
     override fun operation(operation: SqlConditionOperation): IQueryConditionsApi {
-        this.ast.conditionOperation = operation.value;
+        this.ast.metadata.conditionOperation = operation.value;
         return this;
     }
 
@@ -153,47 +167,60 @@ class QueryConditionsBuilder(
     structure [side right]
     ============================================================== */
 
-    override fun sideValue(
-        blockColumn: IQueryColumnsBaseApi.() -> Unit
-    ): IQueryConditionsApi
-    {
-        val ast = QueryColumnsBaseAst();
+    // ---------------------------------------------------------------------
+    // LEGACY SIDE VALUE COLUMN
+    // ---------------------------------------------------------------------
+    override fun sideValueColumn(
+        blockColumn: IQueryColumnsBaseApi.() -> Unit,
+    ): IQueryConditionsApi {
+        val columnAst = QueryColumnsBaseAst()
         QueryColumnsBaseBuilder(
-            params,
-            ast
+            columnAst,
+            modelAliasContext,
+            querySourceContext,
         ).apply(blockColumn)
-        this.ast.conditionSideRight = ast;
-        return this;
+        ast.conditionSideRight = columnAst
+        return this
     }
 
 
-    override fun <T> sideValue(
-        paramName: String,
-        paramValue: T
-    ): IQueryConditionsApi
-    {
-        val parameter = parameterBindingScope.canonical(SqlParameter.of(paramName, paramValue))
-        this.ast.conditionSideRight = parameter
-        params += parameter
-        return this;
+    // ---------------------------------------------------------------------
+    // LEGACY SIDE VALUE PARAM
+    // ---------------------------------------------------------------------
+    override fun sideValueParam(
+        blockParameter: IQueryParameterApi<Any?>.() -> Unit,
+    ): IQueryConditionsApi {
+        val parameterAst = QueryParameterAst<Any?>()
+        val parameterBuilder = QueryParameterBuilder(parameterAst, parameterBindingScope::nextParameterName)
+        parameterBuilder.apply(blockParameter)
+        parameterBuilder.validate()
+        val canonicalParameter = parameterBindingScope.canonical(parameterAst)
+        // ---------------------------------------------------------------------
+        // NEW PARAMETER AST IMPLEMENTATION
+        // The AST node owns this definition; it is not mirrored into the legacy params list.
+        // ---------------------------------------------------------------------
+        ast.conditionSideRight = canonicalParameter
+        return this
     }
 
 
+    // ---------------------------------------------------------------------
+    // NEW PARAMETER AST IMPLEMENTATION
+    // Collection definitions are stored as ordered AST entries; old values stay on the legacy path.
+    // ---------------------------------------------------------------------
     override fun sideValueCollection(
-        paramName: String,
-        blockParamsCollection: IQueryConditionsCollectionApi.() -> Unit
-    ): IQueryConditionsApi
-    {
-        val ast = QueryConditionsCollectionAst();
+        blockParamsCollection: IQueryConditionsCollectionApi.() -> Unit,
+    ): IQueryConditionsApi {
+        val collectionAst = QueryConditionsCollectionAst()
         QueryConditionsCollectionBuilder(
-            params,
-            ast,
-            paramName,
+            collectionAst,
+            null,
             parameterBindingScope,
         ).apply(blockParamsCollection)
-        this.ast.conditionSideRight = ast
-        return this;
+        ast.conditionSideRight = collectionAst
+        return this
     }
+
 
 
 }

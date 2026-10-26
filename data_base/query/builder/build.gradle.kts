@@ -13,7 +13,6 @@ dependencies {
     implementation(project(":data_base:core"))
     implementation(project(":data_base:query:ast"))
     implementation(project(":data_base:query:api"))
-    implementation(project(":data_base:query:meta_data"))
 
     testImplementation(kotlin("test"))
 
@@ -23,6 +22,7 @@ dependencies {
     testImplementation(project(":data_base:models:eloquent"))
     testImplementation(project(":data_base:query:renderer"))
     testImplementation(project(":data_base:manager:execute"))
+    testImplementation(project(":data_base:query:meta_data"))
 }
 
 tasks.test {

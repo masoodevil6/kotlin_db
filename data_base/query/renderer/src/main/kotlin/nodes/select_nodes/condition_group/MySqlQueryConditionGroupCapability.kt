@@ -18,7 +18,7 @@ class MySqlQueryConditionGroupCapability :
     ): String? {
 
         val groups = ast.conditions;
-        val groupLogical = if (dataClass?._hasLogical == false && ast.conditionLogical != null){ast.conditionLogical}else{""}
+        val groupLogical = if (dataClass?._hasLogical == false && ast.metadata.conditionLogical != null){ast.metadata.conditionLogical}else{""}
 
         if (groups.isNotEmpty()) {
 

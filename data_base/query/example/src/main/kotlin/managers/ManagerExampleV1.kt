@@ -14,6 +14,8 @@ import gog.my_project.data_base.query.example.v1.queries.select.A4ExampleSelectV
 import gog.my_project.data_base.query.example.v1.queries.select.A5ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A6ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.select.A7ExampleSelectV1
+import gog.my_project.data_base.query.example.v1.queries.select.A8ExampleSelectV1
+import gog.my_project.data_base.query.example.v1.queries.select.A9ExampleSelectV1
 import gog.my_project.data_base.query.example.v1.queries.update.A1ExampleUpdateV1
 
 class ManagerExampleV1(
@@ -30,8 +32,8 @@ class ManagerExampleV1(
     override fun readyListExamples() {
         listExamplesSelect.addAll(
             listOf(
-                A1ExampleSelectV1(), A2ExampleSelectV1(), A3ExampleSelectV1(),
-                A4ExampleSelectV1(), A5ExampleSelectV1(), A6ExampleSelectV1(), A7ExampleSelectV1(),
+                A1ExampleSelectV1(), A2ExampleSelectV1(), A3ExampleSelectV1(), A4ExampleSelectV1(), A5ExampleSelectV1(),
+                A6ExampleSelectV1(), A7ExampleSelectV1(), A8ExampleSelectV1(), A9ExampleSelectV1(),
             ),
         )
         listExamplesInsert.add(A1ExampleInsertV1())

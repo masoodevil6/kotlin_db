@@ -17,5 +17,4 @@ interface IQueryConditionsGroupsApi : IQueryApi<IQueryConditionsGroupsAst> {
 
     fun addCondition(blockCondition: IQueryConditionsApi.() -> Unit): IQueryConditionsGroupsApi;
 
-
 }

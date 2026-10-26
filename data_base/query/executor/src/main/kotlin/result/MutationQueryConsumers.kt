@@ -2,10 +2,16 @@ package gog.my_project.data_base.query.executer.result
 
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.query.reader.BuiltQuery
+import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
+import gog.my_project.data_base.query.ast.interfaces.IQueryAst
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base.query.renderer.manager.DialectSelector
+import gog.my_project.data_base.query.renderer.parameters.LegacyQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.IdentityAwareQueryRenderResult
+import gog.my_project.data_base.query.renderer.parameters.QueryParameterRendering
 
 class InsertQueryConsumer internal constructor(
     private val query: IQueryRenderInsertApi,
@@ -15,7 +21,7 @@ class InsertQueryConsumer internal constructor(
         executor.execute(query, blockExecute = callback)
     }
 
-    fun sql(): BuiltQuery = BuiltQuery(executor.sql(query), query.params.toMutableList())
+    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast)
 
     fun sql(block: (BuiltQuery) -> Unit): InsertQueryConsumer {
         block(sql())
@@ -31,7 +37,7 @@ class UpdateQueryConsumer internal constructor(
         executor.execute(query, blockExecute = callback)
     }
 
-    fun sql(): BuiltQuery = BuiltQuery(executor.sql(query), query.params.toMutableList())
+    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast)
 
     fun sql(block: (BuiltQuery) -> Unit): UpdateQueryConsumer {
         block(sql())
@@ -47,11 +53,28 @@ class DeleteQueryConsumer internal constructor(
         executor.execute(query, blockExecute = callback)
     }
 
-    fun sql(): BuiltQuery = BuiltQuery(executor.sql(query), query.params.toMutableList())
+    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast)
 
     fun sql(block: (BuiltQuery) -> Unit): DeleteQueryConsumer {
         block(sql())
         return this
+    }
+}
+
+/** Uses one render result for named SQL and the corresponding parameter bindings. */
+private fun mutationBuiltQuery(
+    ast: IQueryAst<*>,
+): BuiltQuery {
+    val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+    return when (val rendered = QueryParameterRendering.renderDml(ast, dialect)) {
+        is LegacyQueryRenderResult -> BuiltQuery(
+            requireNotNull(rendered.sql) { "rendered sql is null" },
+            mutableListOf(),
+        )
+        is IdentityAwareQueryRenderResult -> BuiltQuery(
+            rendered.displaySql,
+            rendered.parameterOccurrences.toMutableList(),
+        )
     }
 }
 

@@ -2,7 +2,7 @@ package gog.my_project.data_base.manager.execute.interfaces
 
 import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.query.reader.SqlParameter
+import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
 import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.manager.execute.query.BoundQuery
@@ -108,7 +108,7 @@ interface IQueryExecute {
         blockExecute: (
             conn: Connection,
             query: String?,
-            params: MutableList<SqlParameter<*>>,
+            params: MutableList<out IQueryParameterBinding>,
             paramsName: List<String>,
             error: Throwable?,
         ) -> Unit,
@@ -140,12 +140,12 @@ interface IQueryExecute {
     /** Maps textual placeholder occurrences to JDBC indexes and delegates value binding. */
     fun readyParamsInQuery(
         ps: PreparedStatement?,
-        params: MutableList<SqlParameter<*>>,
+        params: MutableList<out IQueryParameterBinding>,
         paramsNames: List<String>,
     ): PreparedStatement? {
         if (ps == null) return null
 
-        val parametersByName = linkedMapOf<String, SqlParameter<*>>()
+        val parametersByName = linkedMapOf<String, IQueryParameterBinding>()
         for (parameter in params) {
             val existing = parametersByName[parameter.name]
             if (existing == null) {

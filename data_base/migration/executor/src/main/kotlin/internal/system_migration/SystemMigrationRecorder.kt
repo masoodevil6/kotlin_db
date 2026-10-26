@@ -24,8 +24,14 @@ internal class SystemMigrationRecorder(
 
         val queryBuilder = QueryRenderInsertBuilder()
         queryBuilder.table { table(SystemMigrationTable.NAME).alias("") }
-        queryBuilder.addValue { column("migration", migration) }
-        queryBuilder.addValue { column("batch", batch) }
+        queryBuilder.addValue {
+            column("migration")
+            setValue { paramValue(migration) }
+        }
+        queryBuilder.addValue {
+            column("batch")
+            setValue { paramValue(batch) }
+        }
 
         queryExecutor.executeUpdate(queryBuilder.toBuiltQuery()) { result ->
             when (result) {

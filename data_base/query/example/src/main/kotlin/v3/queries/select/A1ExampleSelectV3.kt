@@ -15,28 +15,62 @@ class A1ExampleSelectV3 : IExampleV3<IQueryRenderSelectApi> {
     override fun query(): IQueryRenderSelectApi = configureQuery(QueryRenderSelectBuilder())
 
     private fun configureQuery(query: IQueryRenderSelectApi): IQueryRenderSelectApi {
-        val declaration = UserPhoneQueryV3(UserPhoneQueryV3.RelationFilters())
-        val phoneCte = declaration.createCte(declaration.params)
+        val declaration = UserPhoneQueryV3()
+        val relationParams = UserPhoneQueryV3.RelationFilters(1)
+        val phoneCte = declaration.createCte(relationParams)
+        val aliasCte = "details";
 
         return query
             .withs {
-                addWith { with(phoneCte) }
+                addWith {
+                    with(phoneCte)
+                }
             }
             .from {
                 cte(phoneCte.name)
-                alias("details")
+                alias(aliasCte)
             }
             .select {
                 addColumn {
                     column {
-                        cteColumn("details", "user_id")
+                        tableSelector(aliasCte)
+                        columnSelector(UserPhoneQueryV3::id)
                     }
-                    alias("id"); execute(DataType.INT)
+                    alias("id")
+                    execute(DataType.INT)
                 }
-                addColumn { column { cteColumn("details", "user_name") }; alias("name"); execute(DataType.STRING) }
-                addColumn { column { cteColumn("details", "user_family") }; alias("family"); execute(DataType.STRING) }
-                addColumn { column { cteColumn("details", "user_age") }; alias("age"); execute(DataType.INT) }
-                addColumn { column { cteColumn("details", "user_phone") }; alias("phone"); execute(DataType.STRING) }
+                addColumn {
+                    column {
+                        tableSelector(aliasCte)
+                        columnSelector(UserPhoneQueryV3::name)
+                    }
+                    alias("name")
+                    execute(DataType.STRING)
+                }
+                addColumn {
+                    column {
+                        tableSelector(aliasCte)
+                        columnSelector(UserPhoneQueryV3::family)
+                    }
+                    alias("family")
+                    execute(DataType.STRING)
+                }
+                addColumn {
+                    column {
+                        tableSelector(aliasCte)
+                        columnSelector(UserPhoneQueryV3::age)
+                    }
+                    alias("age")
+                    execute(DataType.INT)
+                }
+                addColumn {
+                    column {
+                        tableSelector(aliasCte)
+                        columnSelector(UserPhoneQueryV3::phone)
+                    }
+                    alias("phone")
+                    execute(DataType.STRING)
+                }
             }
     }
 

@@ -1,9 +1,9 @@
-package gog.my_project.data_base.query.dialect.manager
+﻿package gog.my_project.data_base.query.dialect.manager
 
 import gog.my_project.data_base.query.ast.interfaces.IQueryAst
-import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
-import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.query.dialect.data_class.RenderedQuery
+import gog.my_project.data_base.query.ast.interfaces.parameter.IQueryParameterAst
+import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
+import gog.my_project.data_base.query.dialect.data_class.parameter_data.ParameterRenderAttempt
 import gog.my_project.data_base.query.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.query.renderer.interfaces.IRendererRegistry
 import gog.my_project.data_base.query.renderer.manager.RenderSessionRegistry
@@ -11,6 +11,7 @@ import gog.my_project.data_base.query.renderer.manager.RendererRegistry
 import gog.my_project.data_base.query.renderer.manager.ParameterPlaceholderMode
 import gog.my_project.data_base.query.renderer.manager.ParameterRenderSession
 import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.reflect.KClass
 import gog.my_project.data_base.query.dialect.data_class.QueryDataClass
 import gog.my_project.data_base.query.renderer.interfaces.IAstRenderer
@@ -25,14 +26,14 @@ abstract class BaseSqlDialect(
     }
 
 
-    override fun <Ast : IQueryAst> render(
+    override fun <Ast : IQueryAst<*>> render(
         ast: Ast
     ): String? {
         return _registry.render(ast , this , null);
     }
 
-    /** Renders once while collecting Builder parameter references in placeholder order. */
-    fun renderWithBindings(ast: IQueryRenderSelectAst): Pair<String?, List<Any>> {
+    /** Renders once while collecting parameter bindings in placeholder-emission order. */
+    fun renderWithBindings(ast: IQueryAst<*>): Pair<String?, List<IQueryParameterBinding>> {
         val session = ParameterRenderSession(ParameterPlaceholderMode.Named, false)
         val sessionRegistry = RenderSessionRegistry(_registry, session)
         val sql = sessionRegistry.render(ast, this, null)
@@ -40,46 +41,82 @@ abstract class BaseSqlDialect(
     }
 
     /**
-     * Renders an identity-aware query AST twice using one immutable renderer-registry snapshot.
-     * Callers must classify and validate the AST with query:meta_data before invoking this method.
+     * Renders once with named placeholders, classifies only parameter sources actually emitted,
+     * and renders a positional form only when a binding-backed parameter was emitted.
      */
-    protected fun renderIdentityAwarePasses(ast: IQueryAst): RenderedQuery {
+    protected fun renderParameterAwarePasses(ast: IQueryAst<*>): ParameterRenderAttempt {
         val rendererSnapshot = SnapshotRendererRegistry(_registry.renderers)
-        val displaySession = ParameterRenderSession(ParameterPlaceholderMode.Named, true)
-        val jdbcSession = ParameterRenderSession(ParameterPlaceholderMode.Positional, true)
+        val bindingSnapshots = IdentityHashMap<IQueryParameterAst<*>, IQueryParameterBinding>()
+        val namedSession = ParameterRenderSession(
+            placeholderMode = ParameterPlaceholderMode.Named,
+            requireOccurrenceAwareRenderers = true,
+            generatedBindings = bindingSnapshots,
+        )
+        val namedSql = RenderSessionRegistry(rendererSnapshot, namedSession).render(ast, this, null)
+        val namedOccurrences = typedOccurrences(namedSession, "named")
 
-        val displaySql = RenderSessionRegistry(rendererSnapshot, displaySession).render(ast, this, null)
-        val jdbcSql = RenderSessionRegistry(rendererSnapshot, jdbcSession).render(ast, this, null)
+        if (namedSession.astParameterOccurrenceCount > 0 &&
+            (namedSession.legacyBindingOccurrenceCount > 0 || namedSession.legacyPlaceholderCount > 0)
+        ) {
+            throw UnsupportedOperationException(
+                "A query cannot mix independent parameter AST nodes with legacy parameter sources",
+            )
+        }
+        if (namedSession.legacyBindingOccurrenceCount > 0 && namedSession.legacyPlaceholderCount > 0) {
+            throw UnsupportedOperationException(
+                "A query cannot mix SqlParameter bindings with legacy unbound placeholder sources",
+            )
+        }
 
-        val displayOccurrences = typedOccurrences(displaySession, "display")
-        val jdbcOccurrences = typedOccurrences(jdbcSession, "JDBC")
-        check(displaySession.emittedParameterCount == jdbcSession.emittedParameterCount) {
+        if (namedSession.astParameterOccurrenceCount == 0 && namedSession.legacyBindingOccurrenceCount == 0) {
+            return ParameterRenderAttempt(
+                namedSql = namedSql,
+                positionalSql = null,
+                parameterOccurrences = namedOccurrences,
+                parameterAstOccurrenceCount = 0,
+                legacyBindingOccurrenceCount = namedSession.legacyBindingOccurrenceCount,
+                legacyPlaceholderCount = namedSession.legacyPlaceholderCount,
+            )
+        }
+
+        val positionalSession = ParameterRenderSession(
+            placeholderMode = ParameterPlaceholderMode.Positional,
+            requireOccurrenceAwareRenderers = true,
+            generatedBindings = bindingSnapshots,
+        )
+        val positionalSql = RenderSessionRegistry(rendererSnapshot, positionalSession).render(ast, this, null)
+        val positionalOccurrences = typedOccurrences(positionalSession, "positional")
+        check(namedSession.emittedParameterCount == positionalSession.emittedParameterCount) {
             "Named and positional rendering emitted different parameter counts"
         }
-        check(displayOccurrences.size == jdbcOccurrences.size) {
+        check(namedOccurrences.size == positionalOccurrences.size) {
             "Named and positional rendering recorded different occurrence counts"
         }
-        check(displayOccurrences.indices.all { displayOccurrences[it] === jdbcOccurrences[it] }) {
+        check(namedSession.astParameterOccurrenceCount == positionalSession.astParameterOccurrenceCount) {
+            "Named and positional rendering emitted different AST parameter counts"
+        }
+        check(namedSession.legacyBindingOccurrenceCount == positionalSession.legacyBindingOccurrenceCount) {
+            "Named and positional rendering emitted different legacy binding counts"
+        }
+        check(namedSession.legacyPlaceholderCount == positionalSession.legacyPlaceholderCount) {
+            "Named and positional rendering emitted different legacy placeholder counts"
+        }
+        check(namedOccurrences.indices.all { namedOccurrences[it] === positionalOccurrences[it] }) {
             "Named and positional rendering emitted different parameter occurrence sequences"
         }
 
-        return RenderedQuery(
-            displaySql = requireNotNull(displaySql) { "Identity-aware query rendered no display SQL" },
-            jdbcSql = requireNotNull(jdbcSql) { "Identity-aware query rendered no positional SQL" },
-            parameterOccurrences = jdbcOccurrences,
+        return ParameterRenderAttempt(
+            namedSql = namedSql,
+            positionalSql = positionalSql,
+            parameterOccurrences = positionalOccurrences,
+            parameterAstOccurrenceCount = namedSession.astParameterOccurrenceCount,
+            legacyBindingOccurrenceCount = namedSession.legacyBindingOccurrenceCount,
+            legacyPlaceholderCount = namedSession.legacyPlaceholderCount,
         )
     }
 
-    private fun typedOccurrences(session: ParameterRenderSession, passName: String): List<SqlParameter<*>> {
-        check(session.emittedParameterCount == session.occurrences.size) {
-            "$passName renderer emission count ${session.emittedParameterCount} does not match " +
-                "recorded occurrence count ${session.occurrences.size}"
-        }
-        return session.occurrences.mapIndexed { index, occurrence ->
-            occurrence as? SqlParameter<*>
-                ?: error("$passName occurrence at index $index is not a SqlParameter")
-        }
-    }
+    private fun typedOccurrences(session: ParameterRenderSession, passName: String): List<IQueryParameterBinding> =
+        session.validatedOccurrences(passName)
 
     private class SnapshotRendererRegistry(
         renderers: Map<KClass<*>, IAstRenderer<*, *>>,
@@ -92,7 +129,7 @@ abstract class BaseSqlDialect(
             renderClass: KClass<A>,
             renderer: IAstRenderer<A, D>,
         ) {
-            throw UnsupportedOperationException("Renderer registry is immutable during identity-aware rendering")
+            throw UnsupportedOperationException("Renderer registry is immutable during parameter-aware rendering")
         }
 
         @Suppress("UNCHECKED_CAST")
@@ -100,7 +137,7 @@ abstract class BaseSqlDialect(
             renderers[type] as? IAstRenderer<A, D>
 
         override fun render(ast: Any?, dialect: ISqlDialect, dataClass: QueryDataClass?): String? =
-            error("Identity-aware rendering must dispatch through RenderSessionRegistry")
+            error("Parameter-aware rendering must dispatch through RenderSessionRegistry")
     }
 
 

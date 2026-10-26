@@ -17,7 +17,7 @@ class MySqlOptionOrderCapability :
     ): String? {
 
         var columnsList = ast.orderByList;
-        var orderType = ast.orderType;
+        var orderType = ast.metadata.orderType;
 
         if (columnsList.isNotEmpty()) {
             var optionOrderStr = "";

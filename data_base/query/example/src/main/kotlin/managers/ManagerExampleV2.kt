@@ -11,7 +11,6 @@ import gog.my_project.data_base.query.example.v2.queries.select.A3ExampleSelectV
 import gog.my_project.data_base.query.example.v2.queries.select.A4ExampleSelectV2
 import gog.my_project.data_base.query.example.v2.queries.select.A5ExampleSelectV2
 import gog.my_project.data_base.query.example.v2.queries.select.A6ExampleSelectV2
-import gog.my_project.data_base.query.example.v2.queries.select.A7ExampleSelectV2
 import gog.my_project.data_base.query.example.v2.queries.insert.A1ExampleInsertV2
 import gog.my_project.data_base.query.example.v2.queries.update.A1ExampleUpdateV2
 import gog.my_project.data_base.query.example.v2.queries.delete.A1ExampleDeleteV2
@@ -30,7 +29,9 @@ class ManagerExampleV2(
 
     override fun readyListExamples() {
         listExamplesInsert.add(A1ExampleInsertV2())
+
         listExamplesUpdate.add(A1ExampleUpdateV2())
+
         listExamplesDelete.add(A1ExampleDeleteV2())
 
         listExamplesSelect.add(A1ExampleSelectV2())
@@ -39,6 +40,5 @@ class ManagerExampleV2(
         listExamplesSelect.add(A4ExampleSelectV2())
         listExamplesSelect.add(A5ExampleSelectV2())
         listExamplesSelect.add(A6ExampleSelectV2())
-        listExamplesSelect.add(A7ExampleSelectV2())
     }
 }

@@ -6,6 +6,8 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.select.IQu
 
 interface IQuerySelectApi : IQueryApi<IQuerySelectAst> {
 
+
+    fun distinct(isDistinct : Boolean= true): IQuerySelectApi;
     fun addColumn(blockColumn: IQueryColumnsApi.() -> Unit): IQuerySelectApi;
 
 }

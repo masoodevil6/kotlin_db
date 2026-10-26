@@ -9,7 +9,7 @@ fun IQueryRenderSelectApi.requireResultOutputAliases(): List<String> {
     require(columns.isNotEmpty()) { "At least one SELECT output is required for result consumption" }
 
     val aliases = columns.mapIndexed { index, column ->
-        column.ColumnAlias?.takeIf(String::isNotBlank)
+        column.metadata.ColumnAlias?.takeIf(String::isNotBlank)
             ?: throw IllegalArgumentException("SELECT output at index $index must have a non-empty SQL alias")
     }
     require(aliases.distinct().size == aliases.size) {

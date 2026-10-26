@@ -4,7 +4,7 @@ private val namedParameterPattern = Regex(":([a-zA-Z_][a-zA-Z0-9_]*)")
 
 data class BuiltQuery(
     val query: String?,
-    val params: MutableList<SqlParameter<*>>,
+    val params: MutableList<out IQueryParameterBinding>,
 ) {
     /** Returns every named-placeholder occurrence in SQL text order and validates its parameters. */
     fun getListParamNames(): List<String> {
@@ -13,7 +13,7 @@ data class BuiltQuery(
             .map { match -> match.groupValues[1] }
             .toList()
         val occurrenceNames = occurrences.toHashSet()
-        val parametersByName = linkedMapOf<String, SqlParameter<*>>()
+        val parametersByName = linkedMapOf<String, IQueryParameterBinding>()
 
         for (parameter in params) {
             val existing = parametersByName[parameter.name]

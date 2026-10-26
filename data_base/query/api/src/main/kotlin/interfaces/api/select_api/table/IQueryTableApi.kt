@@ -4,7 +4,7 @@ import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.cte.ICte
-import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
+import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQueryTableAst
 import kotlin.reflect.KClass
 
@@ -19,7 +19,7 @@ interface IQueryTableApi : IQueryApi<IQueryTableAst> {
 
     fun table(blockQuery: IQueryRenderSelectApi.() -> Unit): IQueryTableApi
 
-    fun <P> cte(declaration: ICteDeclaration<P>): IQueryTableApi
+    fun cte(cte: Cte): IQueryTableApi
 
     fun cte(cte: String): IQueryTableApi;
 

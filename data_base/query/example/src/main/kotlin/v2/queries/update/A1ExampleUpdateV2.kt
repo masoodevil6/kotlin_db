@@ -1,4 +1,4 @@
-﻿package gog.my_project.data_base.query.example.v2.queries.update
+package gog.my_project.data_base.query.example.v2.queries.update
 
 import gog.my_project.data_base.query.example.v2.queries.models.UserModelV2
 import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
@@ -10,15 +10,29 @@ import gog.my_project.data_base.query.executer.result.success
 
 class A1ExampleUpdateV2 : IExampleV2<IQueryRenderUpdateApi> {
     override fun query(): IQueryRenderUpdateApi = QueryRenderUpdateBuilder()
-        .table { table(UserModelV2::class) }
-        .addValue { column(UserModelV2::class, UserModelV2::name, "--changed--") }
+        .table {
+            table(UserModelV2::class)
+        }
+        .addValue {
+            column(UserModelV2::class, UserModelV2::name)
+            setValue {
+                paramName("name")
+                paramValue("--changed--")
+            }
+        }
         .where {
             conditions {
                 addCondition {
                     logicalAnd()
-                    sideSelector { tableColumn(UserModelV2::class, UserModelV2::id, "uu") }
+                    sideSelector {
+                        tableSelector(UserModelV2::class)
+                        columnSelector(UserModelV2::id)
+                    }
                     operationEqual()
-                    sideValue("id1", 5)
+                    sideValueParam {
+                        paramName("id1")
+                        paramValue(5)
+                    }
                 }
             }
         }
@@ -26,7 +40,7 @@ class A1ExampleUpdateV2 : IExampleV2<IQueryRenderUpdateApi> {
     override fun execute(queryManager: IQueryBuilderExecutor) {
         queryManager
             .queryBuilder(query())
-            .sql { builtQuery -> println("V2-Update query: ${builtQuery.query}; params: ${builtQuery.params}") }
+            .sql { builtQuery -> println("\n=============================================\nV2-Update query: ${builtQuery.query}; params: ${builtQuery.params}") }
             .execute()
             .success { affectedRows ->
                 println("V2-Update: $affectedRows row(s) updated")

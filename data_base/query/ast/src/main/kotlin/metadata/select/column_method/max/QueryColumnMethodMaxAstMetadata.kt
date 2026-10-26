@@ -1,4 +1,6 @@
 package gog.my_project.data_base.query.ast.metadata.select.column_method.max
 
-class QueryColumnMethodMaxAstMetadata {
+import gog.my_project.data_base.query.ast.metadata.interfaces.IQueryAstMetadata
+
+class QueryColumnMethodMaxAstMetadata : IQueryAstMetadata {
 }

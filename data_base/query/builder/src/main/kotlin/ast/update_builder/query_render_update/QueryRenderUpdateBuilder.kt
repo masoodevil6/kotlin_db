@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.update_builder.query_render_update
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.where.IQueryWhereApi
 import gog.my_project.data_base.query.api.interfaces.api.update_api.column_update.IQueryColumnUpdateApi
@@ -15,7 +14,6 @@ import gog.my_project.data_base.query.builder.ast.select_builder.where.QueryWher
 import gog.my_project.data_base.query.builder.ast.update_builder.column_update.QueryColumnUpdateBuilder
 
 class QueryRenderUpdateBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryRenderUpdateAst = QueryRenderUpdateAst()
 ) : IQueryRenderUpdateApi {
 
@@ -23,7 +21,6 @@ class QueryRenderUpdateBuilder(
     override fun addValue(blockColumn: IQueryColumnUpdateApi.() -> Unit): IQueryRenderUpdateApi {
         val ast = QueryColumnUpdateAst();
         QueryColumnUpdateBuilder(
-            params,
             ast
         ).apply(blockColumn);
         this.ast.columns.add(ast);
@@ -34,7 +31,6 @@ class QueryRenderUpdateBuilder(
     override fun table(blockTable: IQueryTableApi.() -> Unit): IQueryRenderUpdateApi {
         val ast = QueryTableAst();
         QueryTableBuilder(
-            params,
             ast
         ).apply(blockTable);
         this.ast.table = ast;
@@ -45,7 +41,6 @@ class QueryRenderUpdateBuilder(
     override fun where(blockGroup: IQueryWhereApi.() -> Unit): IQueryRenderUpdateApi {
         val ast = QueryWhereAst();
         QueryWhereBuilder(
-            params,
             ast
         ).apply(blockGroup);
         this.ast.where = ast;

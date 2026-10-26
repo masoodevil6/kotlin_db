@@ -1,6 +1,5 @@
 package gog.my_project.data_base.query.builder.ast.insert_builder.query_render_insert
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.column_insert.IQueryColumnInsertApi
 import gog.my_project.data_base.query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi
@@ -12,7 +11,6 @@ import gog.my_project.data_base.query.builder.ast.insert_builder.column_insert.Q
 import gog.my_project.data_base.query.builder.ast.select_builder.table.QueryTableBuilder
 
 class QueryRenderInsertBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: IQueryRenderInsertAst = QueryRenderInsertAst()
 ): IQueryRenderInsertApi{
 
@@ -20,7 +18,6 @@ class QueryRenderInsertBuilder(
     override fun table(blockTable: IQueryTableApi.() -> Unit): IQueryRenderInsertApi {
         val ast = QueryTableAst();
         QueryTableBuilder(
-            params,
             ast
         ).apply(blockTable);
         this.ast.table = ast;
@@ -32,14 +29,10 @@ class QueryRenderInsertBuilder(
     ): IQueryRenderInsertApi {
         val ast = QueryColumnInsertAst();
         QueryColumnInsertBuilder(
-            params,
             ast
         ).apply(blockColumn);
         this.ast.columns.add(ast);
         return this;
     }
-
-
-
 
 }

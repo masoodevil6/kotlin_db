@@ -10,6 +10,7 @@ interface IQueryRenderDeleteApi : IQueryApi<IQueryRenderDeleteAst> {
     fun addTarget(target: String): IQueryRenderDeleteApi;
 
     fun table(blockTable: IQueryTableApi.() -> Unit): IQueryRenderDeleteApi;
+
     fun where(blockGroup: IQueryWhereApi.() -> Unit): IQueryRenderDeleteApi;
 
 }

@@ -2,67 +2,111 @@ package gog.my_project.data_base.query.example.v3.queries.relations
 
 import gog.my_project.data_base.core.annotations.models.QBQuery
 import gog.my_project.data_base.core.annotations.models.QBQuerySelect
+import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
-import gog.my_project.data_base.query.builder.ast.select_builder.cte.CteDeclaration
+import gog.my_project.data_base.query.ast.enums.DataType
+import gog.my_project.data_base.query.cte.declaration.CteDeclaration
+import gog.my_project.data_base.query.example.v2.queries.models.UserModelV2
 import gog.my_project.data_base.query.example.v3.queries.models.UserModelV3
-
-
+import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base.query.executer.result.error
+import gog.my_project.data_base.query.executer.result.success
 
 
 @QBQuery(name = "user_display_query_v3", alias = "v3_user_display")
-class UserDisplayQueryV3(
-    params: RelationFilters,
-) : CteDeclaration<UserDisplayQueryV3.RelationFilters>(params) {
+class UserDisplayQueryV3 : CteDeclaration<UserDisplayQueryV3.RelationFilters, UserDisplayQueryV3>() {
+
 
     data class RelationFilters(
         val userId: Int? = null,
         val minAge: Int? = null,
     )
 
+
+    private var mappedId: Int? = null
+
     @QBQuerySelect(name = "id", alias = "id")
-    val id: Int get() = error("Typed output property must not be read")
+    var id: Int
+        get() = mappedId
+            ?: throw IllegalStateException("Output property 'id' has not been mapped")
+        set(value) {
+            mappedId = value
+        }
     @QBQuerySelect(name = "full_name", alias = "fullName")
-    val fullName: String? get() = error("Typed output property must not be read")
+    var fullName: String? = null
     @QBQuerySelect(name = "age", alias = "age")
-    val age: Int? get() = error("Typed output property must not be read")
+    var age: Int? = null
+
 
     override fun createCte(params: RelationFilters): Cte = buildCte {
         select {
             addColumn {
-                column(UserModelV3::class, UserModelV3::id)
-                    .alias(UserDisplayQueryV3::id)
+                column {
+                    tableSelector(UserModelV3::class)
+                    columnSelector(UserModelV3::id)
+                }
+                alias(UserDisplayQueryV3::id)
             }
             addColumn {
-                column { tableAttribute("concat( uu.name , '-' , uu.family )") }
-                    .alias(UserDisplayQueryV3::fullName)
+                methodConcat {
+                    column {
+                        tableSelector(UserModelV3::class)
+                        columnSelector(UserModelV3::name)
+                    }
+                    string("-")
+                    column {
+                        tableSelector(UserModelV3::class)
+                        columnSelector(UserModelV3::family)
+                    }
+                }
+                alias(UserDisplayQueryV3::fullName)
+                execute(DataType.STRING)
             }
             addColumn {
-                column(UserModelV3::class, UserModelV3::age)
-                    .alias(UserDisplayQueryV3::age)
+                column {
+                    tableSelector(UserModelV3::class)
+                    columnSelector(UserModelV3::age)
+                }
+                alias(UserDisplayQueryV3::age)
             }
         }
-        from { model(UserModelV3::class) }
+        from {
+            model(UserModelV3::class)
+        }
         if (params.userId != null || params.minAge != null) {
             where {
                 conditions {
                     params.userId?.let { userId ->
                         addCondition {
                             logicalAnd()
-                            sideSelector { tableColumn(UserModelV3::class, UserModelV3::id, "uu") }
+                            sideSelector {
+                                tableSelector(UserModelV3::class)
+                                columnSelector(UserModelV3::id)
+                            }
                             operationEqual()
-                            sideValue("relation_user_id", userId)
+                            sideValueParam {
+                                paramName("relation_user_id")
+                                paramValue(userId)
+                            }
                         }
                     }
                     params.minAge?.let { minAge ->
                         addCondition {
                             logicalAnd()
-                            sideSelector { tableColumn(UserModelV3::class, UserModelV3::age, "uu") }
+                            sideSelector {
+                                tableSelector(UserModelV3::class)
+                                columnSelector(UserModelV3::age)
+                            }
                             operationGreaterThanOrEqual()
-                            sideValue("relation_min_age", minAge)
+                            sideValueParam {
+                                paramName("relation_min_age")
+                                paramValue(minAge)
+                            }
                         }
                     }
                 }
             }
         }
     }
+
 }

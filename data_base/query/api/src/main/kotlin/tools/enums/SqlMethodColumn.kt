@@ -6,4 +6,7 @@ enum class SqlMethodColumn (val value: String) {
     Avg("avg"),
     Min("min"),
     Max("max"),
+
+
+    Concat("concat"),
 }
