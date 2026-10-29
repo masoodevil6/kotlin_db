@@ -103,6 +103,8 @@ class UserDisplayQueryV31 : CteDeclaration<UserDisplayQueryV31.RelationFilters, 
         return super.execute(queryManager, params)
             .success { rows ->
                 rows.forEach { row ->
+                    val lastName = row.fullName;
+                    row.fullName = "aaaaa";
                     println("row: id=${row.id}, fullName=${row.fullName}, age=${row.age}")
                 }
                 rows
@@ -110,13 +112,13 @@ class UserDisplayQueryV31 : CteDeclaration<UserDisplayQueryV31.RelationFilters, 
             .error { failure -> println("error: $failure") }
     }
 
-    protected override fun configureConsumer(consumer: QueryConsumer): QueryConsumer =
+    /*protected override fun configureConsumer(consumer: QueryConsumer): QueryConsumer =
         consumer
             .sql { (queryText, params) ->
                 println("\n=============================================\nV3-Ex1: WITH CTE select with phone join\nquery: $queryText\nparams: $params")
             }
             .details { metadata ->
                 println(formatEffectiveQueryMetadata(metadata))
-            }
+            }*/
 
 }

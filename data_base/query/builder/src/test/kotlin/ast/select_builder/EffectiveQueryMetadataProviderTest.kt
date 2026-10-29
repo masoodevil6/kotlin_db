@@ -560,7 +560,7 @@ class EffectiveQueryMetadataProviderTest {
         assertEquals(2, relations.size)
         assertEquals("published_with_name", relations[0].withSqlName)
         assertEquals(null, relations[0].occurrenceAlias)
-        assertEquals(null, relations[1].withSqlName)
+        assertEquals("published_with_name", relations[1].withSqlName)
         assertEquals("source_occurrence", relations[1].occurrenceAlias)
     }
 

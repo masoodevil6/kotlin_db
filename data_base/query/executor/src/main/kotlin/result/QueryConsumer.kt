@@ -10,6 +10,7 @@ import gog.my_project.data_base.query.api.metadata.EffectiveQueryMetadata
 import gog.my_project.data_base.query.api.metadata.EffectiveQueryMetadataProvider
 import gog.my_project.data_base.query.meta_data.analysis.EffectiveQueryMetadataAnalyzer
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base.query.executer.manager.recordScopedConsumerThrowable
 import gog.my_project.data_base.query.renderer.manager.DialectSelector
 import gog.my_project.data_base.query.renderer.parameters.LegacyQueryRenderResult
 import gog.my_project.data_base.query.renderer.parameters.IdentityAwareQueryRenderResult
@@ -19,6 +20,9 @@ import gog.my_project.data_base.query.renderer.parameters.QueryParameterRenderin
 class QueryConsumer internal constructor(
     private val query: IQueryRenderSelectApi,
     private val executor: IQueryBuilderExecutor,
+    private val reportScopedThrowable: (Throwable) -> Unit = { failure ->
+        recordScopedConsumerThrowable(executor, failure)
+    },
 ) {
     fun first(): ExecuteResult<QueryRow> = captureSynchronousResult { blockExecute ->
         executor.first(query, blockExecute = blockExecute)
@@ -36,18 +40,21 @@ class QueryConsumer internal constructor(
                 val rows = execution.result
                     ?: return ExecuteResult.Failure(
                         IllegalStateException("SELECT completed without a materialized row list"),
-                    )
+                    ).also { reportScopedThrowable(it.exception) }
                 val mappedRows = Collection<T>()
                 for ((index, row) in rows.withIndex()) {
                     val mapped = try {
                         mapper(row)
                     } catch (failure: Exception) {
-                        return ExecuteResult.Failure(
-                            IllegalStateException(
-                                "Failed to map SELECT result row ${index + 1}",
-                                failure,
-                            ),
+                        val mappingFailure = IllegalStateException(
+                            "Failed to map SELECT result row ${index + 1}",
+                            failure,
                         )
+                        reportScopedThrowable(mappingFailure)
+                        return ExecuteResult.Failure(mappingFailure)
+                    } catch (error: Error) {
+                        reportScopedThrowable(error)
+                        throw error
                     }
                     mappedRows.add(mapped)
                 }

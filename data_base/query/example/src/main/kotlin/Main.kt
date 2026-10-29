@@ -3,11 +3,9 @@ package gog.my_project.data_base.query.example
 import gog.my_project.data_base.core.data_base.DatabaseConfig
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
-import gog.my_project.data_base.query.example.managers.IManagerExample
-import gog.my_project.data_base.query.example.managers.ManagerExampleV1
-import gog.my_project.data_base.query.example.managers.ManagerExampleV2
-import gog.my_project.data_base.query.example.managers.ManagerExampleV3
-import gog.my_project.data_base.query.example.managers.ManagerExampleV31
+import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.query.example.runners.ExampleRunOptions
+import gog.my_project.data_base.query.example.runners.ExampleVersionRunner
 import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
@@ -27,40 +25,20 @@ fun main(args: Array<String>) {
         );
 
 
-    val queryManager = QueryBuilderExecutor();
-
+    val queryManager = QueryBuilderExecutor()
     val selectedVersion = args.firstOrNull()?.takeIf { it.isNotBlank() }?.lowercase() ?: "v3"
-    val statusRunSelect = configuredRunOption("query.example.run.select", true)
-    val statusRunInsert = configuredRunOption("query.example.run.insert", false)
-    val statusRunUpdate = configuredRunOption("query.example.run.update", false)
-    val statusRunDelete = configuredRunOption("query.example.run.delete", false)
-    if (selectedVersion == "v3.1") {
-        ManagerExampleV31(statusRunSelect = statusRunSelect).renderExamples(queryManager)
-        return
+    val options = ExampleRunOptions(
+        runSelect = configuredRunOption("query.example.run.select", true),
+        runInsert = configuredRunOption("query.example.run.insert", false),
+        runUpdate = configuredRunOption("query.example.run.update", false),
+        runDelete = configuredRunOption("query.example.run.delete", false),
+        runTransaction = configuredRunOption("query.example.run.transaction", false),
+    )
+
+    when (val result = ExampleVersionRunner.run(selectedVersion, queryManager, options)) {
+        is ExecuteResult.Success -> Unit
+        is ExecuteResult.Failure -> throw result.exception
     }
-    val manager: IManagerExample<*, *, *, *> = when (selectedVersion) {
-        "v1" -> ManagerExampleV1(
-            statusRunSelect = statusRunSelect,
-            statusRunInsert = statusRunInsert,
-            statusRunUpdate = statusRunUpdate,
-            statusRunDelete = statusRunDelete,
-        )
-        "v2" -> ManagerExampleV2(
-            statusRunSelect = statusRunSelect,
-            statusRunInsert = statusRunInsert,
-            statusRunUpdate = statusRunUpdate,
-            statusRunDelete = statusRunDelete,
-        )
-        "v3" -> ManagerExampleV3(
-            statusRunSelect = statusRunSelect,
-            statusRunInsert = statusRunInsert,
-            statusRunUpdate = statusRunUpdate,
-            statusRunDelete = statusRunDelete,
-        )
-        else -> throw IllegalArgumentException("Unsupported example version '$selectedVersion'. Choose v1, v2, v3, or v3.1.")
-    }
-    manager.readyListExamples()
-    manager.renderExamples(queryManager)
 
 }
 

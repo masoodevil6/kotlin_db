@@ -36,6 +36,7 @@ val runSelect = providers.gradleProperty("query.example.run.select").map { it.to
 val runInsert = providers.gradleProperty("query.example.run.insert").map { it.toBooleanStrict() }.orElse(false)
 val runUpdate = providers.gradleProperty("query.example.run.update").map { it.toBooleanStrict() }.orElse(false)
 val runDelete = providers.gradleProperty("query.example.run.delete").map { it.toBooleanStrict() }.orElse(false)
+val runTransaction = providers.gradleProperty("query.example.run.transaction").map { it.toBooleanStrict() }.orElse(false)
 
 tasks.register<JavaExec>("run") {
     group = "application"
@@ -47,6 +48,7 @@ tasks.register<JavaExec>("run") {
     systemProperty("query.example.run.insert", runInsert.get().toString())
     systemProperty("query.example.run.update", runUpdate.get().toString())
     systemProperty("query.example.run.delete", runDelete.get().toString())
+    systemProperty("query.example.run.transaction", runTransaction.get().toString())
 }
 
 kotlin {

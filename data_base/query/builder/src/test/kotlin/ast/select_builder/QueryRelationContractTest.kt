@@ -706,8 +706,9 @@ class QueryRelationContractTest {
         }
         assertEquals(1, relationB.dependencies.size)
         assertSame(relationA, relationB.dependencies.single())
-        assertEquals(1, relationC.dependencies.size)
-        assertSame(relationB, relationC.dependencies.single())
+        assertEquals(listOf(relationA, relationB), relationC.dependencies)
+        assertSame(relationA, relationC.dependencies[0])
+        assertSame(relationB, relationC.dependencies[1])
 
         val consumer = QueryRenderSelectBuilder()
             .withs { addWith { with(relationC) } }

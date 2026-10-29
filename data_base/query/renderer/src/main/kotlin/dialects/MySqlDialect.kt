@@ -27,6 +27,7 @@ import gog.my_project.data_base.query.ast.interfaces.select_interface.option_ord
 import gog.my_project.data_base.query.ast.interfaces.select_interface.option_partition.IQueryOptionPartitionAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.select.IQuerySelectAst
+import gog.my_project.data_base.query.ast.interfaces.select_interface.select_lock_row.IQuerySelectLockRowAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.table.IQueryTableAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.where.IQueryWhereAst
 import gog.my_project.data_base.query.ast.interfaces.select_interface.withs.IQueryWithsAst
@@ -61,6 +62,7 @@ import gog.my_project.data_base.query.renderer.nodes.select_nodes.option_order.M
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.option_partition.MySqlQueryOptionPartitionCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.query.MySqlQueryCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.select.MySqlQuerySelectCapability
+import gog.my_project.data_base.query.renderer.nodes.select_nodes.select_lock_row.MySqlQuerySelectLockRowCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.table.MySqlQueryTableCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.where.MySqlQueryWhereCapability
 import gog.my_project.data_base.query.renderer.nodes.select_nodes.withs.MySqlQueryWithsCapability
@@ -85,6 +87,7 @@ open class MySqlDialect : BaseSqlDialect() {
 
     override val _prefixWiths:  String =       "with";
     override val _prefixSelect: String =       "select";
+    override val _prefixSelectLock: String =   "for update";
     override val _prefixTable:  String =       "from"
     override val _prefixWhere:  String =       "where";
 
@@ -120,14 +123,16 @@ open class MySqlDialect : BaseSqlDialect() {
         _registry.register(IQueryJoinsItemAst::class                       , MySqlQueryJoinsItemCapability());
 
         _registry.register(IQueryRenderSelectAst::class                    , MySqlQueryCapability());
-        _registry.register(IQuerySelectAst::class                          , MySqlQuerySelectCapability());
         _registry.register(IQueryTableAst::class                           , MySqlQueryTableCapability());
         _registry.register(IQueryWhereAst::class                           , MySqlQueryWhereCapability());
         _registry.register(IQueryWithsAst::class                           , MySqlQueryWithsCapability());
         _registry.register(IQueryWithsItemAst::class                       , MySqlQueryWithsItemCapability());
 
+        _registry.register(IQuerySelectAst::class                          , MySqlQuerySelectCapability());
+        _registry.register(IQuerySelectLockRowAst::class                   , MySqlQuerySelectLockRowCapability());
+
         _registry.register(IQueryColumnMethodConcatAst::class              , MySqlQueryColumnMethodConcatCapability());
-        _registry.register(IQueryColumnMethodCountAst::class              , MySqlQueryColumnMethodCountCapability());
+        _registry.register(IQueryColumnMethodCountAst::class               , MySqlQueryColumnMethodCountCapability());
         _registry.register(IQueryColumnMethodMinAst::class                 , MySqlQueryColumnMethodMinCapability());
         _registry.register(IQueryColumnMethodMaxAst::class                 , MySqlQueryColumnMethodMaxCapability());
         _registry.register(IQueryColumnMethodSumAst::class                 , MySqlQueryColumnMethodSumCapability());

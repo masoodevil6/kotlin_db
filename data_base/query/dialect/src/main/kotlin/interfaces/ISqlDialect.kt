@@ -11,6 +11,7 @@ interface ISqlDialect {
 
     val _prefixWiths:         String;
     val _prefixSelect:        String;
+    val _prefixSelectLock:    String;
     val _prefixTable:         String;
     val _prefixWhere:         String;
     val _prefixGroup:         String;

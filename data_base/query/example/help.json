@@ -2,7 +2,7 @@
     "schemaVersion": 2,
     "module": {
         "title": "نمونه‌های Query Builder",
-        "description": "نمونه‌های V1، V2، V3 و V3.1 برای ساخت و اجرای Queryها. V3.1 هر CTE را مستقیماً اجرا می‌کند. اکشن Run، Main.kt را با تنظیم فعلی اجرا می‌کند و به MySQL وصل می‌شود؛ در تنظیم فعلی، فقط Selectها فعال‌اند.",
+        "description": "نمونه‌های V1 تا V4 برای ساخت و اجرای Queryها. V3.1 هر CTE را مستقیماً اجرا می‌کند. V4 نمونه‌های SELECT مبتنی بر CTE، عملیات CRUD و تراکنش را دارد. اکشن Run، Main.kt را با تنظیم فعلی اجرا می‌کند و به MySQL وصل می‌شود؛ عملیات تغییردهنده و تراکنش به‌صورت پیش‌فرض غیرفعال‌اند.",
         "icon": "code",
         "actions": [
             {
@@ -14,7 +14,7 @@
                     {
                         "id": "version",
                         "label": "نسخهٔ اجرا",
-                        "description": "اگر نسخه‌ای انتخاب نشود، V3 به‌صورت پیش‌فرض اجرا می‌شود. V3.1 هر CTE را مستقیماً اجرا می‌کند.",
+                        "description": "اگر نسخه‌ای انتخاب نشود، V3 به‌صورت پیش‌فرض اجرا می‌شود. V3.1 هر CTE را مستقیماً اجرا می‌کند. V4 نمونه‌های CTE، CRUD و تراکنش دارد.",
                         "type": "select",
                         "required": false,
                         "secret": false,
@@ -34,6 +34,10 @@
                             {
                                 "value": "v3.1",
                                 "label": "V3.1 (Direct CTE execution)"
+                            },
+                            {
+                                "value": "v4",
+                                "label": "V4 (CTE, CRUD, and transactions)"
                             }
                         ],
                         "binding": {
@@ -91,6 +95,19 @@
                         "binding": {
                             "type": "gradle-project-property",
                             "name": "query.example.run.delete"
+                        }
+                    },
+                    {
+                        "id": "run-transaction",
+                        "label": "اجرای Transaction",
+                        "description": "برای اجرای سناریوهای تراکنش V4 این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.transaction"
                         }
                     }
                 ]

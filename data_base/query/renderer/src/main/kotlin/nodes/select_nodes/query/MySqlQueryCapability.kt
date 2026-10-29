@@ -8,6 +8,7 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.option_offs
 import gog.my_project.data_base.query.dialect.data_class.select_data.option_order.QueryOptionOrderData
 import gog.my_project.data_base.query.dialect.data_class.select_data.query_render_select.IQueryRenderSelectData
 import gog.my_project.data_base.query.dialect.data_class.select_data.select.QuerySelectData
+import gog.my_project.data_base.query.dialect.data_class.select_data.select_lock_row.QuerySelectLockRowData
 import gog.my_project.data_base.query.dialect.data_class.select_data.table.QueryTableData
 import gog.my_project.data_base.query.dialect.data_class.select_data.where.QueryWhereData
 import gog.my_project.data_base.query.dialect.data_class.select_data.withs.QueryWithsData
@@ -25,27 +26,29 @@ class MySqlQueryCapability :
     ): String?
     {
 
-        val queryBuilderWiths =        ast.withs;
-        val queryBuilderSelect =       ast.select;
-        val queryBuilderTable =        ast.table;
-        val queryBuilderJoins =        ast.joins;
-        val queryBuilderWhere =        ast.where;
-        val queryBuilderOptionLimit =  ast.optionLimit;
-        val queryBuilderOptionOffset = ast.optionOffset;
-        val queryBuilderOptionGroup =  ast.optionGroup;
-        val queryBuilderOptionOrder =  ast.optionOrder;
+        val queryBuilderWiths =          ast.withs;
+        val queryBuilderSelect =         ast.select;
+        val queryBuilderTable =          ast.table;
+        val queryBuilderJoins =          ast.joins;
+        val queryBuilderWhere =          ast.where;
+        val queryBuilderOptionLimit =    ast.optionLimit;
+        val queryBuilderOptionOffset =   ast.optionOffset;
+        val queryBuilderOptionGroup =    ast.optionGroup;
+        val queryBuilderOptionOrder =    ast.optionOrder;
+        val queryBuilderSelectLockRow =  ast.lockForUpdate;
 
         val renderedWiths = ctx.registry.render(queryBuilderWiths, ctx.dialect, QueryWithsData(_withPrefix = true))
 
         return  " ${renderedWiths.orEmpty()} " +
-                " ${ctx.registry.render(queryBuilderSelect       , ctx.dialect  , QuerySelectData(_withPrefix = true))       } " +
-                " ${ctx.registry.render(queryBuilderTable        , ctx.dialect  , QueryTableData(_withPrefix = true))       } " +
-                " ${ctx.registry.render(queryBuilderJoins        , ctx.dialect  , QueryJoinsData())                           } " +
-                " ${ctx.registry.render(queryBuilderWhere        , ctx.dialect  , QueryWhereData())                           } " +
-                " ${ctx.registry.render(queryBuilderOptionGroup  , ctx.dialect  , QueryOptionGroupData())                     } " +
-                " ${ctx.registry.render(queryBuilderOptionOrder  , ctx.dialect  , QueryOptionOrderData())                     } " +
-                " ${ctx.registry.render(queryBuilderOptionLimit  , ctx.dialect  , QueryOptionLimitData())                     } " +
-                " ${ctx.registry.render(queryBuilderOptionOffset , ctx.dialect  , QueryOptionOffsetData())                    } ";
+                " ${ctx.registry.render(queryBuilderSelect        , ctx.dialect  , QuerySelectData(_withPrefix = true))        } " +
+                " ${ctx.registry.render(queryBuilderTable         , ctx.dialect  , QueryTableData(_withPrefix = true))         } " +
+                " ${ctx.registry.render(queryBuilderJoins         , ctx.dialect  , QueryJoinsData())                           } " +
+                " ${ctx.registry.render(queryBuilderWhere         , ctx.dialect  , QueryWhereData())                           } " +
+                " ${ctx.registry.render(queryBuilderOptionGroup   , ctx.dialect  , QueryOptionGroupData())                     } " +
+                " ${ctx.registry.render(queryBuilderOptionOrder   , ctx.dialect  , QueryOptionOrderData())                     } " +
+                " ${ctx.registry.render(queryBuilderOptionLimit   , ctx.dialect  , QueryOptionLimitData())                     } " +
+                " ${ctx.registry.render(queryBuilderOptionOffset  , ctx.dialect  , QueryOptionOffsetData())                    } " +
+                " ${ctx.registry.render(queryBuilderSelectLockRow , ctx.dialect  , QuerySelectLockRowData())                   } ";
 
     }
 

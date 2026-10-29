@@ -16,16 +16,17 @@ dependencies {
 
     implementation(project(":tools"))
 
-    implementation(project(":data_base:core"))
+    api(project(":data_base:core"))
 
-    implementation(project(":data_base:query:ast"))
+    api(project(":data_base:query:ast"))
     implementation(project(":data_base:query:builder"))
-    implementation(project(":data_base:query:api"))
+    api(project(":data_base:query:api"))
     implementation(project(":data_base:query:meta_data"))
     implementation(project(":data_base:query:dialect"))
     implementation(project(":data_base:query:renderer"))
 
-    implementation(project(":data_base:manager:execute"))
+    api(project(":data_base:manager:execute"))
+    implementation(project(":data_base:manager:connection"))
 
     testImplementation(kotlin("test"))
     testImplementation(project(":data_base:query:cte"))
@@ -33,6 +34,19 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    maxParallelForks = 1
+    listOf(
+        "execute.test.db.transaction.enabled",
+        "execute.test.db.host",
+        "execute.test.db.port",
+        "execute.test.db.name",
+        "execute.test.db.username",
+        "execute.test.db.password",
+    ).forEach { propertyName ->
+        providers.gradleProperty(propertyName).orNull?.let { propertyValue ->
+            systemProperty(propertyName, propertyValue)
+        }
+    }
 }
 kotlin {
     jvmToolchain(24)

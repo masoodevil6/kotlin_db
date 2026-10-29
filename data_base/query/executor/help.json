@@ -61,6 +61,106 @@
         "type": "gradle-html",
         "path": "build/reports/tests/test"
       }
+    },
+    {
+      "id": "query-executor-transaction-mysql-integration",
+      "title": "TransactionMySqlIntegrationTest.kt — آزمون تراکنش MySQL",
+      "description": "اجرای هفت سناریوی واقعی تراکنش و FOR UPDATE روی schema اختصاصی. تست برای هر سناریو جدول InnoDB یکتا می‌سازد و فقط همان جدول را پاک می‌کند. پیش از فعال‌کردن opt-in، وجود schema و کاربر محدود و مجازبودن تغییرات در آن را تأیید کنید.",
+      "runner": {
+        "type": "gradle-test",
+        "testFilter": "gog.my_project.data_base.query.executer.manager.TransactionMySqlIntegrationTest"
+      },
+      "parameters": [
+        {
+          "id": "transaction-opt-in",
+          "label": "فعال‌سازی صریح تست دیتابیسی",
+          "description": "تا پیش از آماده‌بودن schema آزمایشی و تأیید مجوزها خاموش بماند؛ برای اجرای هفت سناریوی دیتابیسی باید روشن شود.",
+          "type": "boolean",
+          "required": true,
+          "default": false,
+          "secret": false,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.transaction.enabled"
+          }
+        },
+        {
+          "id": "db-host",
+          "label": "میزبان MySQL",
+          "type": "text",
+          "required": true,
+          "default": "127.0.0.1",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.host"
+          }
+        },
+        {
+          "id": "db-port",
+          "label": "درگاه MySQL",
+          "type": "number",
+          "required": true,
+          "default": 3306,
+          "secret": false,
+          "minimum": 1,
+          "maximum": 65535,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.port"
+          }
+        },
+        {
+          "id": "db-schema",
+          "label": "Schema آزمایشی اختصاصی",
+          "type": "text",
+          "required": true,
+          "default": "kotlin_db_test_connection",
+          "secret": false,
+          "validation": {
+            "pattern": "^(?:qb_tx_test_[A-Za-z0-9_]+|kotlin_db_test_connection)$",
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.name"
+          }
+        },
+        {
+          "id": "db-username",
+          "label": "کاربر محدود MySQL",
+          "type": "text",
+          "required": true,
+          "default": "qb_tx_test_user",
+          "secret": false,
+          "validation": {
+            "notBlank": true
+          },
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.username"
+          }
+        },
+        {
+          "id": "db-password",
+          "label": "گذرواژهٔ کاربر آزمایشی",
+          "description": "در فرم محلی Help وارد می‌شود؛ مقدار پیش‌فرض ندارد و محرمانه است.",
+          "type": "password",
+          "required": true,
+          "secret": true,
+          "binding": {
+            "type": "gradle-project-property",
+            "name": "execute.test.db.password"
+          }
+        }
+      ],
+      "report": {
+        "type": "gradle-html",
+        "path": "build/reports/tests/test"
+      }
     }
   ]
 }

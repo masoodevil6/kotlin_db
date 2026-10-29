@@ -7,6 +7,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.option_limit
 import gog.my_project.data_base.query.api.interfaces.api.select_api.option_offset.IQueryOptionOffsetApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.option_order.IQueryOptionOrderApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.select.IQuerySelectApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.select_lock_row.IQuerySelectLockRowApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.table.IQueryTableApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.where.IQueryWhereApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQueryWithsApi
@@ -27,5 +28,7 @@ interface IQueryRenderSelectApi : IQueryApi<IQueryRenderSelectAst> {
     fun group(blockGroup: IQueryOptionGroupApi.() -> Unit): IQueryRenderSelectApi;
 
     fun order(blockOrder: IQueryOptionOrderApi.() -> Unit): IQueryRenderSelectApi;
+
+    fun lockForUpdate(blockLock: IQuerySelectLockRowApi.() -> Unit): IQueryRenderSelectApi;
 
 }

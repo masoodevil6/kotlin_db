@@ -3,7 +3,7 @@ package gog.my_project.data_base.manager.execute.interfaces
 import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
-import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
+import gog.my_project.data_base.manager.execute.connection.withOwnedConnection
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.manager.execute.query.BoundQuery
 import java.sql.Connection
@@ -44,6 +44,15 @@ interface IQueryExecute {
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,
     )
 
+    /** Executes a legacy SELECT using a caller-owned connection. Implementations may opt in explicitly. */
+    fun executeSelect(
+        connection: Connection,
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<ResultSet>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
+
     /** Executes positional SQL with occurrence-ordered parameter references. */
     fun executeSelect(
         boundQuery: BoundQuery,
@@ -58,10 +67,27 @@ interface IQueryExecute {
         )
     }
 
+    /** Executes positional SELECT SQL without taking ownership of the supplied connection. */
+    fun executeSelect(
+        connection: Connection,
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<ResultSet>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
+
     fun executeUpdate(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
     )
+
+    fun executeUpdate(
+        connection: Connection,
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
 
     /** Executes positional UPDATE SQL with occurrence-ordered parameter references. */
     fun executeUpdate(
@@ -71,10 +97,26 @@ interface IQueryExecute {
         blockExecute(unsupportedBoundQueryExecution())
     }
 
+    fun executeUpdate(
+        connection: Connection,
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
+
     fun executeInsert(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Long>) -> Unit,
     )
+
+    fun executeInsert(
+        connection: Connection,
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Long>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
 
     /** Executes positional INSERT SQL with occurrence-ordered parameter references. */
     fun executeInsert(
@@ -84,10 +126,26 @@ interface IQueryExecute {
         blockExecute(unsupportedBoundQueryExecution())
     }
 
+    fun executeInsert(
+        connection: Connection,
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Long>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
+
     fun executeDelete(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
     )
+
+    fun executeDelete(
+        connection: Connection,
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
 
     /** Executes positional DELETE SQL with occurrence-ordered parameter references. */
     fun executeDelete(
@@ -97,10 +155,26 @@ interface IQueryExecute {
         blockExecute(unsupportedBoundQueryExecution())
     }
 
+    fun executeDelete(
+        connection: Connection,
+        boundQuery: BoundQuery,
+        blockExecute: (ExecuteResult<Int>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
+
     fun executeTable(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
     )
+
+    fun executeTable(
+        connection: Connection,
+        builtQuery: BuiltQuery,
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+    ) {
+        blockExecute(unsupportedSuppliedConnectionExecution())
+    }
 
     /** Acquires the connection and invokes the operation once; operation code owns JDBC error delivery. */
     fun execute(
@@ -119,8 +193,7 @@ interface IQueryExecute {
         // A null SQL input retains its legacy post-connection failure path.
         val paramsNames = builtQuery.getListParamNames()
 
-        val connection = DatabaseConnection().build()
-        connection.use { conn ->
+        withOwnedConnection { conn ->
             if (query == null) {
                 blockExecute(
                     conn,
@@ -186,6 +259,13 @@ interface IQueryExecute {
         ExecuteResult.Failure(
             UnsupportedOperationException(
                 "${this::class.qualifiedName} does not support identity-aware BoundQuery execution",
+            ),
+        )
+
+    private fun <T> unsupportedSuppliedConnectionExecution(): ExecuteResult<T> =
+        ExecuteResult.Failure(
+            UnsupportedOperationException(
+                "${this::class.qualifiedName} does not support execution on a supplied JDBC Connection",
             ),
         )
 

@@ -7,6 +7,7 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.option_offse
 import gog.my_project.data_base.query.api.interfaces.api.select_api.option_order.IQueryOptionOrderApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.select.IQuerySelectApi
+import gog.my_project.data_base.query.api.interfaces.api.select_api.select_lock_row.IQuerySelectLockRowApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.where.IQueryWhereApi
 import gog.my_project.data_base.query.api.interfaces.api.select_api.withs.IQueryWithsApi
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
@@ -19,6 +20,7 @@ import gog.my_project.data_base.query.ast.schema.select_schema.option_offset.Que
 import gog.my_project.data_base.query.ast.schema.select_schema.option_order.QueryOptionOrderAst
 import gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst
 import gog.my_project.data_base.query.ast.schema.select_schema.select.QuerySelectAst
+import gog.my_project.data_base.query.ast.schema.select_schema.select_lock_row.QuerySelectLockRowAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.where.QueryWhereAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.table.QueryTableAst
 import gog.my_project.data_base.query.ast.schema.select_schema_ast.withs.QueryWithsAst
@@ -32,6 +34,7 @@ import gog.my_project.data_base.query.builder.ast.select_builder.option_limit.Qu
 import gog.my_project.data_base.query.builder.ast.select_builder.option_offset.QueryOptionOffsetBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.option_order.QueryOptionOrderBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.select.QuerySelectBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.select_lock_row.QuerySelectLockRowBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.table.QueryTableBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.where.QueryWhereBuilder
 import gog.my_project.data_base.query.builder.ast.select_builder.withs.QueryWithsBuilder
@@ -228,6 +231,20 @@ class QueryRenderSelectBuilder(
             ast
         ).apply(blockOrder);
         this.ast.optionOrder = ast;
+        return this;
+    }
+
+
+
+    /* ==============================================================
+      structure [lock]
+      ============================================================== */
+    override fun lockForUpdate(blockLock: IQuerySelectLockRowApi.() -> Unit): IQueryRenderSelectApi {
+        val ast = QuerySelectLockRowAst();
+        QuerySelectLockRowBuilder(
+            ast
+        ).apply(blockLock);
+        this.ast.lockForUpdate = ast;
         return this;
     }
 

@@ -17,6 +17,19 @@ fun <T, R> ExecuteResult<T>.success(
     is ExecuteResult.Failure -> this
 }
 
+/**
+ * Continues a successful result with another result-producing operation.
+ * Unlike [success], this flattens the returned result, so a deliberate Failure
+ * remains a Failure for callers such as transaction scopes. A successful null
+ * payload is passed to [transform] so the caller can decide how to handle it.
+ */
+fun <T, R> ExecuteResult<T>.then(
+    transform: (T?) -> ExecuteResult<R>,
+): ExecuteResult<R> = when (this) {
+    is ExecuteResult.Success -> transform(result)
+    is ExecuteResult.Failure -> this
+}
+
 /** Observes a failure without consuming or recovering it. */
 fun <T> ExecuteResult<T>.error(
     handler: (Throwable) -> Unit,

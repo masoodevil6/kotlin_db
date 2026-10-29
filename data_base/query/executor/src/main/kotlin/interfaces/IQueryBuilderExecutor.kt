@@ -34,6 +34,32 @@ import java.sql.ResultSet
 
 interface IQueryBuilderExecutor  {
 
+    /**
+     * Runs the callback with one connection-bound executor when this implementation supports
+     * connection scopes. Implementations without connection-bound execution fail explicitly and
+     * do not invoke the callback or fall back to per-query connections.
+     */
+    fun <T> connection(
+        block: (ctx: IQueryBuilderExecutor) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = ExecuteResult.Failure(
+        UnsupportedOperationException(
+            "${this::class.qualifiedName} does not support connection-scoped execution",
+        ),
+    )
+
+    /**
+     * Runs the callback in a transaction when this executor supports transaction scopes.
+     * Implementations without connection-bound execution support fail explicitly and do not
+     * invoke the callback or fall back to ordinary per-query connections.
+     */
+    fun <T> transaction(
+        block: (tx: IQueryBuilderExecutor) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = ExecuteResult.Failure(
+        UnsupportedOperationException(
+            "${this::class.qualifiedName} does not support transaction-scoped execution",
+        ),
+    )
+
     /** Builds a SELECT query and binds this executor to its fluent consumer. */
     fun queryBuilderSelect(
         block: (IQueryRenderSelectApi) -> Unit,
@@ -42,6 +68,9 @@ interface IQueryBuilderExecutor  {
         block(query)
         return QueryConsumer(query, this)
     }
+
+
+
 
     /** Binds an already constructed SELECT query to this executor. */
     fun queryBuilder(query: IQueryRenderSelectApi): QueryConsumer =
@@ -62,6 +91,10 @@ interface IQueryBuilderExecutor  {
     /** Builds an operation-specific query through the unified queryBuilder entry point. */
     fun <T> queryBuilder(block: QueryBuilderOperationBlock<T>): T =
         block.build(QueryBuilderSelection(this))
+
+
+
+
 
     /** Returns rendered SQL without interpolating or changing the query's parameters. */
     fun sql(queryBuilder: IQueryRenderSelectApi): String = renderSql(queryBuilder)
@@ -172,6 +205,9 @@ interface IQueryBuilderExecutor  {
         )
     }
 
+
+
+
     //// select
     fun execute(
         queryBuilder:    IQueryRenderSelectApi,
@@ -199,6 +235,9 @@ interface IQueryBuilderExecutor  {
         blockExecute:     (ExecuteResult<Int>) -> Unit,
         blockQueryInfo:   ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
     )
+
+
+
 
 
     fun <Ast: IQueryAst<*>,Api :IQueryApi<Ast> > executeOut(

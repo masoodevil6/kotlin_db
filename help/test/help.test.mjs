@@ -79,6 +79,34 @@ test('loads the real migration Help Definition without changing its Gradle test 
   assert.equal(loaded.tests[1].context.expectedMigrations.length, 7);
 });
 
+test('executor transaction MySQL Help accepts the exact allowlisted schema and prefixed test schemas', () => {
+  const repositoryRoot = path.resolve(import.meta.dirname, '../..');
+  const projectDir = path.join(repositoryRoot, 'data_base', 'query', 'executor');
+  const loaded = loadHelpDefinition({ projectPath: ':data_base:query:executor', projectDir });
+  const integrationTest = loaded.tests.find((item) => item.id === 'query-executor-transaction-mysql-integration');
+  assert.ok(integrationTest);
+
+  const schemaParameter = integrationTest.parameters.find((item) => item.id === 'db-schema');
+  assert.equal(schemaParameter.default, 'kotlin_db_test_connection');
+
+  const passwordParameter = integrationTest.parameters.find((item) => item.id === 'db-password');
+  assert.equal(passwordParameter.secret, true);
+  assert.equal(passwordParameter.default, undefined);
+
+  const validateSchema = (schema) => validateParameters(integrationTest, {
+    'transaction-opt-in': true,
+    'db-host': '127.0.0.1',
+    'db-port': 3306,
+    'db-schema': schema,
+    'db-username': 'qb_tx_test_user',
+    'db-password': 'test-only-placeholder',
+  })['execute.test.db.name'];
+
+  assert.equal(validateSchema('kotlin_db_test_connection'), 'kotlin_db_test_connection');
+  assert.equal(validateSchema('qb_tx_test_valid_1'), 'qb_tx_test_valid_1');
+  assert.throws(() => validateSchema('application_database'), /invalid format/);
+});
+
 test('Query Example helper exposes V3.1 and passes it to Gradle as the version property', async () => {
   const repositoryRoot = path.resolve(import.meta.dirname, '../..');
   const projectDir = path.join(repositoryRoot, 'data_base', 'query', 'example');

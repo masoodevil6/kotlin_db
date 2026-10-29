@@ -108,8 +108,8 @@ class InlineCteParameterBindingTest {
         assertEquals(expectedPlaceholderOrder, placeholderNames(whereFirstSql))
 
         val whereFirstParent = whereBeforeFrom.ast.table!!.derivedQuery!!
-        val whereFirstNested = whereFirstParent.withs!!.withs.single().withBody!!
-        assertEquals("inner_query", whereFirstParent.withs!!.withs.single().metadata.withName)
+        val whereFirstNested = whereFirstParent.table!!.derivedQuery!!
+        assertEquals("inner_query", whereFirstParent.table!!.metadata.cteRuntimeName)
         val expectedWhereFirstReferences = listOf(
             conditionParameter(whereFirstNested),
             conditionParameter(whereFirstParent),
@@ -124,7 +124,8 @@ class InlineCteParameterBindingTest {
         }
 
         val fromFirstParent = fromBeforeWhere.ast.table!!.derivedQuery!!
-        val fromFirstNested = fromFirstParent.withs!!.withs.single().withBody!!
+        val fromFirstNested = fromFirstParent.table!!.derivedQuery!!
+        assertEquals("inner_query", fromFirstParent.table!!.metadata.cteRuntimeName)
         val expectedFromFirstReferences = listOf(
             conditionParameter(fromFirstNested),
             conditionParameter(fromFirstParent),

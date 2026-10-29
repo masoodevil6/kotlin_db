@@ -9,6 +9,7 @@ import gog.my_project.data_base.query.api.interfaces.api.update_api.query_render
 import gog.my_project.data_base.query.ast.enums.DataType
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base.query.executer.result.QueryConsumer
 import gog.my_project.data_base.query.executer.result.QueryRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -142,6 +143,24 @@ class QueryConsumerExecuteAsTest {
         val failure = assertIs<ExecuteResult.Failure>(result).exception
         assertTrue(failure.message.orEmpty().contains("materialized row list"))
         assertEquals(0, mapperCalls)
+        assertEquals(1, executor.getCalls)
+    }
+
+    @Test
+    fun `executeAs reports missing materialized rows to the scoped failure observer`() {
+        val executor = RecordingExecutor(ExecuteResult.Success(null))
+        val observedFailures = mutableListOf<Throwable>()
+
+        val result = QueryConsumer(
+            QueryRenderSelectBuilder(),
+            executor,
+            observedFailures::add,
+        ).executeAs { it }
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("materialized row list"))
+        assertEquals(1, observedFailures.size)
+        assertSame(failure, observedFailures.single())
         assertEquals(1, executor.getCalls)
     }
 

@@ -59,7 +59,7 @@ class A5ExampleSelectV1 : IExampleV1<IQueryRenderSelectApi> {
                         tableSelector("uu")
                         columnSelector("age")
                     }
-                    operationIs()
+                    operationEqual()
                     sideValueParam {
                         paramName("user_age")
                         paramValue(1)

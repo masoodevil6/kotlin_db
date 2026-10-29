@@ -4,6 +4,8 @@ import gog.my_project.collection.Collection as ProjectCollection
 import gog.my_project.collection.ICollection
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.query.executer.result.toCollection
+import gog.my_project.data_base.query.executer.result.toList
+import gog.my_project.data_base.query.executer.result.success
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -68,5 +70,56 @@ class ExecuteResultCollectionExtensionsTest {
         val extracted: ICollection<Int> = result.toCollection()
 
         assertEquals(17, extracted[0])
+    }
+
+    @Test
+    fun `toList extracts raw rows from the original list instance`() {
+        val rows = listOf("first", "second")
+        val result: ExecuteResult<List<String>> = ExecuteResult.Success(rows)
+
+        assertSame(rows, result.toList())
+    }
+
+    @Test
+    fun `toList rethrows a raw select failure and rejects a missing row list`() {
+        val original = IllegalArgumentException("raw SELECT failed")
+        val failed: ExecuteResult<List<String>> = ExecuteResult.Failure(original)
+        val thrown = assertFailsWith<IllegalArgumentException> { failed.toList() }
+        assertSame(original, thrown)
+
+        val missing: ExecuteResult<List<String>> = ExecuteResult.Success(null)
+        assertEquals(
+            "Successful result contains no value",
+            assertFailsWith<IllegalStateException> { missing.toList() }.message,
+        )
+    }
+
+    @Test
+    fun `toList reflects a successful transformation of raw rows`() {
+        val result: ExecuteResult<List<Int>> = ExecuteResult.Success(listOf(1, 2, 3))
+
+        val extracted = result.success { rows -> rows.filter { it > 1 } }.toList()
+
+        assertEquals(listOf(2, 3), extracted)
+    }
+
+    @Test
+    fun `toList converts a typed collection after successful transformation`() {
+        val rows: ICollection<Int> = ProjectCollection<Int>().apply {
+            add(1)
+            add(2)
+        }
+        val result: ExecuteResult<ICollection<Int>> = ExecuteResult.Success(rows)
+
+        val extracted = result.success { values -> values.filter { it == 2 } }.toList()
+
+        assertEquals(listOf(2), extracted)
+    }
+
+    @Test
+    fun `toValue extracts the payload transformed by success`() {
+        val result: ExecuteResult<Int> = ExecuteResult.Success(21)
+
+        assertEquals(42, result.success { it * 2 }.toValue())
     }
 }
