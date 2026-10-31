@@ -230,24 +230,24 @@ class MigrationExecutorDropColumnTest {
     private fun migrationForTest(ifExists: Boolean = false): IMigrationDropColumnApi =
         object : IMigrationDropColumnApi {
             override var ast: IMigrationDropColumnAst = MigrationDropColumnAst().apply {
-                tableName = "users"
-                name = "display_name"
-                this.ifExists = ifExists
+                metadata.tableName = "users"
+                metadata.name = "display_name"
+                metadata.ifExists = ifExists
             }
             override var params: MutableList<SqlParameter<*>> = mutableListOf()
 
             override fun tableName(table: String): IMigrationDropColumnApi {
-                ast.tableName = table
+                ast.metadata.tableName = table
                 return this
             }
 
             override fun name(name: String): IMigrationDropColumnApi {
-                ast.name = name
+                ast.metadata.name = name
                 return this
             }
 
             override fun ifExists(): IMigrationDropColumnApi {
-                ast.ifExists = true
+                ast.metadata.ifExists = true
                 return this
             }
         }

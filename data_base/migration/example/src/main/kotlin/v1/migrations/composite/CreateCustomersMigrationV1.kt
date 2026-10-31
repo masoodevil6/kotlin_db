@@ -23,18 +23,9 @@ class CreateCustomersMigrationV1 : Migration {
                 notNull()
             }
         }
-        createIndex {
-            tableName("customers")
-            name("idx_customers_email")
-            column("email")
-        }
     }
 
     override fun down(): MigrationDefinition = migration {
-        dropIndex {
-            tableName("customers")
-            name("idx_customers_email")
-        }
         dropTable {
             tableName("customers")
         }

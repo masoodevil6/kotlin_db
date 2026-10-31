@@ -12,9 +12,7 @@ class MySqlMigrationTableCapability: IMigrationTableCapability {
         ctx: IRenderContext,
         dataClass: MigrationTableData?
     ): String? {
-        val tableName = ast.tableName;
-
-        require(!tableName.isNullOrBlank()) { "Table name must not be blank" }
+        val tableName = requireNotNull(ast.metadata.tableName) { "Table name is required" }
         return "`${tableName.replace("`", "``")}`"
     }
 

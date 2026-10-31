@@ -1,16 +1,19 @@
 package gog.my_project.data_base.migration.example.v1.migrations.rename_column
 
 import gog.my_project.data_base.migration.api.interfaces.rename_column.IMigrationRenameColumnApi
-import gog.my_project.data_base.migration.builder.renameColumn
+import gog.my_project.data_base.migration.builder.ast.rename_column.MigrationRenameColumnBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+
+
+
 
 class A1ExampleRenameColumnV1(
     private val table: String = "users",
     private val from: String = "display_name",
     private val target: String = "full_name",
 ) {
-    fun migration(): IMigrationRenameColumnApi = renameColumn {
+    fun migration(): IMigrationRenameColumnApi = MigrationRenameColumnBuilder().apply {
         tableName(table)
         name(from)
         to(target)

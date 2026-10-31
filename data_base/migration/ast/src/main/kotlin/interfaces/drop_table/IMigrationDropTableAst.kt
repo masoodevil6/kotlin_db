@@ -1,10 +1,8 @@
 package gog.my_project.data_base.migration.ast.interfaces.drop_table
 
 import gog.my_project.data_base.migration.ast.interfaces.IMigrationAst
+import gog.my_project.data_base.migration.ast.metadata.drop_table.MigrationDropTableAstMetadata
 
-interface IMigrationDropTableAst : IMigrationAst {
+interface IMigrationDropTableAst : IMigrationAst<MigrationDropTableAstMetadata> {
 
-    var tableName: String?
-
-    var ifExists: Boolean
 }

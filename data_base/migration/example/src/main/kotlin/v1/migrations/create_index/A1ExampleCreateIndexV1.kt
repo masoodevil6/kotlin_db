@@ -1,9 +1,12 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_index
 
 import gog.my_project.data_base.migration.api.interfaces.create_index.IMigrationCreateIndexApi
-import gog.my_project.data_base.migration.builder.createIndex
+import gog.my_project.data_base.migration.builder.ast.create_index.MigrationCreateIndexBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+
+
+
 
 class A1ExampleCreateIndexV1(
     private val table: String = "users",
@@ -11,7 +14,7 @@ class A1ExampleCreateIndexV1(
     private val column: String = "email",
 ) {
     fun migration(): IMigrationCreateIndexApi =
-        createIndex {
+        MigrationCreateIndexBuilder().apply {
             tableName(table)
             name(index)
             column(column)

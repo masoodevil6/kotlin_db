@@ -7,12 +7,15 @@ import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
 import gog.my_project.data_base.migration.ast.interfaces.foreign_key.ForeignKeyAction
-import gog.my_project.data_base.migration.builder.createTable
+import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
 import gog.my_project.data_base.migration.params.data_types.IntType
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorCreateTableDefinitionsTest {
     @Test
@@ -25,7 +28,7 @@ class MigrationExecutorCreateTableDefinitionsTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createTable {
+                queryBuilder = MigrationRenderCreateTableBuilder().apply {
                     table { tableName("orders") }
                     addColumn { name("tenant_id"); dataType(IntType()); notNull() }
                     addColumn { name("order_id"); dataType(IntType()); notNull() }
@@ -69,7 +72,7 @@ class MigrationExecutorCreateTableDefinitionsTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createTable {
+                queryBuilder = MigrationRenderCreateTableBuilder().apply {
                     table { tableName("lookup") }
                     addColumn { name("id"); dataType(IntType()); notNull() }
                     unique { name("uq_lookup_id"); columns("id") }

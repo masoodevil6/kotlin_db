@@ -12,11 +12,11 @@ class MySqlMigrationDropTableCapability : IMigrationDropTableCapability {
         ctx: IRenderContext,
         dataClass: MigrationDataClass?
     ): String {
-        val tableName = requireNotNull(ast.tableName?.takeIf(String::isNotBlank)) {
-            "DROP TABLE requires a non-blank table name"
+        val tableName = requireNotNull(ast.metadata.tableName) {
+            "DROP TABLE requires a table name"
         }
         val quotedTableName = "`${tableName.replace("`", "``")}`"
-        val ifExists = if (ast.ifExists) " IF EXISTS" else ""
+        val ifExists = if (ast.metadata.ifExists) " IF EXISTS" else ""
         return "DROP TABLE$ifExists $quotedTableName"
     }
 }

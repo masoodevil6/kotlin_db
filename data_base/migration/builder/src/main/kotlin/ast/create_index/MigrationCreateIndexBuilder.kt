@@ -11,25 +11,20 @@ class MigrationCreateIndexBuilder(
     override var ast: IMigrationCreateIndexAst = MigrationCreateIndexAst(),
 ) : IMigrationCreateIndexApi {
     override fun tableName(table: String): IMigrationCreateIndexApi = apply {
-        ast.tableName = table.trim()
+        ast.metadata.tableName = table.trim()
     }
 
     override fun name(name: String): IMigrationCreateIndexApi = apply {
-        ast.indexName = name.trim()
+        ast.metadata.indexName = name.trim()
     }
 
     override fun column(column: String): IMigrationCreateIndexApi = apply {
-        ast.columnName = column.trim()
+        ast.metadata.columnName = column.trim()
     }
 
     override fun using(method: IndexMethod): IMigrationCreateIndexApi = apply {
-        ast.indexMethod = method
+        ast.metadata.indexMethod = method
     }
 
-    fun build(): IMigrationCreateIndexApi {
-        require(!ast.tableName.isNullOrBlank()) { "CREATE INDEX requires a non-blank table name" }
-        require(!ast.indexName.isNullOrBlank()) { "CREATE INDEX requires a non-blank index name" }
-        require(!ast.columnName.isNullOrBlank()) { "CREATE INDEX requires a non-blank column name" }
-        return this
-    }
+    fun build(): IMigrationCreateIndexApi = this
 }

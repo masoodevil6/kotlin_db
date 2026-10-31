@@ -8,14 +8,21 @@ import gog.my_project.data_base.migration.ast.interfaces.create_table.render_mig
 import gog.my_project.data_base.migration.ast.schema.create_table.column.MigrationColumnAst
 import gog.my_project.data_base.migration.ast.schema.create_table.render_migration_create_table.MigrationRenderCreateTableAst
 import gog.my_project.data_base.migration.ast.schema.create_table.table.MigrationTableAst
+import gog.my_project.data_base.migration.builder.ast.create_table.column.MigrationColumnBuilder
+import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableForeignKeyBuilder
+import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableFullTextIndexBuilder
+import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableIndexBuilder
 import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTablePrimaryKeyBuilder
 import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableUniqueBuilder
-import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableFullTextIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.create_table.definition.MigrationCreateTableForeignKeyBuilder
-import gog.my_project.data_base.migration.builder.ast.create_table.column.MigrationColumnBuilder
 import gog.my_project.data_base.migration.builder.ast.create_table.table.MigrationTableBuilder
 import gog.my_project.data_base.migration.params.data_types.DateTimeType
+
+
+
+
+
+
+
 
 class MigrationRenderCreateTableBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
@@ -58,32 +65,17 @@ class MigrationRenderCreateTableBuilder(
 
     private fun appendTimestampColumns(vararg names: String) {
         val normalizedNames = names.map(String::trim)
-        require(normalizedNames.distinctBy { it.lowercase() }.size == normalizedNames.size) {
-            "CREATE TABLE shorthand generated duplicate column names"
-        }
-        normalizedNames.forEach { name -> validateColumnNameAvailable(name) }
         normalizedNames.forEach { name ->
             appendColumnAst(MigrationColumnAst().apply {
-                columnName = name
-                columnDataType = DateTimeType()
-                columnNullable = true
+                metadata.columnName = name
+                metadata.columnDataType = DateTimeType()
+                metadata.columnNullable = true
             })
         }
     }
 
     private fun appendColumn(columnAst: MigrationColumnAst) {
-        val name = requireNotNull(columnAst.columnName?.takeIf(String::isNotBlank)) {
-            "CREATE TABLE column name must not be blank"
-        }
-        validateColumnNameAvailable(name)
         appendColumnAst(columnAst)
-    }
-
-    private fun validateColumnNameAvailable(name: String) {
-        val duplicate = ast.columns.any { existing ->
-            existing.columnName?.trim()?.equals(name.trim(), ignoreCase = true) == true
-        }
-        require(!duplicate) { "CREATE TABLE has duplicate column name '$name'" }
     }
 
     private fun appendColumnAst(columnAst: MigrationColumnAst) {
@@ -131,7 +123,7 @@ class MigrationRenderCreateTableBuilder(
     }
 
     override fun ifNotExists(): IMigrationRenderCreateTableApi {
-        ast.ifNotExists = true
+        ast.metadata.ifNotExists = true
         return this
     }
 

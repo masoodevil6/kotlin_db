@@ -3,15 +3,17 @@ package gog.my_project.data_base.migration.example.v1.migrations.foreign_key
 import gog.my_project.data_base.migration.ast.interfaces.foreign_key.ForeignKeyAction
 import gog.my_project.data_base.migration.ast.schema.create_foreign_key.MigrationCreateForeignKeyAst
 import gog.my_project.data_base.migration.ast.schema.drop_foreign_key.MigrationDropForeignKeyAst
-import gog.my_project.data_base.migration.builder.createForeignKey
-import gog.my_project.data_base.migration.builder.dropForeignKey
+import gog.my_project.data_base.migration.builder.ast.create_foreign_key.MigrationCreateForeignKeyBuilder
 import gog.my_project.data_base.migration.example.v1.migrations.create_foreign_key.A1ExampleCreateForeignKeyV1
 import gog.my_project.data_base.migration.example.v1.migrations.drop_foreign_key.A1ExampleDropForeignKeyV1
 import gog.my_project.data_base.migration.renderer.dialects.MariaDbDialect
 import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.Test
+
+
+
 
 class ForeignKeyV1Test {
     private val mysql = MySqlDialect()
@@ -37,7 +39,7 @@ class ForeignKeyV1Test {
 
     @Test
     fun trimsIdentifiersAndPreservesCaseAndPositionalColumnOrder() {
-        val migration = createForeignKey {
+        val migration = MigrationCreateForeignKeyBuilder().apply {
             tableName(" Orders ")
             name(" Fk_Order_User ")
             columns(" User_ID ", "Tenant_ID")
@@ -45,10 +47,10 @@ class ForeignKeyV1Test {
             referencesColumns(" ID ", "Tenant_ID")
         }
 
-        assertEquals("Orders", migration.ast.tableName)
-        assertEquals("Fk_Order_User", migration.ast.constraintName)
-        assertEquals(listOf("User_ID", "Tenant_ID"), migration.ast.columnNames)
-        assertEquals(listOf("ID", "Tenant_ID"), migration.ast.referencesColumnNames)
+        assertEquals("Orders", migration.ast.metadata.tableName)
+        assertEquals("Fk_Order_User", migration.ast.metadata.constraintName)
+        assertEquals(listOf("User_ID", "Tenant_ID"), migration.ast.metadata.columnNames)
+        assertEquals(listOf("ID", "Tenant_ID"), migration.ast.metadata.referencesColumnNames)
         assertEquals(
             "ALTER TABLE `Orders` ADD CONSTRAINT `Fk_Order_User` " +
                 "FOREIGN KEY (`User_ID`, `Tenant_ID`) REFERENCES `Users` (`ID`, `Tenant_ID`)",
@@ -58,7 +60,7 @@ class ForeignKeyV1Test {
 
     @Test
     fun escapesIdentifiersAndSupportsSingleColumnAsOnePair() {
-        val migration = createForeignKey {
+        val migration = MigrationCreateForeignKeyBuilder().apply {
             tableName("order`data")
             name("fk`order")
             columns("user`id")
@@ -89,13 +91,13 @@ class ForeignKeyV1Test {
             ForeignKeyAction.SET_NULL to "SET NULL",
         )
         actionSql.forEach { (action, sql) ->
-            val withDelete = createForeignKey {
+            val withDelete = MigrationCreateForeignKeyBuilder().apply {
                 tableName("orders"); name("fk_orders_user"); columns("user_id")
                 referencesTable("users"); referencesColumns("id"); onDelete(action)
             }
             assertEquals(true, mysql.render(withDelete.ast)!!.endsWith("ON DELETE $sql"))
 
-            val withUpdate = createForeignKey {
+            val withUpdate = MigrationCreateForeignKeyBuilder().apply {
                 tableName("orders"); name("fk_orders_user"); columns("user_id")
                 referencesTable("users"); referencesColumns("id"); onUpdate(action)
             }
@@ -104,59 +106,62 @@ class ForeignKeyV1Test {
     }
 
     @Test
-    fun rejectsMissingBlankUnequalAndDuplicateBuilderInputs() {
-        assertFailsWith<IllegalArgumentException> { createForeignKey { name("fk"); columns("a"); referencesTable("p"); referencesColumns("a") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName(" "); name("fk"); columns("a"); referencesTable("p"); referencesColumns("a") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name(" "); columns("a"); referencesTable("p"); referencesColumns("a") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns(" "); referencesTable("p"); referencesColumns("a") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns("a"); referencesTable(" "); referencesColumns("a") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns("a"); referencesTable("p"); referencesColumns(" ") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns("a", "b"); referencesTable("p"); referencesColumns("a") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns("a", " A "); referencesTable("p"); referencesColumns("a", "b") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns("a", "b"); referencesTable("p"); referencesColumns("b", " B ") } }
-        assertFailsWith<IllegalArgumentException> { createForeignKey { tableName("c"); name("fk"); columns(); referencesTable("p"); referencesColumns() } }
+    fun rendersBlankUnequalAndDuplicateInputsForDatabaseValidation() {
+        assertFailsWith<IllegalArgumentException> {
+            mysql.render(MigrationCreateForeignKeyBuilder().apply { name("fk"); columns("a"); referencesTable("p"); referencesColumns("a") }.ast)
+        }
+        assertEquals("ALTER TABLE `` ADD CONSTRAINT `fk` FOREIGN KEY (`a`) REFERENCES `p` (`a`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName(" "); name("fk"); columns("a"); referencesTable("p"); referencesColumns("a") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `` FOREIGN KEY (`a`) REFERENCES `p` (`a`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name(" "); columns("a"); referencesTable("p"); referencesColumns("a") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `fk` FOREIGN KEY (``) REFERENCES `p` (`a`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns(" "); referencesTable("p"); referencesColumns("a") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `fk` FOREIGN KEY (`a`) REFERENCES `` (`a`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns("a"); referencesTable(" "); referencesColumns("a") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `fk` FOREIGN KEY (`a`) REFERENCES `p` (``)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns("a"); referencesTable("p"); referencesColumns(" ") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `fk` FOREIGN KEY (`a`, `b`) REFERENCES `p` (`a`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns("a", "b"); referencesTable("p"); referencesColumns("a") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `fk` FOREIGN KEY (`a`, `A`) REFERENCES `p` (`a`, `b`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns("a", " A "); referencesTable("p"); referencesColumns("a", "b") }.ast))
+        assertEquals("ALTER TABLE `c` ADD CONSTRAINT `fk` FOREIGN KEY (`a`, `b`) REFERENCES `p` (`b`, `B`)", mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns("a", "b"); referencesTable("p"); referencesColumns("b", " B ") }.ast))
+        assertFailsWith<IllegalArgumentException> { mysql.render(MigrationCreateForeignKeyBuilder().apply { tableName("c"); name("fk"); columns(); referencesTable("p"); referencesColumns() }.ast) }
     }
 
     @Test
     fun repeatedColumnSettersReplaceListsAndKeepLatestOrder() {
-        val migration = createForeignKey {
+        val migration = MigrationCreateForeignKeyBuilder().apply {
             tableName("orders"); name("fk_orders_user")
             columns("discarded"); columns("tenant_id", "user_id")
             referencesTable("users")
             referencesColumns("discarded"); referencesColumns("tenant_id", "id")
         }
-        assertEquals(listOf("tenant_id", "user_id"), migration.ast.columnNames)
-        assertEquals(listOf("tenant_id", "id"), migration.ast.referencesColumnNames)
+        assertEquals(listOf("tenant_id", "user_id"), migration.ast.metadata.columnNames)
+        assertEquals(listOf("tenant_id", "id"), migration.ast.metadata.referencesColumnNames)
     }
 
     @Test
-    fun renderersDefensivelyRejectIncompleteOrMalformedAsts() {
+    fun renderersRequireAColumnListAndPassSemanticShapeToDatabase() {
         assertFailsWith<IllegalArgumentException> { mysql.render(MigrationCreateForeignKeyAst()) }
-        assertFailsWith<IllegalArgumentException> {
+        assertEquals(
+            "ALTER TABLE `orders` ADD CONSTRAINT `fk` FOREIGN KEY (`a`) REFERENCES `users` (`a`, `b`)",
             mysql.render(MigrationCreateForeignKeyAst().apply {
-                tableName = "orders"; constraintName = "fk"; columnNames = listOf("a")
-                referencesTableName = "users"; referencesColumnNames = listOf("a", "b")
-            })
-        }
-        assertFailsWith<IllegalArgumentException> {
+                metadata.tableName = "orders"; metadata.constraintName = "fk"; metadata.columnNames = listOf("a")
+                metadata.referencesTableName = "users"; metadata.referencesColumnNames = listOf("a", "b")
+            }),
+        )
+        assertEquals(
+            "ALTER TABLE `orders` ADD CONSTRAINT `fk` FOREIGN KEY (`a`, ` A `) REFERENCES `users` (`a`, `b`)",
             mysql.render(MigrationCreateForeignKeyAst().apply {
-                tableName = "orders"; constraintName = "fk"; columnNames = listOf("a", " A ")
-                referencesTableName = "users"; referencesColumnNames = listOf("a", "b")
-            })
-        }
-        assertFailsWith<IllegalArgumentException> {
+                metadata.tableName = "orders"; metadata.constraintName = "fk"; metadata.columnNames = listOf("a", " A ")
+                metadata.referencesTableName = "users"; metadata.referencesColumnNames = listOf("a", "b")
+            }),
+        )
+        assertEquals(
+            "ALTER TABLE `orders` ADD CONSTRAINT `fk` FOREIGN KEY (`a`, `b`) REFERENCES `users` (`a`, ` A `)",
             mysql.render(MigrationCreateForeignKeyAst().apply {
-                tableName = "orders"; constraintName = "fk"; columnNames = listOf("a", "b")
-                referencesTableName = "users"; referencesColumnNames = listOf("a", " A ")
-            })
-        }
+                metadata.tableName = "orders"; metadata.constraintName = "fk"; metadata.columnNames = listOf("a", "b")
+                metadata.referencesTableName = "users"; metadata.referencesColumnNames = listOf("a", " A ")
+            }),
+        )
         assertFailsWith<IllegalArgumentException> { mysql.render(MigrationDropForeignKeyAst()) }
-        assertFailsWith<IllegalArgumentException> {
-            mysql.render(MigrationDropForeignKeyAst().apply { tableName = "orders"; constraintName = " " })
-        }
+        assertEquals("ALTER TABLE `orders` DROP FOREIGN KEY ` `", mysql.render(MigrationDropForeignKeyAst().apply { metadata.tableName = "orders"; metadata.constraintName = " " }))
     }
 
-    private fun foreignKey() = createForeignKey {
+    private fun foreignKey() = MigrationCreateForeignKeyBuilder().apply {
         tableName("orders")
         name("fk_orders_user")
         columns("user_id")

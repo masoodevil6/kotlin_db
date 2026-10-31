@@ -13,12 +13,10 @@ abstract class BaseSqlDialect(
         registerRenders()
     }
 
-
-    override fun <Ast : IMigrationAst> render(
+    override fun <Ast : IMigrationAst<*>> render(
         ast: Ast
     ): String? {
         return _registry.render(ast , this , null);
     }
-
 
 }

@@ -23,20 +23,19 @@ class MySqlMigrationColumnCapability : IMigrationColumnCapability {
         ctx: IRenderContext,
         dataClass: MigrationColumnData?
     ): String {
-        val name = requireNotNull(ast.columnName?.takeIf(String::isNotBlank)) {
-            "Column name must not be blank"
+        val name = requireNotNull(ast.metadata.columnName) {
+            "Column name is required"
         }
-        val type = requireNotNull(ast.columnDataType) { "Column '$name' must have a data type" }
+        val type = requireNotNull(ast.metadata.columnDataType) { "Column '$name' must have a data type" }
         val typeSql = renderDataType(type)
         val parts = mutableListOf(quoteIdentifier(name), typeSql)
 
-        parts += if (ast.columnNullable) "NULL" else "NOT NULL"
-        if (ast.hasColumnDefault) {
-            validateTemporalDefault(type, ast.columnDefault)
-            parts += "DEFAULT ${renderDefault(ast.columnDefault)}"
+        parts += if (ast.metadata.columnNullable) "NULL" else "NOT NULL"
+        if (ast.metadata.hasColumnDefault) {
+            parts += "DEFAULT ${renderDefault(ast.metadata.columnDefault)}"
         }
-        if (ast.columnAutoIncrement) parts += "AUTO_INCREMENT"
-        if (ast.columnPrimary) parts += "PRIMARY KEY"
+        if (ast.metadata.columnAutoIncrement) parts += "AUTO_INCREMENT"
+        if (ast.metadata.columnPrimary) parts += "PRIMARY KEY"
 
         return parts.joinToString(" ")
     }
@@ -59,14 +58,6 @@ class MySqlMigrationColumnCapability : IMigrationColumnCapability {
             "$name fractional-second precision must be between 0 and 6"
         }
         return "$name${precision?.let { "($it)" } ?: ""}"
-    }
-
-    private fun validateTemporalDefault(type: MigrationColumnDataType, value: Any?) {
-        if (type is DateType || type is TimeType || type is DateTimeType || type is TimestampType) {
-            require(value == null || value is String) {
-                "Temporal column DEFAULT must be a string literal or NULL"
-            }
-        }
     }
 
     private fun renderDefault(value: Any?): String = when (value) {

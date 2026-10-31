@@ -2,13 +2,16 @@ package gog.my_project.data_base.migration.example.v1.migrations.create_foreign_
 
 import gog.my_project.data_base.migration.api.interfaces.create_foreign_key.IMigrationCreateForeignKeyApi
 import gog.my_project.data_base.migration.ast.interfaces.foreign_key.ForeignKeyAction
-import gog.my_project.data_base.migration.builder.createForeignKey
+import gog.my_project.data_base.migration.builder.ast.create_foreign_key.MigrationCreateForeignKeyBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
+
+
+
 class A1ExampleCreateForeignKeyV1 {
     fun migration(): IMigrationCreateForeignKeyApi =
-        createForeignKey {
+        MigrationCreateForeignKeyBuilder().apply {
             tableName("orders")
             name("fk_orders_tenant_user")
             columns("tenant_id", "user_id")

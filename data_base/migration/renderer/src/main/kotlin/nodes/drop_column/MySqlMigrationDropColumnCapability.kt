@@ -11,11 +11,11 @@ class MySqlMigrationDropColumnCapability : IMigrationDropColumnCapability {
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val tableName = requireNotNull(ast.tableName?.takeIf(String::isNotBlank)) {
-            "DROP COLUMN requires a non-blank table name"
+        val tableName = requireNotNull(ast.metadata.tableName) {
+            "DROP COLUMN requires a table name"
         }
-        val columnName = requireNotNull(ast.name?.takeIf(String::isNotBlank)) {
-            "DROP COLUMN requires a non-blank column name"
+        val columnName = requireNotNull(ast.metadata.name) {
+            "DROP COLUMN requires a column name"
         }
 
         return "ALTER TABLE ${quoteIdentifier(tableName)} DROP COLUMN ${quoteIdentifier(columnName)}"

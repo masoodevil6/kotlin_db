@@ -1,12 +1,15 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_multi_column_index
 
 import gog.my_project.data_base.migration.ast.schema.create_multi_column_index.MigrationCreateMultiColumnIndexAst
-import gog.my_project.data_base.migration.builder.createMultiColumnIndex
+import gog.my_project.data_base.migration.builder.ast.create_multi_column_index.MigrationCreateMultiColumnIndexBuilder
 import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.Test
+
+
+
 
 class A1ExampleCreateMultiColumnIndexV1Test {
     private val dialect = MySqlDialect()
@@ -21,15 +24,15 @@ class A1ExampleCreateMultiColumnIndexV1Test {
 
     @Test
     fun trimsAndPreservesIdentifierCasingAndColumnOrder() {
-        val migration = createMultiColumnIndex {
+        val migration = MigrationCreateMultiColumnIndexBuilder().apply {
             tableName("  Users  ")
             name("  Idx_User_Name  ")
             columns("  Last_Name  ", "  First_Name  ", "  Email  ")
         }
 
-        assertEquals("Users", migration.ast.tableName)
-        assertEquals("Idx_User_Name", migration.ast.indexName)
-        assertEquals(listOf("Last_Name", "First_Name", "Email"), migration.ast.columnNames)
+        assertEquals("Users", migration.ast.metadata.tableName)
+        assertEquals("Idx_User_Name", migration.ast.metadata.indexName)
+        assertEquals(listOf("Last_Name", "First_Name", "Email"), migration.ast.metadata.columnNames)
         assertEquals(
             "CREATE INDEX `Idx_User_Name` ON `Users` (`Last_Name`, `First_Name`, `Email`)",
             dialect.render(migration.ast),
@@ -39,14 +42,14 @@ class A1ExampleCreateMultiColumnIndexV1Test {
 
     @Test
     fun laterColumnsCallReplacesEarlierList() {
-        val migration = createMultiColumnIndex {
+        val migration = MigrationCreateMultiColumnIndexBuilder().apply {
             tableName("users")
             name("idx_users_email_age")
             columns("last_name", "first_name")
             columns("email", "age")
         }
 
-        assertEquals(listOf("email", "age"), migration.ast.columnNames)
+        assertEquals(listOf("email", "age"), migration.ast.metadata.columnNames)
         assertEquals(
             "CREATE INDEX `idx_users_email_age` ON `users` (`email`, `age`)",
             dialect.render(migration.ast),
@@ -54,21 +57,23 @@ class A1ExampleCreateMultiColumnIndexV1Test {
     }
 
     @Test
-    fun duplicateComparisonIgnoresCaseAndWhitespaceButPreservesValidSpelling() {
-        assertFailsWith<IllegalArgumentException> {
-            createMultiColumnIndex {
-                tableName("users")
-                name("idx_users_email")
-                columns("email", " EMAIL ")
-            }
+    fun rendersDuplicateColumnsWithoutSemanticValidationAndPreservesSpelling() {
+        val duplicate = MigrationCreateMultiColumnIndexBuilder().apply {
+            tableName("users")
+            name("idx_users_email")
+            columns("email", " EMAIL ")
         }
+        assertEquals(
+            "CREATE INDEX `idx_users_email` ON `users` (`email`, `EMAIL`)",
+            dialect.render(duplicate.ast),
+        )
 
-        val valid = createMultiColumnIndex {
+        val valid = MigrationCreateMultiColumnIndexBuilder().apply {
             tableName("users")
             name("idx_users_email_user")
             columns("Email", "UserName")
         }
-        assertEquals(listOf("Email", "UserName"), valid.ast.columnNames)
+        assertEquals(listOf("Email", "UserName"), valid.ast.metadata.columnNames)
         assertEquals(
             "CREATE INDEX `idx_users_email_user` ON `users` (`Email`, `UserName`)",
             dialect.render(valid.ast),
@@ -78,13 +83,13 @@ class A1ExampleCreateMultiColumnIndexV1Test {
     @Test
     fun hasNoArtificialColumnCountLimit() {
         val columns = (1..20).map { "column_$it" }
-        val migration = createMultiColumnIndex {
+        val migration = MigrationCreateMultiColumnIndexBuilder().apply {
             tableName("events")
             name("idx_events_many")
             columns(*columns.toTypedArray())
         }
 
-        assertEquals(columns, migration.ast.columnNames)
+        assertEquals(columns, migration.ast.metadata.columnNames)
         assertEquals(
             "CREATE INDEX `idx_events_many` ON `events` (${columns.joinToString(", ") { "`$it`" }})",
             dialect.render(migration.ast),
@@ -92,46 +97,51 @@ class A1ExampleCreateMultiColumnIndexV1Test {
     }
 
     @Test
-    fun rejectsMissingBlankOrSingleColumnInput() {
+    fun requiresAColumnListButRendersSingleAndBlankColumnIdentifiers() {
         assertFailsWith<IllegalArgumentException> {
-            createMultiColumnIndex { tableName("users"); name("idx") }
+            dialect.render(MigrationCreateMultiColumnIndexBuilder().apply { tableName("users"); name("idx") }.ast)
         }
-        assertFailsWith<IllegalArgumentException> {
-            createMultiColumnIndex { tableName("users"); name("idx"); columns("email") }
-        }
-        assertFailsWith<IllegalArgumentException> {
-            createMultiColumnIndex { tableName("users"); name("idx"); columns("email", " ") }
-        }
+        assertEquals(
+            "CREATE INDEX `idx` ON `users` (`email`)",
+            dialect.render(MigrationCreateMultiColumnIndexBuilder().apply { tableName("users"); name("idx"); columns("email") }.ast),
+        )
+        assertEquals(
+            "CREATE INDEX `idx` ON `users` (`email`, ``)",
+            dialect.render(MigrationCreateMultiColumnIndexBuilder().apply { tableName("users"); name("idx"); columns("email", " ") }.ast),
+        )
     }
 
     @Test
-    fun rendererRejectsInvalidDirectAst() {
-        assertFailsWith<IllegalArgumentException> {
+    fun rendererAcceptsDatabaseSemanticCasesInDirectAst() {
+        assertEquals(
+            "CREATE INDEX `idx_users_email` ON `users` (`email`)",
             dialect.render(MigrationCreateMultiColumnIndexAst().apply {
-                tableName = "users"
-                indexName = "idx_users_email"
-                columnNames = listOf("email")
-            })
-        }
-        assertFailsWith<IllegalArgumentException> {
+                metadata.tableName = "users"
+                metadata.indexName = "idx_users_email"
+                metadata.columnNames = listOf("email")
+            }),
+        )
+        assertEquals(
+            "CREATE INDEX `idx_users_email` ON `users` (`email`, ` EMAIL `)",
             dialect.render(MigrationCreateMultiColumnIndexAst().apply {
-                tableName = "users"
-                indexName = "idx_users_email"
-                columnNames = listOf("email", " EMAIL ")
-            })
-        }
-        assertFailsWith<IllegalArgumentException> {
+                metadata.tableName = "users"
+                metadata.indexName = "idx_users_email"
+                metadata.columnNames = listOf("email", " EMAIL ")
+            }),
+        )
+        assertEquals(
+            "CREATE INDEX `idx_users_email` ON `users` (`email`, ` `)",
             dialect.render(MigrationCreateMultiColumnIndexAst().apply {
-                tableName = "users"
-                indexName = "idx_users_email"
-                columnNames = listOf("email", " ")
-            })
-        }
+                metadata.tableName = "users"
+                metadata.indexName = "idx_users_email"
+                metadata.columnNames = listOf("email", " ")
+            }),
+        )
     }
 
     @Test
     fun quotesReservedWordsEscapesBackticksAndAddsNoOptions() {
-        val sql = createMultiColumnIndex {
+        val sql = MigrationCreateMultiColumnIndexBuilder().apply {
             tableName("order")
             name("select`index")
             columns("user`email", "group")
@@ -145,12 +155,12 @@ class A1ExampleCreateMultiColumnIndexV1Test {
 
     @Test
     fun scalarSetterCallOrderDoesNotChangeSql() {
-        val first = createMultiColumnIndex {
+        val first = MigrationCreateMultiColumnIndexBuilder().apply {
             columns("last_name", "first_name")
             name("idx_users_name")
             tableName("users")
         }
-        val second = createMultiColumnIndex {
+        val second = MigrationCreateMultiColumnIndexBuilder().apply {
             tableName("users")
             name("idx_users_name")
             columns("last_name", "first_name")

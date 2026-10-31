@@ -7,8 +7,6 @@ import gog.my_project.data_base.query.dialect.data_class.select_data.conditions_
 import gog.my_project.data_base.query.dialect.nodes.select_nodes.condition_item_collection.IQueryConditionCollectionCapability
 import gog.my_project.data_base.query.renderer.interfaces.IRenderContext
 import gog.my_project.data_base.query.renderer.interfaces.IParameterOccurrenceAwareRenderer
-import gog.my_project.data_base.query.renderer.interfaces.renderParameter
-import gog.my_project.data_base.query.renderer.interfaces.renderLegacyPlaceholder
 
 class MySqlQueryConditionCollectionCapability :
     IQueryConditionCollectionCapability, IParameterOccurrenceAwareRenderer {

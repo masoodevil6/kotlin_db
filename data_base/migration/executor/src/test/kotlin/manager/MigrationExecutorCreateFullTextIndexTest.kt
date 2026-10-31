@@ -5,12 +5,15 @@ import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.createFullTextIndex
+import gog.my_project.data_base.migration.builder.ast.create_full_text_index.MigrationCreateFullTextIndexBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorCreateFullTextIndexTest {
     @Test
@@ -23,7 +26,7 @@ class MigrationExecutorCreateFullTextIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createFullTextIndex {
+                queryBuilder = MigrationCreateFullTextIndexBuilder().apply {
                     tableName("posts")
                     name("ft_posts_title_body")
                     columns("title", "body")
@@ -53,7 +56,7 @@ class MigrationExecutorCreateFullTextIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createFullTextIndex {
+                queryBuilder = MigrationCreateFullTextIndexBuilder().apply {
                     tableName("posts")
                     name("ft_posts_body")
                     columns("body")

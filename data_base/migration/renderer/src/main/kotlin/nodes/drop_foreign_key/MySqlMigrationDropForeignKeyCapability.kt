@@ -11,15 +11,13 @@ class MySqlMigrationDropForeignKeyCapability : IMigrationDropForeignKeyCapabilit
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val table = requireIdentifier(ast.tableName, "table")
-        val constraint = requireIdentifier(ast.constraintName, "constraint")
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val constraint = requireIdentifier(ast.metadata.constraintName, "constraint")
         return "ALTER TABLE ${quoteIdentifier(table)} DROP FOREIGN KEY ${quoteIdentifier(constraint)}"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) {
-            "DROP FOREIGN KEY requires a non-blank $label name"
-        }
+        requireNotNull(value) { "DROP FOREIGN KEY requires a $label name" }
 
     private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
 }

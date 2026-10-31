@@ -1,33 +1,27 @@
 package gog.my_project.data_base.migration.ast.interfaces.create_table.definition
 
-import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
-import gog.my_project.data_base.migration.ast.interfaces.foreign_key.ForeignKeyAction
+import gog.my_project.data_base.migration.ast.metadata.create_table.definition.ForeignKeyDefinitionAstMetadata
+import gog.my_project.data_base.migration.ast.metadata.create_table.definition.FullTextIndexDefinitionAstMetadata
+import gog.my_project.data_base.migration.ast.metadata.create_table.definition.IndexDefinitionAstMetadata
+import gog.my_project.data_base.migration.ast.metadata.create_table.definition.PrimaryKeyDefinitionAstMetadata
+import gog.my_project.data_base.migration.ast.metadata.create_table.definition.UniqueDefinitionAstMetadata
 
 data class PrimaryKeyDefinitionAst(
-    val columnNames: List<String>,
-) : IMigrationCreateTableDefinitionAst
+    override var metadata: PrimaryKeyDefinitionAstMetadata,
+) : IMigrationCreateTableDefinitionAst<PrimaryKeyDefinitionAstMetadata>
 
 data class UniqueDefinitionAst(
-    val indexName: String,
-    val columnNames: List<String>,
-) : IMigrationCreateTableDefinitionAst
+    override var metadata: UniqueDefinitionAstMetadata,
+) : IMigrationCreateTableDefinitionAst<UniqueDefinitionAstMetadata>
 
 data class IndexDefinitionAst(
-    val indexName: String,
-    val columnNames: List<String>,
-    val indexMethod: IndexMethod? = null,
-) : IMigrationCreateTableDefinitionAst
+    override var metadata: IndexDefinitionAstMetadata,
+) : IMigrationCreateTableDefinitionAst<IndexDefinitionAstMetadata>
 
 data class FullTextIndexDefinitionAst(
-    val indexName: String,
-    val columnNames: List<String>,
-) : IMigrationCreateTableDefinitionAst
+    override var metadata: FullTextIndexDefinitionAstMetadata,
+) : IMigrationCreateTableDefinitionAst<FullTextIndexDefinitionAstMetadata>
 
 data class ForeignKeyDefinitionAst(
-    val constraintName: String,
-    val columnNames: List<String>,
-    val referencesTableName: String,
-    val referencesColumnNames: List<String>,
-    val onDelete: ForeignKeyAction? = null,
-    val onUpdate: ForeignKeyAction? = null,
-) : IMigrationCreateTableDefinitionAst
+    override var metadata: ForeignKeyDefinitionAstMetadata,
+) : IMigrationCreateTableDefinitionAst<ForeignKeyDefinitionAstMetadata>

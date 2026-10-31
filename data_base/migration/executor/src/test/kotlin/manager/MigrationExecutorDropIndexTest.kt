@@ -6,12 +6,15 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.dropIndex
+import gog.my_project.data_base.migration.builder.ast.drop_index.MigrationDropIndexBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorDropIndexTest {
     @Test
@@ -24,7 +27,7 @@ class MigrationExecutorDropIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = dropIndex { tableName("users"); name("PRIMARY") },
+                queryBuilder = MigrationDropIndexBuilder().apply { tableName("users"); name("PRIMARY") },
                 blockExecute = { received = it },
             )
         } finally {
@@ -47,7 +50,7 @@ class MigrationExecutorDropIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = dropIndex { tableName("users"); name("idx_users_email") },
+                queryBuilder = MigrationDropIndexBuilder().apply { tableName("users"); name("idx_users_email") },
                 blockExecute = { received = it },
                 blockQueryInfo = { query, _ -> reportedQuery = query },
             )

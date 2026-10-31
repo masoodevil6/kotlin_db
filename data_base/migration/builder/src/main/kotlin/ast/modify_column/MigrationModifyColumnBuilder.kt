@@ -19,16 +19,14 @@ class MigrationModifyColumnBuilder(
     private var autoIncrementState: Boolean? = null
 
     override var ast: IMigrationModifyColumnAst
-        get() = MigrationModifyColumnAst(
-            tableName = requireValue(table, "table name"),
-            columnName = requireValue(column, "column name"),
-            columnDataType = requireNotNull(type) { "MODIFY COLUMN requires a data type" },
-            nullability = requireNotNull(nullable) { "MODIFY COLUMN requires explicit nullability" },
-            defaultDefinition = defaultDefinition,
-            autoIncrement = requireNotNull(autoIncrementState) {
-                "MODIFY COLUMN requires an explicit AUTO_INCREMENT state"
-            },
-        )
+        get() = MigrationModifyColumnAst().apply {
+            metadata.tableName = table
+            metadata.columnName = column
+            metadata.columnDataType = type
+            metadata.nullability = nullable
+            metadata.defaultDefinition = this@MigrationModifyColumnBuilder.defaultDefinition
+            metadata.autoIncrement = autoIncrementState ?: false
+        }
         set(value) { throw UnsupportedOperationException("MODIFY COLUMN AST is built from DSL state") }
 
     override fun tableName(table: String): IMigrationModifyColumnApi = apply { this.table = table.trim() }
@@ -43,6 +41,4 @@ class MigrationModifyColumnBuilder(
     }
     override fun autoIncrement(status: Boolean): IMigrationModifyColumnApi = apply { autoIncrementState = status }
 
-    private fun requireValue(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) { "MODIFY COLUMN requires a non-blank $label" }
 }

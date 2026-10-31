@@ -1,20 +1,23 @@
 package gog.my_project.data_base.migration.example.v1.migrations.temporal_data_types
 
-import gog.my_project.data_base.migration.builder.addColumn
-import gog.my_project.data_base.migration.builder.createTable
-import gog.my_project.data_base.migration.builder.modifyColumn
+import gog.my_project.data_base.migration.builder.ast.add_column.MigrationAddColumnBuilder
+import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
+import gog.my_project.data_base.migration.builder.ast.modify_column.MigrationModifyColumnBuilder
 import gog.my_project.data_base.migration.params.data_types.DateTimeType
 import gog.my_project.data_base.migration.params.data_types.DateType
 import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.TimeType
 import gog.my_project.data_base.migration.params.data_types.TimestampType
+import gog.my_project.data_base.migration.params.data_types.TimeType
 import gog.my_project.data_base.migration.renderer.dialects.MariaDbDialect
 import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.Test
+
+
+
 
 class TemporalDataTypesV1Test {
     private val mysql = MySqlDialect()
@@ -33,7 +36,7 @@ class TemporalDataTypesV1Test {
     @Test
     fun defaultAndExplicitZeroPrecisionRenderAsSpecified() {
         val sql = mysql.render(
-            createTable {
+            MigrationRenderCreateTableBuilder().apply {
                 table { tableName("temporal_values") }
                 addColumn { name("date_value"); dataType(DateType()) }
                 addColumn { name("time_default"); dataType(TimeType()) }
@@ -52,7 +55,7 @@ class TemporalDataTypesV1Test {
     @Test
     fun addColumnRendersTemporalTypeAndEscapesLiteralDefault() {
         val sql = mysql.render(
-            addColumn {
+            MigrationAddColumnBuilder().apply {
                 tableName("events")
                 name("created_at")
                 dataType(TimestampType(6))
@@ -69,10 +72,10 @@ class TemporalDataTypesV1Test {
 
     @Test
     fun modifyColumnKeepsTypeNullabilityAndDefaultIndependent() {
-        val noDefault = modifyColumn {
+        val noDefault = MigrationModifyColumnBuilder().apply {
             tableName("events"); name("updated_at"); dataType(DateTimeType(2)); nullable(); autoIncrement(false)
         }
-        val stringDefault = modifyColumn {
+        val stringDefault = MigrationModifyColumnBuilder().apply {
             tableName("events"); name("started_at"); dataType(TimestampType()); notNull()
             default("2026-09-29 12:13:14"); autoIncrement(false)
         }
@@ -99,28 +102,28 @@ class TemporalDataTypesV1Test {
     }
 
     @Test
-    fun rejectsNonStringTemporalDefaultsInCreateAddAndModify() {
-        val create = createTable {
+    fun rendersNumericTemporalDefaultsWithoutRevalidatingDatabaseRules() {
+        val create = MigrationRenderCreateTableBuilder().apply {
             table { tableName("events") }
             addColumn { name("created_at"); dataType(TimestampType()); default(123) }
         }
-        val add = addColumn {
+        val add = MigrationAddColumnBuilder().apply {
             tableName("events"); name("created_at"); dataType(TimestampType()); default(123)
         }
-        val modify = modifyColumn {
+        val modify = MigrationModifyColumnBuilder().apply {
             tableName("events"); name("created_at"); dataType(TimestampType()); nullable()
             default(123); autoIncrement(false)
         }
 
-        assertFailsWith<IllegalArgumentException> { mysql.render(create.ast) }
-        assertFailsWith<IllegalArgumentException> { mysql.render(add.ast) }
-        assertFailsWith<IllegalArgumentException> { mysql.render(modify.ast) }
+        assertTrue(mysql.render(create.ast).orEmpty().contains("DEFAULT 123"))
+        assertEquals("ALTER TABLE `events` ADD COLUMN `created_at` TIMESTAMP NOT NULL DEFAULT 123", mysql.render(add.ast))
+        assertEquals("ALTER TABLE `events` MODIFY COLUMN `created_at` TIMESTAMP NULL DEFAULT 123", mysql.render(modify.ast))
     }
 
     @Test
     fun mariadbDialectUsesItsRegisteredTemporalRendering() {
         val sql = mariaDb.render(
-            createTable {
+            MigrationRenderCreateTableBuilder().apply {
                 table { tableName("temporal_values") }
                 addColumn { name("happened_at"); dataType(TimestampType(4)); nullable() }
             }.ast,
@@ -134,7 +137,7 @@ class TemporalDataTypesV1Test {
 
     @Test
     fun temporalTypeDefaultsDoNotBroadenExistingNumericDefaults() {
-        val existingType = createTable {
+        val existingType = MigrationRenderCreateTableBuilder().apply {
             table { tableName("temporal_values") }
             addColumn { name("count"); dataType(IntType()); default(5) }
         }

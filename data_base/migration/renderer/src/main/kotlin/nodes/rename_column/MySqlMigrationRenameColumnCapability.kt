@@ -28,10 +28,9 @@ class MySqlMigrationRenameColumnCapability : IMigrationRenameColumnCapability {
     }
 
     private fun validateAst(ast: IMigrationRenameColumnAst): Triple<String, String, String> {
-        val table = requireNotNull(ast.tableName?.trim()?.takeIf(String::isNotBlank)) { "RENAME COLUMN requires a non-blank table name" }
-        val source = requireNotNull(ast.name?.trim()?.takeIf(String::isNotBlank)) { "RENAME COLUMN requires a non-blank source column name" }
-        val target = requireNotNull(ast.to?.trim()?.takeIf(String::isNotBlank)) { "RENAME COLUMN requires a non-blank target column name" }
-        require(source != target) { "RENAME COLUMN source and target names must differ" }
+        val table = requireNotNull(ast.metadata.tableName) { "RENAME COLUMN requires a table name" }
+        val source = requireNotNull(ast.metadata.name) { "RENAME COLUMN requires a source column name" }
+        val target = requireNotNull(ast.metadata.to) { "RENAME COLUMN requires a target column name" }
         return Triple(table, source, target)
     }
 

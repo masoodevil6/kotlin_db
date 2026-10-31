@@ -11,6 +11,6 @@ interface ISqlDialect {
 
     fun registerRenders();
 
-    fun <Ast: IMigrationAst> render(ast: Ast) : String?;
+    fun <Ast : IMigrationAst<*>> render(ast: Ast): String?;
 
 }

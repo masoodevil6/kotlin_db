@@ -11,16 +11,14 @@ class MySqlMigrationCreateUniqueIndexCapability : IMigrationCreateUniqueIndexCap
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val index = requireIdentifier(ast.indexName, "index")
-        val table = requireIdentifier(ast.tableName, "table")
-        val column = requireIdentifier(ast.columnName, "column")
+        val index = requireIdentifier(ast.metadata.indexName, "index")
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val column = requireIdentifier(ast.metadata.columnName, "column")
         return "CREATE UNIQUE INDEX ${quoteIdentifier(index)} ON ${quoteIdentifier(table)} (${quoteIdentifier(column)})"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) {
-            "CREATE UNIQUE INDEX requires a non-blank $label name"
-        }
+        requireNotNull(value) { "CREATE UNIQUE INDEX requires a $label name" }
 
     private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
 }

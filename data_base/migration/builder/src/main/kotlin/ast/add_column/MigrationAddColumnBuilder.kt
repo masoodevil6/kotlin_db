@@ -7,7 +7,6 @@ import gog.my_project.data_base.migration.ast.schema.add_column.MigrationAddColu
 import gog.my_project.data_base.migration.ast.schema.create_table.column.MigrationColumnAst
 import gog.my_project.data_base.migration.builder.ast.create_table.column.MigrationColumnBuilder
 import gog.my_project.data_base.migration.params.data_types.MigrationColumnDataType
-
 class MigrationAddColumnBuilder(
     override var params: MutableList<SqlParameter<*>> = mutableListOf(),
     override var ast: IMigrationAddColumnAst = MigrationAddColumnAst(),
@@ -20,7 +19,7 @@ class MigrationAddColumnBuilder(
     }
 
     override fun tableName(table: String): IMigrationAddColumnApi {
-        ast.tableName = table.trim()
+        ast.metadata.tableName = table.trim()
         return this
     }
 

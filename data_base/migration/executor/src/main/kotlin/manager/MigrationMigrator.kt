@@ -3,9 +3,7 @@ package gog.my_project.data_base.migration.executor.manager
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationConfiguration
-import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.api.interfaces.MigrationGroup
-import gog.my_project.data_base.migration.api.interfaces.MigrationIdentity
 import gog.my_project.data_base.migration.api.interfaces.MigrationRegistration
 import gog.my_project.data_base.migration.api.interfaces.RegisteredMigration
 import gog.my_project.data_base.migration.api.interfaces.SingleMigration
@@ -74,7 +72,6 @@ class MigrationMigrator(
         safely(completion) {
             val migration = instantiate(registered)
             val definition = migration.up()
-            requireSingleOperation(registered.id, definition)
             val operation = definition.operations.single()
 
             executor.execute(operation, blockExecute = { executionResult ->
@@ -116,13 +113,6 @@ class MigrationMigrator(
         registered.migrationClass.java.getConstructor().newInstance()
     } catch (error: InvocationTargetException) {
         throw error.targetException ?: error
-    }
-
-    private fun requireSingleOperation(identity: MigrationIdentity, definition: MigrationDefinition) {
-        require(definition.operations.size == 1) {
-            "Migration '${identity.value}' must define exactly one operation in up(); " +
-                "found ${definition.operations.size}"
-        }
     }
 
     private fun MigrationConfiguration.orderedMigrations(): List<RegisteredMigration> =

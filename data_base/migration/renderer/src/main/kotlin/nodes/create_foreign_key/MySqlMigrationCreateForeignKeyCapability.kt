@@ -12,14 +12,11 @@ class MySqlMigrationCreateForeignKeyCapability : IMigrationCreateForeignKeyCapab
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val table = requireIdentifier(ast.tableName, "table")
-        val constraint = requireIdentifier(ast.constraintName, "constraint")
-        val referencedTable = requireIdentifier(ast.referencesTableName, "referenced table")
-        val localColumns = requireColumns(ast.columnNames, "local")
-        val referencedColumns = requireColumns(ast.referencesColumnNames, "referenced")
-        require(localColumns.size == referencedColumns.size) {
-            "CREATE FOREIGN KEY local and referenced column lists must have equal size"
-        }
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val constraint = requireIdentifier(ast.metadata.constraintName, "constraint")
+        val referencedTable = requireIdentifier(ast.metadata.referencesTableName, "referenced table")
+        val localColumns = requireColumns(ast.metadata.columnNames, "local")
+        val referencedColumns = requireColumns(ast.metadata.referencesColumnNames, "referenced")
 
         val sql = StringBuilder()
             .append("ALTER TABLE ").append(quoteIdentifier(table))
@@ -28,29 +25,19 @@ class MySqlMigrationCreateForeignKeyCapability : IMigrationCreateForeignKeyCapab
             .append(" REFERENCES ").append(quoteIdentifier(referencedTable))
             .append(" (").append(referencedColumns.joinToString(", ", transform = ::quoteIdentifier)).append(')')
 
-        ast.onDelete?.let { sql.append(" ON DELETE ").append(it.sql()) }
-        ast.onUpdate?.let { sql.append(" ON UPDATE ").append(it.sql()) }
+        ast.metadata.onDelete?.let { sql.append(" ON DELETE ").append(it.sql()) }
+        ast.metadata.onUpdate?.let { sql.append(" ON UPDATE ").append(it.sql()) }
         return sql.toString()
     }
 
     private fun requireColumns(columns: List<String>?, label: String): List<String> {
         val values = requireNotNull(columns) { "CREATE FOREIGN KEY requires $label columns" }
         require(values.isNotEmpty()) { "CREATE FOREIGN KEY requires at least one $label column" }
-        require(values.all(String::isNotBlank)) { "CREATE FOREIGN KEY $label column names must be non-blank" }
-        for (currentIndex in values.indices) {
-            for (previousIndex in 0 until currentIndex) {
-                require(!values[currentIndex].trim().equals(values[previousIndex].trim(), ignoreCase = true)) {
-                    "CREATE FOREIGN KEY $label column names must not contain duplicates"
-                }
-            }
-        }
         return values
     }
 
     private fun requireIdentifier(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) {
-            "CREATE FOREIGN KEY requires a non-blank $label name"
-        }
+        requireNotNull(value) { "CREATE FOREIGN KEY requires a $label name" }
 
     private fun ForeignKeyAction.sql(): String = when (this) {
         ForeignKeyAction.CASCADE -> "CASCADE"

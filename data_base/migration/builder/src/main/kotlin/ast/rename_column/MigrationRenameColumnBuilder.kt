@@ -10,21 +10,15 @@ class MigrationRenameColumnBuilder(
     override var ast: IMigrationRenameColumnAst = MigrationRenameColumnAst(),
 ) : IMigrationRenameColumnApi {
     override fun tableName(table: String): IMigrationRenameColumnApi {
-        ast.tableName = table.trim().also { require(it.isNotEmpty()) { "RENAME COLUMN requires a non-blank table name" } }
+        ast.metadata.tableName = table.trim()
         return this
     }
     override fun name(name: String): IMigrationRenameColumnApi {
-        val normalized = name.trim()
-        require(normalized.isNotEmpty()) { "RENAME COLUMN requires a non-blank source column name" }
-        require(ast.to == null || ast.to != normalized) { "RENAME COLUMN source and target names must differ" }
-        ast.name = normalized
+        ast.metadata.name = name.trim()
         return this
     }
     override fun to(name: String): IMigrationRenameColumnApi {
-        val normalized = name.trim()
-        require(normalized.isNotEmpty()) { "RENAME COLUMN requires a non-blank target column name" }
-        require(ast.name == null || ast.name != normalized) { "RENAME COLUMN source and target names must differ" }
-        ast.to = normalized
+        ast.metadata.to = name.trim()
         return this
     }
 }

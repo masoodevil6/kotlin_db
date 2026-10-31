@@ -11,31 +11,17 @@ class MySqlMigrationCreateFullTextIndexCapability : IMigrationCreateFullTextInde
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val index = requireIdentifier(ast.indexName, "index")
-        val table = requireIdentifier(ast.tableName, "table")
-        val columns = requireNotNull(ast.columnNames) { "CREATE FULLTEXT INDEX requires at least one column" }
+        val index = requireIdentifier(ast.metadata.indexName, "index")
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val columns = requireNotNull(ast.metadata.columnNames) { "CREATE FULLTEXT INDEX requires at least one column" }
         require(columns.isNotEmpty()) { "CREATE FULLTEXT INDEX requires at least one column" }
-        require(columns.all(String::isNotBlank)) { "CREATE FULLTEXT INDEX column names must be non-blank" }
-        requireNoDuplicateColumns(columns)
 
         val renderedColumns = columns.joinToString(", ") { quoteIdentifier(it) }
         return "CREATE FULLTEXT INDEX ${quoteIdentifier(index)} ON ${quoteIdentifier(table)} ($renderedColumns)"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) {
-            "CREATE FULLTEXT INDEX requires a non-blank $label name"
-        }
-
-    private fun requireNoDuplicateColumns(columns: List<String>) {
-        for (currentIndex in columns.indices) {
-            for (previousIndex in 0 until currentIndex) {
-                require(!columns[currentIndex].trim().equals(columns[previousIndex].trim(), ignoreCase = true)) {
-                    "CREATE FULLTEXT INDEX column names must not contain duplicates"
-                }
-            }
-        }
-    }
+        requireNotNull(value) { "CREATE FULLTEXT INDEX requires a $label name" }
 
     private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
 }

@@ -11,7 +11,7 @@ class MigrationTableBuilder(
 ) : IMigrationTableApi {
 
     override fun tableName(table: String): IMigrationTableApi {
-        this.ast.tableName = table.trim();
+        this.ast.metadata.tableName = table.trim();
         return this;
     }
 

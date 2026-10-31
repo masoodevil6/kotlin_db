@@ -10,21 +10,16 @@ class MigrationCreateUniqueIndexBuilder(
     override var ast: IMigrationCreateUniqueIndexAst = MigrationCreateUniqueIndexAst(),
 ) : IMigrationCreateUniqueIndexApi {
     override fun tableName(table: String): IMigrationCreateUniqueIndexApi = apply {
-        ast.tableName = table.trim()
+        ast.metadata.tableName = table.trim()
     }
 
     override fun name(name: String): IMigrationCreateUniqueIndexApi = apply {
-        ast.indexName = name.trim()
+        ast.metadata.indexName = name.trim()
     }
 
     override fun column(column: String): IMigrationCreateUniqueIndexApi = apply {
-        ast.columnName = column.trim()
+        ast.metadata.columnName = column.trim()
     }
 
-    fun build(): IMigrationCreateUniqueIndexApi {
-        require(!ast.tableName.isNullOrBlank()) { "CREATE UNIQUE INDEX requires a non-blank table name" }
-        require(!ast.indexName.isNullOrBlank()) { "CREATE UNIQUE INDEX requires a non-blank index name" }
-        require(!ast.columnName.isNullOrBlank()) { "CREATE UNIQUE INDEX requires a non-blank column name" }
-        return this
-    }
+    fun build(): IMigrationCreateUniqueIndexApi = this
 }

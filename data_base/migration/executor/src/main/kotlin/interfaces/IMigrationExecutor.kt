@@ -125,7 +125,7 @@ interface IMigrationExecutor {
 
 
     //// [TOOLS]
-    fun <Ast: IMigrationAst,Api : IMigrationApi<Ast>> executeOut(
+    fun <Ast : IMigrationAst<*>, Api : IMigrationApi<Ast>> executeOut(
         migrationBuilder:    Api,
         blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null,
         blockResult:     (db: IQueryExecute ,builtQuery: BuiltQuery) -> Unit

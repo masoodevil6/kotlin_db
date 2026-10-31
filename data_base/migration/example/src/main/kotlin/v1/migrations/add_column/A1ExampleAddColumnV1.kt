@@ -1,17 +1,20 @@
 package gog.my_project.data_base.migration.example.v1.migrations.add_column
 
 import gog.my_project.data_base.migration.api.interfaces.add_column.IMigrationAddColumnApi
-import gog.my_project.data_base.migration.builder.addColumn
+import gog.my_project.data_base.migration.builder.ast.add_column.MigrationAddColumnBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 import gog.my_project.data_base.migration.params.data_types.VarcharType
+
+
+
 
 class A1ExampleAddColumnV1(
     private val table: String = "users",
     private val column: String = "email",
 ) {
     fun migration(): IMigrationAddColumnApi =
-        addColumn {
+        MigrationAddColumnBuilder().apply {
             tableName(table)
             name(column)
             dataType(VarcharType(255))

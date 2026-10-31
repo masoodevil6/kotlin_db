@@ -10,19 +10,28 @@ import kotlin.test.assertIs
 
 class CreateCustomersMigrationV1Test {
     @Test
-    fun upAndDownReturnOrderedDefinitionsWithoutRunningThem() {
-        val migration = CreateCustomersMigrationV1()
+    fun tableAndIndexAreSeparateSingleOperationMigrations() {
+        val createTableMigration = CreateCustomersMigrationV1()
+        val createIndexMigration = CreateCustomersEmailIndexMigrationV1()
+        val tableUp = createTableMigration.up()
+        val tableDown = createTableMigration.down()
+        val indexUp = createIndexMigration.up()
+        val indexDown = createIndexMigration.down()
 
-        val up = migration.up()
-        val down = migration.down()
+        assertEquals(1, tableUp.operations.size)
+        assertEquals(1, tableDown.operations.size)
+        assertEquals(1, indexUp.operations.size)
+        assertEquals(1, indexDown.operations.size)
 
-        assertEquals(2, up.operations.size)
-        val createTable = assertIs<IMigrationRenderCreateTableApi>(up.operations[0])
-        assertIs<IMigrationCreateIndexApi>(up.operations[1])
-        assertEquals("customers", createTable.ast.migrationTableAst?.tableName)
+        val createTable = assertIs<IMigrationRenderCreateTableApi>(tableUp.operations.single())
+        assertIs<IMigrationCreateIndexApi>(indexUp.operations.single())
+        assertEquals("customers", createTable.ast.migrationTableAst?.metadata?.tableName)
 
-        assertEquals(2, down.operations.size)
-        assertIs<IMigrationDropIndexApi>(down.operations[0])
-        assertIs<IMigrationDropTableApi>(down.operations[1])
+        val forwardOperations = listOf(tableUp.operations.single(), indexUp.operations.single())
+        val rollbackOperations = listOf(indexDown.operations.single(), tableDown.operations.single())
+        assertIs<IMigrationRenderCreateTableApi>(forwardOperations[0])
+        assertIs<IMigrationCreateIndexApi>(forwardOperations[1])
+        assertIs<IMigrationDropIndexApi>(rollbackOperations[0])
+        assertIs<IMigrationDropTableApi>(rollbackOperations[1])
     }
 }

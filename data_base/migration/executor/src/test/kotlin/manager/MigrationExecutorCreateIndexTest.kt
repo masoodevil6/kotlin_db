@@ -4,15 +4,18 @@ import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.createIndex
+import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
+import gog.my_project.data_base.migration.builder.ast.create_index.MigrationCreateIndexBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorCreateIndexTest {
     @Test
@@ -25,7 +28,7 @@ class MigrationExecutorCreateIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createIndex {
+                queryBuilder = MigrationCreateIndexBuilder().apply {
                     tableName("users")
                     name("idx_users_email")
                     column("email")
@@ -52,7 +55,7 @@ class MigrationExecutorCreateIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createIndex {
+                queryBuilder = MigrationCreateIndexBuilder().apply {
                     tableName("users")
                     name("idx_users_email")
                     column("email")
@@ -80,7 +83,7 @@ class MigrationExecutorCreateIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createIndex {
+                queryBuilder = MigrationCreateIndexBuilder().apply {
                     tableName("lookup")
                     name("idx_lookup_code")
                     column("code")

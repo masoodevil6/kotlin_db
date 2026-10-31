@@ -1,16 +1,9 @@
 package gog.my_project.data_base.migration.ast.interfaces.modify_column
 
 import gog.my_project.data_base.migration.ast.interfaces.IMigrationAst
-import gog.my_project.data_base.migration.params.data_types.MigrationColumnDataType
+import gog.my_project.data_base.migration.ast.metadata.modify_column.MigrationModifyColumnAstMetadata
 
-interface IMigrationModifyColumnAst : IMigrationAst {
-    val tableName: String
-    val columnName: String
-    val columnDataType: MigrationColumnDataType
-    val nullability: ColumnNullability
-    val defaultDefinition: DefaultDefinition
-    val autoIncrement: Boolean
-}
+interface IMigrationModifyColumnAst : IMigrationAst<MigrationModifyColumnAstMetadata>
 
 enum class ColumnNullability {
     NULL,

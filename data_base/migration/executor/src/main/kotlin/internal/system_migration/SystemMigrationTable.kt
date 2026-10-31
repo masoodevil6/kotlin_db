@@ -1,15 +1,18 @@
 package gog.my_project.data_base.migration.executor.internal.system_migration
 
-import gog.my_project.data_base.migration.builder.createTable
+import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
 import gog.my_project.data_base.migration.params.data_types.IntType
 import gog.my_project.data_base.migration.params.data_types.VarcharType
+
+
+
 
 /** Defines the internal system_migration table schema; it does not execute the DDL. */
 internal object SystemMigrationTable {
     const val NAME = "system_migration"
     private const val MIGRATION_ID_LENGTH = 255
 
-    fun definition() = createTable {
+    fun definition() = MigrationRenderCreateTableBuilder().apply {
         table { tableName(NAME) }
         addColumn {
             name("id")

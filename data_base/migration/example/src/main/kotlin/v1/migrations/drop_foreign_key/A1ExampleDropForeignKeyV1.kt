@@ -1,13 +1,16 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_foreign_key
 
 import gog.my_project.data_base.migration.api.interfaces.drop_foreign_key.IMigrationDropForeignKeyApi
-import gog.my_project.data_base.migration.builder.dropForeignKey
+import gog.my_project.data_base.migration.builder.ast.drop_foreign_key.MigrationDropForeignKeyBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
+
+
+
 class A1ExampleDropForeignKeyV1 {
     fun migration(): IMigrationDropForeignKeyApi =
-        dropForeignKey {
+        MigrationDropForeignKeyBuilder().apply {
             tableName("orders")
             name("fk_orders_tenant_user")
         }

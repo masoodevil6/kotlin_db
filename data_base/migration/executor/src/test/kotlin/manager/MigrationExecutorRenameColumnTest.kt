@@ -26,12 +26,12 @@ class MigrationExecutorRenameColumnTest {
         val executor = MigrationExecutor(queryExecutor = db)
         val migration = object : IMigrationRenameColumnApi {
             override var ast: IMigrationRenameColumnAst = MigrationRenameColumnAst().apply {
-                tableName = "users"; name = "display_name"; to = "full_name"
+                metadata.tableName = "users"; metadata.name = "display_name"; metadata.to = "full_name"
             }
             override var params: MutableList<SqlParameter<*>> = mutableListOf()
-            override fun tableName(table: String) = apply { ast.tableName = table }
-            override fun name(name: String) = apply { ast.name = name }
-            override fun to(name: String) = apply { ast.to = name }
+            override fun tableName(table: String) = apply { ast.metadata.tableName = table }
+            override fun name(name: String) = apply { ast.metadata.name = name }
+            override fun to(name: String) = apply { ast.metadata.to = name }
         }
         var received: ExecuteResult<Boolean>? = null
         var reported: String? = null
@@ -139,12 +139,12 @@ class MigrationExecutorRenameColumnTest {
 
     private fun migrationForTest() = object : IMigrationRenameColumnApi {
         override var ast: IMigrationRenameColumnAst = MigrationRenameColumnAst().apply {
-            tableName = "users"; name = "display_name"; to = "full_name"
+            metadata.tableName = "users"; metadata.name = "display_name"; metadata.to = "full_name"
         }
         override var params: MutableList<SqlParameter<*>> = mutableListOf()
-        override fun tableName(table: String) = apply { ast.tableName = table }
-        override fun name(name: String) = apply { ast.name = name }
-        override fun to(name: String) = apply { ast.to = name }
+        override fun tableName(table: String) = apply { ast.metadata.tableName = table }
+        override fun name(name: String) = apply { ast.metadata.name = name }
+        override fun to(name: String) = apply { ast.metadata.to = name }
     }
 
     private class RecordingQueryExecute(

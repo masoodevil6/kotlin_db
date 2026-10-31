@@ -4,5 +4,4 @@ import gog.my_project.data_base.migration.ast.interfaces.create_foreign_key.IMig
 import gog.my_project.data_base.migration.dialect.data_class.MigrationDataClass
 import gog.my_project.data_base.migration.dialect.interfaces.IAstRenderer
 
-interface IMigrationCreateForeignKeyCapability :
-    IAstRenderer<IMigrationCreateForeignKeyAst, MigrationDataClass?>
+interface IMigrationCreateForeignKeyCapability : IAstRenderer<IMigrationCreateForeignKeyAst, MigrationDataClass?>

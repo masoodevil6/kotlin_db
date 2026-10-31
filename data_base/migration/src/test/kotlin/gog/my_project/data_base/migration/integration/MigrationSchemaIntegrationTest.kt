@@ -8,9 +8,8 @@ import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.api.interfaces.MigrationId
 import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
-import gog.my_project.data_base.migration.builder.createTable
-import gog.my_project.data_base.migration.builder.dropForeignKey as buildDropForeignKey
-import gog.my_project.data_base.migration.builder.dropTable
+import gog.my_project.data_base.migration.builder.ast.drop_foreign_key.MigrationDropForeignKeyBuilder
+import gog.my_project.data_base.migration.builder.ast.drop_table.MigrationDropTableBuilder
 import gog.my_project.data_base.migration.builder.migration
 import gog.my_project.data_base.migration.builder.migrationConfig
 import gog.my_project.data_base.migration.executor.manager.MigrationExecutor
@@ -24,13 +23,16 @@ import java.sql.Connection
 import java.sql.DatabaseMetaData
 import java.sql.DriverManager
 import java.sql.Types
-import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.Test
+
+
+
 
 class MigrationSchemaIntegrationTest {
     @Test
@@ -215,7 +217,7 @@ class MigrationSchemaIntegrationTest {
     private fun dropForeignKey(foreignKey: ForeignKeyToDrop) {
         var result: ExecuteResult<Boolean>? = null
         MigrationExecutor().execute(
-            queryBuilder = buildDropForeignKey {
+            queryBuilder = MigrationDropForeignKeyBuilder().apply {
                 tableName(foreignKey.table)
                 name(foreignKey.name)
             },
@@ -230,7 +232,7 @@ class MigrationSchemaIntegrationTest {
     private fun dropTableIfPresent(tableName: String) {
         var result: ExecuteResult<Boolean>? = null
         MigrationExecutor().execute(
-            queryBuilder = dropTable {
+            queryBuilder = MigrationDropTableBuilder().apply {
                 tableName(tableName)
                 ifExists()
             },

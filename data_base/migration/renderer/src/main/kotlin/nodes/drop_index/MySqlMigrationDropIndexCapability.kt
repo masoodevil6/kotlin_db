@@ -11,15 +11,13 @@ class MySqlMigrationDropIndexCapability : IMigrationDropIndexCapability {
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val index = requireIdentifier(ast.indexName, "index")
-        val table = requireIdentifier(ast.tableName, "table")
+        val index = requireIdentifier(ast.metadata.indexName, "index")
+        val table = requireIdentifier(ast.metadata.tableName, "table")
         return "DROP INDEX ${quoteIdentifier(index)} ON ${quoteIdentifier(table)}"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) {
-            "DROP INDEX requires a non-blank $label name"
-        }
+        requireNotNull(value) { "DROP INDEX requires a $label name" }
 
     private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
 }

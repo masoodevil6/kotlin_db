@@ -1,6 +1,7 @@
 package gog.my_project.data_base.query.builder.ast.select_builder
 
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 
 /** Validates the SELECT output names required by key-based ResultSet materialization. */
 fun IQueryRenderSelectApi.requireResultOutputAliases(): List<String> {
@@ -17,3 +18,9 @@ fun IQueryRenderSelectApi.requireResultOutputAliases(): List<String> {
     }
     return aliases
 }
+
+internal fun IQueryRenderSelectAst.selectAliases(): List<String> =
+    select?.columns.orEmpty()
+        .mapNotNull {
+            it.metadata.ColumnAlias?.takeIf { name -> name.isNotBlank() }
+        }

@@ -5,12 +5,15 @@ import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.createMultiColumnIndex
+import gog.my_project.data_base.migration.builder.ast.create_multi_column_index.MigrationCreateMultiColumnIndexBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorCreateMultiColumnIndexTest {
     @Test
@@ -23,7 +26,7 @@ class MigrationExecutorCreateMultiColumnIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createMultiColumnIndex {
+                queryBuilder = MigrationCreateMultiColumnIndexBuilder().apply {
                     tableName("users")
                     name("idx_users_name_email")
                     columns("last_name", "first_name", "email")
@@ -53,7 +56,7 @@ class MigrationExecutorCreateMultiColumnIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createMultiColumnIndex {
+                queryBuilder = MigrationCreateMultiColumnIndexBuilder().apply {
                     tableName("users")
                     name("idx_users_name_email")
                     columns("last_name", "first_name")

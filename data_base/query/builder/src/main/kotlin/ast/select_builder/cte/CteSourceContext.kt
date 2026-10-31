@@ -3,6 +3,7 @@ package gog.my_project.data_base.query.builder.ast.select_builder.cte
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.metadata.select.column_base.QueryColumnsBaseAstMetadata
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
+import gog.my_project.data_base.query.builder.ast.select_builder.selectAliases
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
 
@@ -174,6 +175,3 @@ internal class CteSourceContext {
                 ?: "A Query source must be added in the SELECT FROM block before referencing its output",
         )
 }
-
-internal fun IQueryRenderSelectAst.selectAliases(): List<String> =
-    select?.columns.orEmpty().mapNotNull { it.metadata.ColumnAlias?.takeIf { name -> name.isNotBlank() } }

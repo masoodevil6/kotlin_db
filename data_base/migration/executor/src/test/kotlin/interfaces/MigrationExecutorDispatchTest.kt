@@ -4,7 +4,6 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.api.interfaces.IMigrationApi
 import gog.my_project.data_base.migration.api.interfaces.add_column.IMigrationAddColumnApi
 import gog.my_project.data_base.migration.api.interfaces.create_foreign_key.IMigrationCreateForeignKeyApi
 import gog.my_project.data_base.migration.api.interfaces.create_full_text_index.IMigrationCreateFullTextIndexApi
@@ -17,27 +16,31 @@ import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationD
 import gog.my_project.data_base.migration.api.interfaces.drop_foreign_key.IMigrationDropForeignKeyApi
 import gog.my_project.data_base.migration.api.interfaces.drop_index.IMigrationDropIndexApi
 import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
+import gog.my_project.data_base.migration.api.interfaces.IMigrationApi
 import gog.my_project.data_base.migration.api.interfaces.modify_column.IMigrationModifyColumnApi
 import gog.my_project.data_base.migration.api.interfaces.rename_column.IMigrationRenameColumnApi
 import gog.my_project.data_base.migration.api.interfaces.rename_table.IMigrationRenameTableApi
 import gog.my_project.data_base.migration.ast.interfaces.IMigrationAst
-import gog.my_project.data_base.migration.builder.createTable
-import gog.my_project.data_base.migration.builder.dropColumn
-import gog.my_project.data_base.migration.builder.renameColumn
+import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
+import gog.my_project.data_base.migration.builder.ast.drop_column.MigrationDropColumnBuilder
+import gog.my_project.data_base.migration.builder.ast.rename_column.MigrationRenameColumnBuilder
 import gog.my_project.data_base.migration.renderer.manager.DialectSelector
-import kotlin.test.Test
+import java.lang.reflect.Proxy
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
-import java.lang.reflect.Proxy
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorDispatchTest {
     @Test
     fun dispatchesCreateTableToTypedExecutorOverload() {
         val executor = RecordingMigrationExecutor()
-        val operation = createTable { table { tableName("users") } }
+        val operation = MigrationRenderCreateTableBuilder().apply { table { tableName("users") } }
 
         executor.execute(operation, blockExecute = {})
 
@@ -48,7 +51,7 @@ class MigrationExecutorDispatchTest {
     @Test
     fun dispatchesDropColumnIfExistsToSemanticExecutorOverload() {
         val executor = RecordingMigrationExecutor()
-        val operation = dropColumn {
+        val operation = MigrationDropColumnBuilder().apply {
             tableName("users")
             name("legacy")
             ifExists()
@@ -58,7 +61,7 @@ class MigrationExecutorDispatchTest {
         executor.execute(operation, blockExecute = { result = it })
 
         assertSame(operation, executor.executedOperation)
-        assertTrue(operation.ast.ifExists)
+        assertTrue(operation.ast.metadata.ifExists)
         assertEquals(ExecuteResult.Success(true), result)
         assertFalse(executor.genericExecuteOutCalled)
     }
@@ -66,7 +69,7 @@ class MigrationExecutorDispatchTest {
     @Test
     fun dispatchesRenameColumnToTypedExecutorOverload() {
         val executor = RecordingMigrationExecutor()
-        val operation = renameColumn {
+        val operation = MigrationRenameColumnBuilder().apply {
             tableName("users")
             name("display_name")
             to("full_name")
@@ -134,7 +137,7 @@ class MigrationExecutorDispatchTest {
         var result: ExecuteResult<Boolean>? = null
 
         executor.execute(
-            createTable { table { tableName("users") } },
+            MigrationRenderCreateTableBuilder().apply { table { tableName("users") } },
             blockExecute = { result = it },
         )
 
@@ -250,7 +253,7 @@ class MigrationExecutorDispatchTest {
             blockQueryInfo: ((String?, MutableMap<String, Any?>) -> Unit)?,
         ) = record(queryBuilder, blockExecute)
 
-        override fun <Ast : IMigrationAst, Api : IMigrationApi<Ast>> executeOut(
+        override fun <Ast : IMigrationAst<*>, Api : IMigrationApi<Ast>> executeOut(
             migrationBuilder: Api,
             blockQueryInfo: ((String?, MutableMap<String, Any?>) -> Unit)?,
             blockResult: (IQueryExecute, BuiltQuery) -> Unit,
@@ -265,5 +268,9 @@ class MigrationExecutorDispatchTest {
         override var params: MutableList<SqlParameter<*>> = mutableListOf()
     }
 
-    private class UnknownAst : IMigrationAst
+    private class UnknownAst : IMigrationAst<UnknownAstMetadata> {
+        override var metadata = UnknownAstMetadata()
+    }
+
+    private class UnknownAstMetadata : gog.my_project.data_base.migration.ast.metadata.interfaces.IMigrationAstMetadata
 }

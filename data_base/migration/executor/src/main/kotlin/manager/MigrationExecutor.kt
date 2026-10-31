@@ -288,10 +288,10 @@ class MigrationExecutor(
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
     ) {
-        val table = requireNotNull(queryBuilder.ast.tableName?.trim()?.takeIf(String::isNotBlank)) {
+        val table = requireNotNull(queryBuilder.ast.metadata.tableName?.trim()?.takeIf(String::isNotBlank)) {
             "RENAME COLUMN requires a non-blank table name"
         }
-        val source = requireNotNull(queryBuilder.ast.name?.trim()?.takeIf(String::isNotBlank)) {
+        val source = requireNotNull(queryBuilder.ast.metadata.name?.trim()?.takeIf(String::isNotBlank)) {
             "RENAME COLUMN requires a non-blank source column name"
         }
         val showCreate = "SHOW CREATE TABLE ${quoteMySqlIdentifier(table)}"
@@ -357,7 +357,7 @@ class MigrationExecutor(
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
         val ast = queryBuilder.ast
-        if (!ast.ifExists) {
+        if (!ast.metadata.ifExists) {
             executeOut(
                 migrationBuilder = queryBuilder,
                 blockQueryInfo = blockQueryInfo,
@@ -369,8 +369,8 @@ class MigrationExecutor(
         // Render first so malformed AST is rejected before any query is issued.
         val dialect = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
         val ddl = dialect.render(ast) ?: throw IllegalStateException("rendered sql is null")
-        val tableName = requireNotNull(ast.tableName)
-        val columnName = requireNotNull(ast.name)
+        val tableName = requireNotNull(ast.metadata.tableName)
+        val columnName = requireNotNull(ast.metadata.name)
         val checkQuery = BuiltQuery(
             "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS " +
                 "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tableName " +

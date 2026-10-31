@@ -10,16 +10,12 @@ class MigrationDropForeignKeyBuilder(
     override var ast: IMigrationDropForeignKeyAst = MigrationDropForeignKeyAst(),
 ) : IMigrationDropForeignKeyApi {
     override fun tableName(table: String): IMigrationDropForeignKeyApi = apply {
-        ast.tableName = table.trim()
+        ast.metadata.tableName = table.trim()
     }
 
     override fun name(name: String): IMigrationDropForeignKeyApi = apply {
-        ast.constraintName = name.trim()
+        ast.metadata.constraintName = name.trim()
     }
 
-    fun build(): IMigrationDropForeignKeyApi {
-        require(!ast.tableName.isNullOrBlank()) { "DROP FOREIGN KEY requires a non-blank table name" }
-        require(!ast.constraintName.isNullOrBlank()) { "DROP FOREIGN KEY requires a non-blank constraint name" }
-        return this
-    }
+    fun build(): IMigrationDropForeignKeyApi = this
 }

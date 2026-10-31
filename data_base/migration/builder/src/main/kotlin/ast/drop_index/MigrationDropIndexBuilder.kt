@@ -10,16 +10,12 @@ class MigrationDropIndexBuilder(
     override var ast: IMigrationDropIndexAst = MigrationDropIndexAst(),
 ) : IMigrationDropIndexApi {
     override fun tableName(table: String): IMigrationDropIndexApi = apply {
-        ast.tableName = table.trim()
+        ast.metadata.tableName = table.trim()
     }
 
     override fun name(name: String): IMigrationDropIndexApi = apply {
-        ast.indexName = name.trim()
+        ast.metadata.indexName = name.trim()
     }
 
-    fun build(): IMigrationDropIndexApi {
-        require(!ast.tableName.isNullOrBlank()) { "DROP INDEX requires a non-blank table name" }
-        require(!ast.indexName.isNullOrBlank()) { "DROP INDEX requires a non-blank index name" }
-        return this
-    }
+    fun build(): IMigrationDropIndexApi = this
 }

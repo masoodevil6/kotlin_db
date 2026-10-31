@@ -13,7 +13,6 @@ import gog.my_project.data_base.migration.api.interfaces.MigrationRegistration
 import gog.my_project.data_base.migration.api.interfaces.RegisteredMigration
 import gog.my_project.data_base.migration.api.interfaces.SingleMigration
 import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
-import gog.my_project.data_base.migration.builder.dropTable
 import gog.my_project.data_base.migration.builder.migration
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 import gog.my_project.data_base.migration.renderer.manager.DialectSelector
@@ -21,12 +20,13 @@ import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.util.ArrayDeque
 import kotlin.reflect.KClass
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.Test
+
 
 class MigrationMigratorTest {
     @Test
@@ -317,7 +317,7 @@ class MigrationMigratorTest {
 
     private fun FakeMigrationExecutor.operationTableNames(): List<String> =
         executedOperations.map { operation ->
-            assertIs<IMigrationDropTableApi>(operation).ast.tableName.orEmpty()
+            assertIs<IMigrationDropTableApi>(operation).ast.metadata.tableName.orEmpty()
         }
 
     data class Row(val id: Int, val migration: String, val batch: Int)

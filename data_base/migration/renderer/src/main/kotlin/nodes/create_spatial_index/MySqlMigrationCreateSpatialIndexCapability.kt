@@ -11,17 +11,15 @@ class MySqlMigrationCreateSpatialIndexCapability : IMigrationCreateSpatialIndexC
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val index = requireIdentifier(ast.indexName, "index")
-        val table = requireIdentifier(ast.tableName, "table")
-        val column = requireIdentifier(ast.columnName, "column")
+        val index = requireIdentifier(ast.metadata.indexName, "index")
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val column = requireIdentifier(ast.metadata.columnName, "column")
 
         return "CREATE SPATIAL INDEX ${quoteIdentifier(index)} ON ${quoteIdentifier(table)} (${quoteIdentifier(column)})"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =
-        requireNotNull(value?.takeIf(String::isNotBlank)) {
-            "CREATE SPATIAL INDEX requires a non-blank $label name"
-        }
+        requireNotNull(value) { "CREATE SPATIAL INDEX requires a $label name" }
 
     private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
 }

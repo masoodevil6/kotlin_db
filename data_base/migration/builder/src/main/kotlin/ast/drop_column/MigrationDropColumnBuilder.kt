@@ -11,31 +11,19 @@ class MigrationDropColumnBuilder(
 ) : IMigrationDropColumnApi {
 
     override fun tableName(table: String): IMigrationDropColumnApi {
-        ast.tableName = table.trim().also {
-            require(it.isNotEmpty()) { "DROP COLUMN requires a non-blank table name" }
-        }
+        ast.metadata.tableName = table.trim()
         return this
     }
 
     override fun name(name: String): IMigrationDropColumnApi {
-        ast.name = name.trim().also {
-            require(it.isNotEmpty()) { "DROP COLUMN requires a non-blank column name" }
-        }
+        ast.metadata.name = name.trim()
         return this
     }
 
     override fun ifExists(): IMigrationDropColumnApi {
-        ast.ifExists = true
+        ast.metadata.ifExists = true
         return this
     }
 
-    fun build(): IMigrationDropColumnApi {
-        require(!ast.tableName.isNullOrBlank()) {
-            "DROP COLUMN requires a non-blank table name"
-        }
-        require(!ast.name.isNullOrBlank()) {
-            "DROP COLUMN requires a non-blank column name"
-        }
-        return this
-    }
+    fun build(): IMigrationDropColumnApi = this
 }

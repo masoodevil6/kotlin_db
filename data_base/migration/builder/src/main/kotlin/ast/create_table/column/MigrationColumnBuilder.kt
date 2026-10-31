@@ -12,33 +12,33 @@ class MigrationColumnBuilder(
 ) : IMigrationColumnApi {
 
     override fun name(name: String): IMigrationColumnApi {
-        this.ast.columnName = name.trim();
+        this.ast.metadata.columnName = name.trim();
         return this;
     }
 
     override fun dataType(dataType: MigrationColumnDataType): IMigrationColumnApi {
-        this.ast.columnDataType = dataType;
+        this.ast.metadata.columnDataType = dataType;
         return this;
     }
 
     override fun default(defaultValue: Any?): IMigrationColumnApi {
-        this.ast.columnDefault = defaultValue;
-        this.ast.hasColumnDefault = true;
+        this.ast.metadata.columnDefault = defaultValue;
+        this.ast.metadata.hasColumnDefault = true;
         return this;
     }
 
     override fun isNullable(status: Boolean): IMigrationColumnApi {
-        this.ast.columnNullable = status;
+        this.ast.metadata.columnNullable = status;
         return this;
     }
 
     override fun isAutoIncrement(status: Boolean): IMigrationColumnApi {
-        this.ast.columnAutoIncrement = status;
+        this.ast.metadata.columnAutoIncrement = status;
         return this;
     }
 
     override fun isPrimary(status: Boolean): IMigrationColumnApi {
-        this.ast.columnPrimary = status;
+        this.ast.metadata.columnPrimary = status;
         return this;
     }
 

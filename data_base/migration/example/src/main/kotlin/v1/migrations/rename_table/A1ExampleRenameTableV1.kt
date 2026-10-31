@@ -1,9 +1,12 @@
 package gog.my_project.data_base.migration.example.v1.migrations.rename_table
 
 import gog.my_project.data_base.migration.api.interfaces.rename_table.IMigrationRenameTableApi
-import gog.my_project.data_base.migration.builder.renameTable
+import gog.my_project.data_base.migration.builder.ast.rename_table.MigrationRenameTableBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+
+
+
 
 class A1ExampleRenameTableV1(
     private val from: String = "users",
@@ -11,7 +14,7 @@ class A1ExampleRenameTableV1(
 ) {
 
     fun migration(): IMigrationRenameTableApi =
-        renameTable {
+        MigrationRenameTableBuilder().apply {
             fromTableName(from)
             toTableName(to)
         }

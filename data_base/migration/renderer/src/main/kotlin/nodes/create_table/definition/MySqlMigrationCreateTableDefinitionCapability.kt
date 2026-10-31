@@ -13,70 +13,50 @@ import gog.my_project.data_base.migration.dialect.interfaces.IAstRenderer
 import gog.my_project.data_base.migration.dialect.interfaces.IRenderContext
 
 class MySqlMigrationCreateTableDefinitionCapability :
-    IAstRenderer<IMigrationCreateTableDefinitionAst, MigrationDataClass?> {
+    IAstRenderer<IMigrationCreateTableDefinitionAst<*>, MigrationDataClass?> {
 
     override fun render(
-        ast: IMigrationCreateTableDefinitionAst,
+        ast: IMigrationCreateTableDefinitionAst<*>,
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String = when (ast) {
         is PrimaryKeyDefinitionAst -> {
-            validateColumns(ast.columnNames, "PRIMARY KEY")
-            "PRIMARY KEY (${renderColumns(ast.columnNames)})"
+            validateColumns(ast.metadata.columnNames, "PRIMARY KEY")
+            "PRIMARY KEY (${renderColumns(ast.metadata.columnNames)})"
         }
         is UniqueDefinitionAst -> {
-            validateIdentifier(ast.indexName, "UNIQUE name")
-            validateColumns(ast.columnNames, "UNIQUE")
-            "CONSTRAINT ${quoteIdentifier(ast.indexName)} UNIQUE (${renderColumns(ast.columnNames)})"
+            validateColumns(ast.metadata.columnNames, "UNIQUE")
+            "CONSTRAINT ${quoteIdentifier(ast.metadata.indexName)} UNIQUE (${renderColumns(ast.metadata.columnNames)})"
         }
         is IndexDefinitionAst -> {
-            validateIdentifier(ast.indexName, "INDEX name")
-            validateColumns(ast.columnNames, "INDEX")
-            val method = ast.indexMethod?.let { " USING ${renderMethod(it)}" }.orEmpty()
-            "INDEX ${quoteIdentifier(ast.indexName)} (${renderColumns(ast.columnNames)})$method"
+            validateColumns(ast.metadata.columnNames, "INDEX")
+            val method = ast.metadata.indexMethod?.let { " USING ${renderMethod(it)}" }.orEmpty()
+            "INDEX ${quoteIdentifier(ast.metadata.indexName)} (${renderColumns(ast.metadata.columnNames)})$method"
         }
         is FullTextIndexDefinitionAst -> {
-            validateIdentifier(ast.indexName, "FULLTEXT INDEX name")
-            validateColumns(ast.columnNames, "FULLTEXT INDEX")
-            "FULLTEXT INDEX ${quoteIdentifier(ast.indexName)} (${renderColumns(ast.columnNames)})"
+            validateColumns(ast.metadata.columnNames, "FULLTEXT INDEX")
+            "FULLTEXT INDEX ${quoteIdentifier(ast.metadata.indexName)} (${renderColumns(ast.metadata.columnNames)})"
         }
         is ForeignKeyDefinitionAst -> renderForeignKey(ast)
         else -> error("Unsupported CREATE TABLE definition: ${ast::class.qualifiedName}")
     }
 
     private fun renderForeignKey(ast: ForeignKeyDefinitionAst): String {
-        validateIdentifier(ast.constraintName, "FOREIGN KEY name")
-        validateIdentifier(ast.referencesTableName, "FOREIGN KEY referenced table")
-        validateColumns(ast.columnNames, "FOREIGN KEY local")
-        validateColumns(ast.referencesColumnNames, "FOREIGN KEY referenced")
-        require(ast.columnNames.size == ast.referencesColumnNames.size) {
-            "FOREIGN KEY local and referenced column lists must have equal size"
-        }
+        validateColumns(ast.metadata.columnNames, "FOREIGN KEY local")
+        validateColumns(ast.metadata.referencesColumnNames, "FOREIGN KEY referenced")
         val actions = buildList {
-            ast.onDelete?.let { add("ON DELETE ${renderAction(it)}") }
-            ast.onUpdate?.let { add("ON UPDATE ${renderAction(it)}") }
+            ast.metadata.onDelete?.let { add("ON DELETE ${renderAction(it)}") }
+            ast.metadata.onUpdate?.let { add("ON UPDATE ${renderAction(it)}") }
         }
         val suffix = if (actions.isEmpty()) "" else " ${actions.joinToString(" ")}"
-        return "CONSTRAINT ${quoteIdentifier(ast.constraintName)} " +
-            "FOREIGN KEY (${renderColumns(ast.columnNames)}) " +
-            "REFERENCES ${quoteIdentifier(ast.referencesTableName)} " +
-            "(${renderColumns(ast.referencesColumnNames)})$suffix"
-    }
-
-    private fun validateIdentifier(value: String, label: String) {
-        require(value.isNotBlank()) { "$label must not be blank" }
+        return "CONSTRAINT ${quoteIdentifier(ast.metadata.constraintName)} " +
+            "FOREIGN KEY (${renderColumns(ast.metadata.columnNames)}) " +
+            "REFERENCES ${quoteIdentifier(ast.metadata.referencesTableName)} " +
+            "(${renderColumns(ast.metadata.referencesColumnNames)})$suffix"
     }
 
     private fun validateColumns(columns: List<String>, label: String) {
         require(columns.isNotEmpty()) { "$label requires at least one column" }
-        require(columns.all(String::isNotBlank)) { "$label column names must not be blank" }
-        for (currentIndex in columns.indices) {
-            for (previousIndex in 0 until currentIndex) {
-                require(!columns[currentIndex].equals(columns[previousIndex], ignoreCase = true)) {
-                    "$label column names must not contain duplicates"
-                }
-            }
-        }
     }
 
     private fun renderColumns(columns: List<String>): String =

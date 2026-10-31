@@ -2,6 +2,10 @@ package gog.my_project.data_base.migration.example.v1.migrations.registration
 
 import gog.my_project.data_base.migration.api.interfaces.MigrationGroup
 import gog.my_project.data_base.migration.api.interfaces.SingleMigration
+import gog.my_project.data_base.migration.api.interfaces.add_column.IMigrationAddColumnApi
+import gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi
+import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationDropColumnApi
+import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -20,5 +24,21 @@ class MigrationRegistrationExampleTest {
         assertEquals("customers", group.name)
         assertEquals(listOf("add_customer_email"), group.migrations.map { it.id.value })
         assertEquals(AddCustomerEmailRegistrationExample::class, group.migrations.single().migrationClass)
+    }
+
+    @Test
+    fun registeredMigrationsHaveOneOperationAndReverseTheirDependencyOrder() {
+        val createCustomers = CreateCustomersRegistrationExample()
+        val addEmail = AddCustomerEmailRegistrationExample()
+
+        assertIs<IMigrationRenderCreateTableApi>(createCustomers.up().operations.single())
+        assertIs<IMigrationAddColumnApi>(addEmail.up().operations.single())
+
+        val rollbackInReverseRegistrationOrder = listOf(
+            addEmail.down().operations.single(),
+            createCustomers.down().operations.single(),
+        )
+        assertIs<IMigrationDropColumnApi>(rollbackInReverseRegistrationOrder[0])
+        assertIs<IMigrationDropTableApi>(rollbackInReverseRegistrationOrder[1])
     }
 }

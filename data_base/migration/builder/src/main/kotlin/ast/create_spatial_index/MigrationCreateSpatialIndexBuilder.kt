@@ -10,25 +10,16 @@ class MigrationCreateSpatialIndexBuilder(
     override var ast: IMigrationCreateSpatialIndexAst = MigrationCreateSpatialIndexAst(),
 ) : IMigrationCreateSpatialIndexApi {
     override fun tableName(table: String): IMigrationCreateSpatialIndexApi = apply {
-        ast.tableName = table.trim()
+        ast.metadata.tableName = table.trim()
     }
 
     override fun name(name: String): IMigrationCreateSpatialIndexApi = apply {
-        ast.indexName = name.trim()
+        ast.metadata.indexName = name.trim()
     }
 
     override fun column(column: String): IMigrationCreateSpatialIndexApi = apply {
-        ast.columnName = column.trim()
+        ast.metadata.columnName = column.trim()
     }
 
-    fun build(): IMigrationCreateSpatialIndexApi {
-        requireIdentifier(ast.tableName, "table")
-        requireIdentifier(ast.indexName, "index")
-        requireIdentifier(ast.columnName, "column")
-        return this
-    }
-
-    private fun requireIdentifier(value: String?, label: String) {
-        require(!value.isNullOrBlank()) { "CREATE SPATIAL INDEX requires a non-blank $label name" }
-    }
+    fun build(): IMigrationCreateSpatialIndexApi = this
 }

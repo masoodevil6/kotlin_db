@@ -5,13 +5,16 @@ import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.createForeignKey
-import gog.my_project.data_base.migration.builder.dropForeignKey
+import gog.my_project.data_base.migration.builder.ast.create_foreign_key.MigrationCreateForeignKeyBuilder
+import gog.my_project.data_base.migration.builder.ast.drop_foreign_key.MigrationDropForeignKeyBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorForeignKeyTest {
     @Test
@@ -25,7 +28,7 @@ class MigrationExecutorForeignKeyTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = createForeignKey {
+                queryBuilder = MigrationCreateForeignKeyBuilder().apply {
                     tableName("orders"); name("fk_orders_user"); columns("user_id")
                     referencesTable("users"); referencesColumns("id")
                 },
@@ -56,7 +59,7 @@ class MigrationExecutorForeignKeyTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MARIA_DB)
             executor.execute(
-                queryBuilder = dropForeignKey { tableName("orders"); name("fk_orders_user") },
+                queryBuilder = MigrationDropForeignKeyBuilder().apply { tableName("orders"); name("fk_orders_user") },
                 blockExecute = { result = it },
             )
         } finally {

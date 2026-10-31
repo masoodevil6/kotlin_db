@@ -1,9 +1,12 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_multi_column_index
 
 import gog.my_project.data_base.migration.api.interfaces.create_multi_column_index.IMigrationCreateMultiColumnIndexApi
-import gog.my_project.data_base.migration.builder.createMultiColumnIndex
+import gog.my_project.data_base.migration.builder.ast.create_multi_column_index.MigrationCreateMultiColumnIndexBuilder
 import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+
+
+
 
 class A1ExampleCreateMultiColumnIndexV1(
     private val table: String = "users",
@@ -11,7 +14,7 @@ class A1ExampleCreateMultiColumnIndexV1(
     private val columns: List<String> = listOf("last_name", "first_name", "email"),
 ) {
     fun migration(): IMigrationCreateMultiColumnIndexApi =
-        createMultiColumnIndex {
+        MigrationCreateMultiColumnIndexBuilder().apply {
             tableName(table)
             name(index)
             columns(*columns.toTypedArray())

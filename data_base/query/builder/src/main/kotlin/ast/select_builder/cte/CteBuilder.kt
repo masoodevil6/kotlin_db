@@ -5,7 +5,9 @@ import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render
 import gog.my_project.data_base.query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base.query.api.interfaces.relations.Cte
 import gog.my_project.data_base.query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
+import gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst
 import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base.query.builder.ast.select_builder.selectAliases
 import gog.my_project.data_base.query.builder.metadata.queries.QueryMetadataResolver
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
@@ -42,7 +44,7 @@ private fun buildCteDefinition(
     val logicalQueryName = declarationOwner?.let { QueryMetadataResolver.queryName(it) }
 
     val builder = QueryRenderSelectBuilder(
-        ast = gog.my_project.data_base.query.ast.schema.select_schema.query_render_select.QueryRenderSelectAst(),
+        ast = QueryRenderSelectAst(),
     ).apply {
         requireCteOutputAliases(name, declarationOwner)
         block()

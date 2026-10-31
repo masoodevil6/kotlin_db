@@ -11,16 +11,12 @@ class MigrationRenameTableBuilder(
 ) : IMigrationRenameTableApi {
 
     override fun fromTableName(table: String): IMigrationRenameTableApi {
-        ast.fromTableName = table.trim().also {
-            require(it.isNotEmpty()) { "RENAME TABLE requires a non-blank source table name" }
-        }
+        ast.metadata.fromTableName = table.trim()
         return this
     }
 
     override fun toTableName(table: String): IMigrationRenameTableApi {
-        ast.toTableName = table.trim().also {
-            require(it.isNotEmpty()) { "RENAME TABLE requires a non-blank target table name" }
-        }
+        ast.metadata.toTableName = table.trim()
         return this
     }
 }

@@ -12,11 +12,11 @@ class MySqlMigrationRenameTableCapability : IMigrationRenameTableCapability {
         ctx: IRenderContext,
         dataClass: MigrationDataClass?
     ): String {
-        val fromTableName = requireNotNull(ast.fromTableName?.takeIf(String::isNotBlank)) {
-            "RENAME TABLE requires a non-blank source table name"
+        val fromTableName = requireNotNull(ast.metadata.fromTableName) {
+            "RENAME TABLE requires a source table name"
         }
-        val toTableName = requireNotNull(ast.toTableName?.takeIf(String::isNotBlank)) {
-            "RENAME TABLE requires a non-blank target table name"
+        val toTableName = requireNotNull(ast.metadata.toTableName) {
+            "RENAME TABLE requires a target table name"
         }
         val quotedFromTableName = "`${fromTableName.replace("`", "``")}`"
         val quotedToTableName = "`${toTableName.replace("`", "``")}`"

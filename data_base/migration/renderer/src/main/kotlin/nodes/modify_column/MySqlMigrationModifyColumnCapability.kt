@@ -24,23 +24,29 @@ class MySqlMigrationModifyColumnCapability : IMigrationModifyColumnCapability {
         ctx: IRenderContext,
         dataClass: MigrationDataClass?,
     ): String {
-        val table = requireIdentifier(ast.tableName, "table")
-        val name = requireIdentifier(ast.columnName, "column")
-        val typeSql = renderType(ast.columnDataType)
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val name = requireIdentifier(ast.metadata.columnName, "column")
+        val columnDataType = requireNotNull(ast.metadata.columnDataType) {
+            "MODIFY COLUMN requires a data type"
+        }
+        val typeSql = renderType(columnDataType)
         val parts = mutableListOf(quoteIdentifier(name), typeSql)
-        parts += when (ast.nullability) {
+        parts += when (requireNotNull(ast.metadata.nullability) {
+            "MODIFY COLUMN requires explicit nullability"
+        }) {
             ColumnNullability.NULL -> "NULL"
             ColumnNullability.NOT_NULL -> "NOT NULL"
         }
-        when (val default = ast.defaultDefinition) {
+        when (val default = requireNotNull(ast.metadata.defaultDefinition) {
+            "MODIFY COLUMN requires a default definition"
+        }) {
             DefaultDefinition.NoDefaultClause -> Unit
             DefaultDefinition.DefaultNull -> parts += "DEFAULT NULL"
             is DefaultDefinition.DefaultValue -> {
-                validateTemporalDefault(ast.columnDataType, default.value)
                 parts += "DEFAULT ${renderDefault(default.value)}"
             }
         }
-        if (ast.autoIncrement) parts += "AUTO_INCREMENT"
+        if (ast.metadata.autoIncrement) parts += "AUTO_INCREMENT"
         return "ALTER TABLE ${quoteIdentifier(table)} MODIFY COLUMN ${parts.joinToString(" ")}"
     }
 
@@ -49,14 +55,11 @@ class MySqlMigrationModifyColumnCapability : IMigrationModifyColumnCapability {
         is TimeType -> renderTemporalType("TIME", type.precision)
         is DateTimeType -> renderTemporalType("DATETIME", type.precision)
         is TimestampType -> renderTemporalType("TIMESTAMP", type.precision)
-        is VarcharType -> "VARCHAR(${type.length.also { require(it > 0) { "VARCHAR length must be positive" } }})"
+        is VarcharType -> "VARCHAR(${type.length})"
         is TextType -> "TEXT"
         is IntType -> "INT"
         is BooleanType -> "TINYINT(1)"
-        is DecimalType -> {
-            require(type.precision > 0 && type.scale in 0..type.precision) { "Invalid DECIMAL precision/scale" }
-            "DECIMAL(${type.precision}, ${type.scale})"
-        }
+        is DecimalType -> "DECIMAL(${type.precision}, ${type.scale})"
         is JsonType -> "JSON"
     }
 
@@ -65,12 +68,6 @@ class MySqlMigrationModifyColumnCapability : IMigrationModifyColumnCapability {
             "$name fractional-second precision must be between 0 and 6"
         }
         return "$name${precision?.let { "($it)" } ?: ""}"
-    }
-
-    private fun validateTemporalDefault(type: MigrationColumnDataType, value: Any) {
-        if (type is DateType || type is TimeType || type is DateTimeType || type is TimestampType) {
-            require(value is String) { "Temporal column DEFAULT must be a string literal" }
-        }
     }
 
     private fun renderDefault(value: Any): String = when (value) {
@@ -84,8 +81,8 @@ class MySqlMigrationModifyColumnCapability : IMigrationModifyColumnCapability {
         else -> throw IllegalArgumentException("Unsupported DEFAULT value type: ${value::class.qualifiedName}")
     }
 
-    private fun requireIdentifier(value: String, label: String): String =
-        requireNotNull(value.trim().takeIf(String::isNotBlank)) { "MODIFY COLUMN requires a non-blank $label name" }
+    private fun requireIdentifier(value: String?, label: String): String =
+        requireNotNull(value) { "MODIFY COLUMN requires a $label name" }
 
     private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
 }

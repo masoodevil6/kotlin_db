@@ -6,12 +6,15 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.modifyColumn
+import gog.my_project.data_base.migration.builder.ast.modify_column.MigrationModifyColumnBuilder
 import gog.my_project.data_base.migration.params.data_types.IntType
 import java.sql.ResultSet
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.Test
+
+
+
 
 class MigrationExecutorModifyColumnTest {
     @Test
@@ -31,7 +34,7 @@ class MigrationExecutorModifyColumnTest {
         assertSame(failure, (received as ExecuteResult.Failure).exception)
     }
 
-    private fun modification() = modifyColumn {
+    private fun modification() = MigrationModifyColumnBuilder().apply {
         tableName("users")
         name("age")
         dataType(IntType())

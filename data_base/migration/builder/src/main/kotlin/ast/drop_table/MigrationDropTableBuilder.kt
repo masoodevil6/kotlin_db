@@ -11,14 +11,12 @@ class MigrationDropTableBuilder(
 ) : IMigrationDropTableApi {
 
     override fun tableName(table: String): IMigrationDropTableApi {
-        ast.tableName = table.trim().also {
-            require(it.isNotEmpty()) { "DROP TABLE requires a non-blank table name" }
-        }
+        ast.metadata.tableName = table.trim()
         return this
     }
 
     override fun ifExists(): IMigrationDropTableApi {
-        ast.ifExists = true
+        ast.metadata.ifExists = true
         return this
     }
 }

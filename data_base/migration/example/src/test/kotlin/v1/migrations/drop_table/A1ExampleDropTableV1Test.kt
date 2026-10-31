@@ -1,10 +1,13 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_table
 
-import gog.my_project.data_base.migration.builder.dropTable
+import gog.my_project.data_base.migration.builder.ast.drop_table.MigrationDropTableBuilder
 import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.Test
+
+
+
 
 class A1ExampleDropTableV1Test {
 
@@ -28,22 +31,21 @@ class A1ExampleDropTableV1Test {
 
     @Test
     fun trimsTableNameBeforeRendering() {
-        val migration = dropTable { tableName("  users  ") }
+        val migration = MigrationDropTableBuilder().apply { tableName("  users  ") }
 
         assertEquals("DROP TABLE `users`", MySqlDialect().render(migration.ast))
     }
 
     @Test
-    fun rejectsBlankTableName() {
-        assertFailsWith<IllegalArgumentException> {
-            dropTable { tableName("   ") }
-        }
+    fun rendersBlankTableNameForDatabaseValidation() {
+        val migration = MigrationDropTableBuilder().apply { tableName("   ") }
+        assertEquals("DROP TABLE ``", MySqlDialect().render(migration.ast))
     }
 
     @Test
     fun ifExistsDefaultsToFalseInAst() {
-        val migration = dropTable { tableName("users") }
+        val migration = MigrationDropTableBuilder().apply { tableName("users") }
 
-        assertEquals(false, migration.ast.ifExists)
+        assertEquals(false, migration.ast.metadata.ifExists)
     }
 }

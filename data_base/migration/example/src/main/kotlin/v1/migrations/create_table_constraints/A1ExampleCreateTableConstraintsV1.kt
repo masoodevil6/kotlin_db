@@ -3,14 +3,17 @@ package gog.my_project.data_base.migration.example.v1.migrations.create_table_co
 import gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi
 import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
 import gog.my_project.data_base.migration.ast.interfaces.foreign_key.ForeignKeyAction
-import gog.my_project.data_base.migration.builder.createTable
+import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
 import gog.my_project.data_base.migration.example.v1.migrations.IExampleV1
 import gog.my_project.data_base.migration.params.data_types.IntType
 import gog.my_project.data_base.migration.params.data_types.TextType
 import gog.my_project.data_base.migration.params.data_types.VarcharType
 
+
+
+
 class A1ExampleCreateTableConstraintsV1 : IExampleV1 {
-    override fun migration(): IMigrationRenderCreateTableApi = createTable {
+    override fun migration(): IMigrationRenderCreateTableApi = MigrationRenderCreateTableBuilder().apply {
         table { tableName("orders") }
 
         addColumn {

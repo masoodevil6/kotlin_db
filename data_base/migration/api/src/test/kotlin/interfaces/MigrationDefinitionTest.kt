@@ -9,17 +9,15 @@ import kotlin.test.assertSame
 
 class MigrationDefinitionTest {
     @Test
-    fun constructorSnapshotsMembershipAndOrderButKeepsOperationReferences() {
+    fun constructorSnapshotsTheSingleOperationAndKeepsItsReference() {
         val first = TestMigrationApi(TestAst("first"))
-        val second = TestMigrationApi(TestAst("second"))
-        val source = mutableListOf<IMigrationApi<*>>(first, second)
+        val source = mutableListOf<IMigrationApi<*>>(first)
 
         val definition = MigrationDefinition(source)
         source.clear()
 
-        assertEquals(2, definition.operations.size)
-        assertSame(first, definition.operations[0])
-        assertSame(second, definition.operations[1])
+        assertEquals(1, definition.operations.size)
+        assertSame(first, definition.operations.single())
 
         val changedAst = TestAst("changed")
         first.ast = changedAst
@@ -35,7 +33,53 @@ class MigrationDefinitionTest {
         }
     }
 
-    private data class TestAst(val value: String) : IMigrationAst
+    @Test
+    fun publicConstructorRejectsEmptyAndMultipleOperations() {
+        val first = TestMigrationApi(TestAst("first"))
+        val second = TestMigrationApi(TestAst("second"))
+
+        val empty = assertFailsWith<IllegalArgumentException> {
+            MigrationDefinition(emptyList())
+        }
+        assertEquals(
+            "MigrationDefinition must contain exactly one top-level operation; found 0",
+            empty.message,
+        )
+
+        val multiple = assertFailsWith<IllegalArgumentException> {
+            MigrationDefinition(listOf(first, second))
+        }
+        assertEquals(
+            "MigrationDefinition must contain exactly one top-level operation; found 2",
+            multiple.message,
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val nullOperation = listOf(null) as List<IMigrationApi<*>>
+        val nullFailure = assertFailsWith<IllegalArgumentException> {
+            MigrationDefinition(nullOperation)
+        }
+        assertEquals("MigrationDefinition must contain a non-null top-level operation", nullFailure.message)
+    }
+
+    @Test
+    fun migrationUpAndDownBothRejectInvalidDirectDefinitions() {
+        val operation = TestMigrationApi(TestAst("one"))
+        val extraOperation = TestMigrationApi(TestAst("two"))
+        val migration = object : Migration {
+            override fun up() = MigrationDefinition(emptyList())
+            override fun down() = MigrationDefinition(listOf(operation, extraOperation))
+        }
+
+        assertFailsWith<IllegalArgumentException> { migration.up() }
+        assertFailsWith<IllegalArgumentException> { migration.down() }
+    }
+
+    private data class TestAst(val value: String) : IMigrationAst<TestAstMetadata> {
+        override var metadata = TestAstMetadata()
+    }
+
+    private class TestAstMetadata : gog.my_project.data_base.migration.ast.metadata.interfaces.IMigrationAstMetadata
 
     private class TestMigrationApi(
         override var ast: TestAst,
