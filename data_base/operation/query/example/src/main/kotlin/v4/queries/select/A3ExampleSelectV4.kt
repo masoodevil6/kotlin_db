@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.example.v4.queries.select
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.example.v4.queries.IExampleV4
 import gog.my_project.data_base_query.example.v4.queries.delete.A1ExampleDeleteV4
 import gog.my_project.data_base_query.example.v4.queries.insert.A1ExampleInsertV4

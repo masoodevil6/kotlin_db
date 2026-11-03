@@ -1,6 +1,5 @@
 package gog.my_project.data_base.migration.api.interfaces
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
 import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
 import gog.my_project.data_base_schema.ast.interfaces.drop_table.ISchemaDropTableAst
@@ -80,7 +79,6 @@ class MigrationDefinitionTest {
 
     private class TestSchemaDropTableApi(
         override var ast: ISchemaDropTableAst = SchemaDropTableAst(),
-        override var params: MutableList<SqlParameter<*>> = mutableListOf(),
     ) : ISchemaDropTableApi {
         override fun tableName(table: String): ISchemaDropTableApi = apply { ast.metadata.tableName = table }
 

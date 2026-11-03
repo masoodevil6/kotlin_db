@@ -47,7 +47,6 @@ class A1ExampleCreateUniqueIndexV1Test {
         }
 
         assertEquals("PRIMARY", migration.ast.metadata.indexName)
-        assertEquals(0, migration.params.size)
         assertEquals(
             "CREATE UNIQUE INDEX `PRIMARY` ON `users` (`email`)",
             dialect.render(migration.ast),

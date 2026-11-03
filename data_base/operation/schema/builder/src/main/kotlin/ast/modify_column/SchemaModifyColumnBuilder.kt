@@ -1,6 +1,5 @@
 package gog.my_project.data_base_schema.builder.ast.modify_column
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.modify_column.ISchemaModifyColumnApi
 import gog.my_project.data_base_schema.ast.interfaces.modify_column.ColumnNullability
 import gog.my_project.data_base_schema.ast.interfaces.modify_column.DefaultDefinition
@@ -8,9 +7,7 @@ import gog.my_project.data_base_schema.ast.interfaces.modify_column.ISchemaModif
 import gog.my_project.data_base_schema.ast.schema.modify_column.SchemaModifyColumnAst
 import gog.my_project.data_base_schema.params.data_types.SchemaColumnDataType
 
-class SchemaModifyColumnBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf(),
-) : ISchemaModifyColumnApi {
+class SchemaModifyColumnBuilder : ISchemaModifyColumnApi {
     private var table: String? = null
     private var column: String? = null
     private var type: SchemaColumnDataType? = null

@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.executor.result
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 /** Transforms a non-null successful payload and preserves null success or failure. */
 fun <T, R> ExecuteResult<T>.success(

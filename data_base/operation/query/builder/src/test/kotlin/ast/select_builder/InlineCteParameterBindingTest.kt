@@ -1,6 +1,6 @@
 ﻿package gog.my_project.data_base_query.builder.ast.select_builder
 
-import gog.my_project.data_base.manager.execute.query.BoundQuery
+import gog.my_project.data_base_manager.execute.query.BoundQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base_query.api.interfaces.relations.Cte
@@ -15,7 +15,7 @@ import gog.my_project.data_base_query.builder.ast.select_builder.query_render_se
 import gog.my_project.data_base_query.renderer.dialects.MySqlDialect
 import gog.my_project.data_base_query.renderer.parameters.IdentityAwareQueryRenderResult
 import gog.my_project.data_base_query.renderer.parameters.QueryParameterRendering
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import java.lang.reflect.Proxy
 import java.sql.PreparedStatement
 import java.sql.Types

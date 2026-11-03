@@ -1,13 +1,29 @@
 package gog.my_project.data_base_operation.executor.transaction
 
-import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.connection.manager.DatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 
 /** Runs one callback on a single owned JDBC connection and finalizes it as a transaction. */
 class OperationTransactionExecutor(
-    private val connectionFactory: () -> Connection = { DatabaseConnection().build() },
+    private val connectionFactory: () -> Connection,
+    private val databasePlatformConfig: DatabasePlatformConfig,
 ) {
+    constructor() : this(DatabaseContext.legacyDefault())
+
+    constructor(databaseContext: DatabaseContext) : this(
+        databaseContext::openConnection,
+        databaseContext.platformConfig,
+    )
+
+    /** Compatibility constructor for callers that supply their own Connection factory. */
+    @Suppress("DEPRECATION")
+    constructor(connectionFactory: () -> Connection) : this(
+        connectionFactory,
+        DatabaseContext.legacyDefault().platformConfig,
+    )
     fun <T> transaction(
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
     ): ExecuteResult<T> = transaction(OperationExecutionCoordinator(), block)
@@ -49,7 +65,7 @@ class OperationTransactionExecutor(
             return ExecuteResult.Failure(exception)
         }
 
-        val scope = OperationExecutionScope(connection)
+        val scope = OperationExecutionScope(connection, databasePlatformConfig)
         operationScope = scope
         OperationScopeGuard.activate(scope)
         coordinator.activate(scope)

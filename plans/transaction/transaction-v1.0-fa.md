@@ -213,7 +213,7 @@ binding همچنان از `readyParamsInQuery` موجود انجام می‌شو
 $env:JAVA_HOME = 'D:\Dev\tools\jdk-24'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 $env:GRADLE_USER_HOME = (Join-Path (Get-Location) '.gradle')
-.\gradlew.bat :data_base:manager:execute:test --tests "gog.my_project.data_base.manager.execute.manager.QueryExecuteContractTest" --rerun-tasks --console=plain
+.\gradlew.bat :data_base:manager:execute:test --tests "gog.my_project.data_base_manager.execute.manager.QueryExecuteContractTest" --rerun-tasks --console=plain
 ```
 
 نتیجهٔ اجرای نهایی: `BUILD SUCCESSFUL`; XML کلاس `QueryExecuteContractTest` گزارش `26 tests, 0 failures, 0 errors, 0 skipped` داد. taskهای این اجرای `--rerun-tasks` همگی اجرا شدند (`8 actionable tasks: 8 executed`). اجرای نخست با Gradle User Home پیش‌فرض پیش از شروع taskها به‌دلیل `Access is denied` روی `gradle-8.14-bin.zip.lck` متوقف شد؛ اجرای موفق از cache محلی `.gradle` مخزن و JDK `24.0.2` استفاده کرد. هیچ قفل یا cacheای دستی حذف یا تغییر داده نشد.

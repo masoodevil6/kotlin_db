@@ -10,7 +10,7 @@ import gog.my_project.data_base_query.cte.mapper.CteQueryRowMapper
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.QueryConsumer
 import gog.my_project.data_base_query.executor.result.QueryRow
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.collection.ICollection
 
 /** Optional declaration base that builds a typed relation using its concrete runtime owner. */

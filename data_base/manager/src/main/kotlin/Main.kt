@@ -1,4 +1,4 @@
-package gog.my_project.data_base.manager
+package gog.my_project.data_base_manager
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.

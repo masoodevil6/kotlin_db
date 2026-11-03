@@ -1,11 +1,10 @@
 package gog.my_project.data_base.migration.executor.interfaces
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
 import gog.my_project.data_base_schema.api.interfaces.create_foreign_key.ISchemaCreateForeignKeyApi
 import gog.my_project.data_base_schema.api.interfaces.create_full_text_index.ISchemaCreateFullTextIndexApi
@@ -316,7 +315,6 @@ class MigrationExecutorDispatchTest {
 
     private class UnknownSchemaApi : ISchemaApi<UnknownAst> {
         override var ast = UnknownAst()
-        override var params: MutableList<SqlParameter<*>> = mutableListOf()
     }
 
     private class UnknownAst : ISchemaAst<UnknownAstMetadata> {

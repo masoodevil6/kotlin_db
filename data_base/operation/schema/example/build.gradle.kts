@@ -10,13 +10,7 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":data_base:core"))
-    implementation(project(":data_base:manager:execute"))
-    implementation(project(":data_base:operation:schema:api"))
-    implementation(project(":data_base:operation:schema:params"))
-    implementation(project(":data_base:operation:schema:builder"))
-    implementation(project(":data_base:operation:schema:renderer"))
-    implementation(project(":data_base:operation:schema:executor"))
+    implementation(project(":data_base:operation:schema"))
 }
 
 tasks.register<JavaExec>("run") {

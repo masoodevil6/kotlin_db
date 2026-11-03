@@ -1,13 +1,29 @@
 package gog.my_project.data_base_operation.executor.transaction
 
-import gog.my_project.data_base.manager.connection.manager.DatabaseConnection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.connection.manager.DatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 
 /** Owns Connection and Transaction scope lifecycles for an execution lineage. */
-class OperationExecutionExecutor(
-    private val connectionFactory: () -> Connection = { DatabaseConnection().build() },
+class OperationExecutionExecutor private constructor(
+    private val connectionFactory: () -> Connection,
+    private val databasePlatformConfig: DatabasePlatformConfig,
 ) {
+    constructor() : this(DatabaseContext.legacyDefault())
+
+    constructor(databaseContext: DatabaseContext) : this(
+        databaseContext::openConnection,
+        databaseContext.platformConfig,
+    )
+
+    /** Compatibility constructor for callers that supply their own Connection factory. */
+    @Suppress("DEPRECATION")
+    constructor(connectionFactory: () -> Connection) : this(
+        connectionFactory,
+        DatabaseContext.legacyDefault().platformConfig,
+    )
     fun <T> connection(
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
     ): ExecuteResult<T> = connection(OperationExecutionCoordinator(), block)
@@ -39,7 +55,7 @@ class OperationExecutionExecutor(
             }
 
             val activeScope = try {
-                OperationExecutionScope(connection).also {
+                OperationExecutionScope(connection, databasePlatformConfig).also {
                     scope = it
                     OperationScopeGuard.activate(it)
                     coordinator.activate(it)
@@ -128,7 +144,8 @@ class OperationExecutionExecutor(
     fun <T> transaction(
         coordinator: OperationExecutionCoordinator,
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
-    ): ExecuteResult<T> = OperationTransactionExecutor(connectionFactory).transaction(coordinator, block)
+    ): ExecuteResult<T> = OperationTransactionExecutor(connectionFactory, databasePlatformConfig)
+        .transaction(coordinator, block)
 
     private fun closeConnection(connection: Connection, primary: Throwable?): Throwable? {
         val closeFailure = try {

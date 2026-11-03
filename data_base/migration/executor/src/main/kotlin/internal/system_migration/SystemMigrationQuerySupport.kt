@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.executor.internal.system_migration
 
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base_query.ast.interfaces.IQueryAst
@@ -14,8 +14,10 @@ import gog.my_project.data_base_query.renderer.parameters.LegacyQueryRenderResul
 import gog.my_project.data_base_query.renderer.parameters.QueryParameterRendering
 
 /** Renders a Query API through the configured query dialect and wraps it for the existing manager. */
-internal fun <Ast : IQueryAst<*>, Api : IQueryApi<Ast>> Api.toBuiltQuery(): BuiltQuery {
-    val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+internal fun <Ast : IQueryAst<*>, Api : IQueryApi<Ast>> Api.toBuiltQuery(
+    platform: DatabasePlatformConfig,
+): BuiltQuery {
+    val dialect = DialectSelector().select(platform.dialect)
     val rendered = when (val queryAst = ast) {
         is IQueryRenderSelectAst -> QueryParameterRendering.render(queryAst, dialect)
         is IQueryRenderInsertAst, is IQueryRenderUpdateAst, is IQueryRenderDeleteAst ->

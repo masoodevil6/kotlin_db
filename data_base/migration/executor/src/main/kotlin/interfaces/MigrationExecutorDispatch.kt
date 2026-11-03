@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.executor.interfaces
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
 import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
 import gog.my_project.data_base_schema.api.interfaces.create_foreign_key.ISchemaCreateForeignKeyApi

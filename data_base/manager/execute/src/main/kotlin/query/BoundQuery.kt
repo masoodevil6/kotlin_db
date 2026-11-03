@@ -1,4 +1,4 @@
-package gog.my_project.data_base.manager.execute.query
+package gog.my_project.data_base_manager.execute.query
 
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
 import java.util.Collections

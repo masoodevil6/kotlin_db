@@ -2,8 +2,8 @@ package gog.my_project.data_base_schema.executor.manager
 
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
 import gog.my_project.data_base_operation.executor.transaction.OperationTransactionExecutor
 import java.lang.reflect.InvocationHandler

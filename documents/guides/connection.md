@@ -64,7 +64,7 @@ import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.QueryRow
 import gog.my_project.data_base_query.executor.result.error
 import gog.my_project.data_base_query.executor.result.success
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 private fun userById(userId: Int): IQueryRenderSelectApi = QueryRenderSelectBuilder()
     .select {
@@ -176,8 +176,8 @@ fun main() {
 ~~~kotlin
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 fun main() {
     val query = BuiltQuery(

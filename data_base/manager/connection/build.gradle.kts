@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    id("java-library")
 }
 
 group = "gog.my_project.data_base.manager.connection"
@@ -10,7 +11,7 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":data_base:core"))
+    api(project(":data_base:core"))
 
     testImplementation(kotlin("test"))
 

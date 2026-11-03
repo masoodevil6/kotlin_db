@@ -15,7 +15,7 @@
 ~~~kotlin
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.QueryRow
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 val queryManager = QueryBuilderExecutor()
 
@@ -47,7 +47,7 @@ val transactionResult: ExecuteResult<String> = queryManager.transaction { ctx ->
 import gog.my_project.collection.ICollection
 import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base_query.executor.result.QueryRow
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 data class UserView(val id: Int, val name: String?)
 
@@ -79,7 +79,7 @@ import gog.my_project.collection.ICollection
 import gog.my_project.data_base_query.executor.result.QueryRow
 import gog.my_project.data_base_query.executor.result.toCollection
 import gog.my_project.data_base_query.executor.result.toList
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 // فرض شده selectQuery، insertQuery، updateQuery و deleteQuery با DSL ساخته شده‌اند.
 

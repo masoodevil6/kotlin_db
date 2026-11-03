@@ -1,10 +1,11 @@
 package gog.my_project.data_base_query.executor.interfaces
 
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
@@ -33,6 +34,14 @@ import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
 
 interface IQueryBuilderExecutor  {
+
+    /** Database selected for this executor; legacy implementers retain the old global default. */
+    @Suppress("DEPRECATION")
+    val databaseContext: DatabaseContext
+        get() = DatabaseContext.legacyDefault()
+
+    val databasePlatformConfig: DatabasePlatformConfig
+        get() = databaseContext.platformConfig
 
     /**
      * Runs the callback with one connection-bound executor when this implementation supports
@@ -97,13 +106,13 @@ interface IQueryBuilderExecutor  {
 
 
     /** Returns rendered SQL without interpolating or changing the query's parameters. */
-    fun sql(queryBuilder: IQueryRenderSelectApi): String = renderSql(queryBuilder)
+    fun sql(queryBuilder: IQueryRenderSelectApi): String = renderSql(queryBuilder, databasePlatformConfig)
 
-    fun sql(queryBuilder: IQueryRenderInsertApi): String = renderSql(queryBuilder)
+    fun sql(queryBuilder: IQueryRenderInsertApi): String = renderSql(queryBuilder, databasePlatformConfig)
 
-    fun sql(queryBuilder: IQueryRenderUpdateApi): String = renderSql(queryBuilder)
+    fun sql(queryBuilder: IQueryRenderUpdateApi): String = renderSql(queryBuilder, databasePlatformConfig)
 
-    fun sql(queryBuilder: IQueryRenderDeleteApi): String = renderSql(queryBuilder)
+    fun sql(queryBuilder: IQueryRenderDeleteApi): String = renderSql(queryBuilder, databasePlatformConfig)
 
     /** Materializes the first row while the low-level ResultSet is still live. */
     fun first(
@@ -245,9 +254,7 @@ interface IQueryBuilderExecutor  {
         blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null,
         blockResult:     (db: IQueryExecute ,builtQuery: BuiltQuery) -> Unit
     ){
-        val db = QueryExecute()
-
-        val dialect  = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+        val dialect  = DialectSelector().select(databasePlatformConfig.dialect)
 
         val builtQuery = renderBuiltQuery(queryBuilder.ast, dialect)
 
@@ -259,13 +266,16 @@ interface IQueryBuilderExecutor  {
             blockQueryInfo(queryString , paramsMap)
         }
 
-        blockResult(db, builtQuery);
+        blockResult(QueryExecute(databaseContext), builtQuery)
     }
 
 }
 
-private fun <Ast : IQueryAst<*>> renderSql(queryBuilder: IQueryApi<Ast>): String {
-    val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+private fun <Ast : IQueryAst<*>> renderSql(
+    queryBuilder: IQueryApi<Ast>,
+    platform: DatabasePlatformConfig,
+): String {
+    val dialect = DialectSelector().select(platform.dialect)
     return dialect.render(queryBuilder.ast)
         ?: throw IllegalStateException("rendered sql is null")
 }

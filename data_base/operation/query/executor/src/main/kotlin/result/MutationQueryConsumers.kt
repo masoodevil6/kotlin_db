@@ -1,8 +1,7 @@
 package gog.my_project.data_base_query.executor.result
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
 import gog.my_project.data_base_query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
@@ -21,7 +20,7 @@ class InsertQueryConsumer internal constructor(
         executor.execute(query, blockExecute = callback)
     }
 
-    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast)
+    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast, executor.databasePlatformConfig)
 
     fun sql(block: (BuiltQuery) -> Unit): InsertQueryConsumer {
         block(sql())
@@ -37,7 +36,7 @@ class UpdateQueryConsumer internal constructor(
         executor.execute(query, blockExecute = callback)
     }
 
-    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast)
+    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast, executor.databasePlatformConfig)
 
     fun sql(block: (BuiltQuery) -> Unit): UpdateQueryConsumer {
         block(sql())
@@ -53,7 +52,7 @@ class DeleteQueryConsumer internal constructor(
         executor.execute(query, blockExecute = callback)
     }
 
-    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast)
+    fun sql(): BuiltQuery = mutationBuiltQuery(query.ast, executor.databasePlatformConfig)
 
     fun sql(block: (BuiltQuery) -> Unit): DeleteQueryConsumer {
         block(sql())
@@ -64,8 +63,9 @@ class DeleteQueryConsumer internal constructor(
 /** Uses one render result for named SQL and the corresponding parameter bindings. */
 private fun mutationBuiltQuery(
     ast: IQueryAst<*>,
+    platform: gog.my_project.data_base.core.data_base.DatabasePlatformConfig,
 ): BuiltQuery {
-    val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+    val dialect = DialectSelector().select(platform.dialect)
     return when (val rendered = QueryParameterRendering.renderDml(ast, dialect)) {
         is LegacyQueryRenderResult -> BuiltQuery(
             requireNotNull(rendered.sql) { "rendered sql is null" },

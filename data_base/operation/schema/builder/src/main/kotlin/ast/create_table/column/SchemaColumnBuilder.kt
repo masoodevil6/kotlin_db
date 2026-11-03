@@ -1,13 +1,11 @@
 package gog.my_project.data_base_schema.builder.ast.create_table.column
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.create_table.table_column.ISchemaColumnApi
 import gog.my_project.data_base_schema.ast.interfaces.create_table.column.ISchemaColumnAst
 import gog.my_project.data_base_schema.ast.schema.create_table.column.SchemaColumnAst
 import gog.my_project.data_base_schema.params.data_types.SchemaColumnDataType
 
 class SchemaColumnBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: ISchemaColumnAst = SchemaColumnAst(),
 ) : ISchemaColumnApi {
 

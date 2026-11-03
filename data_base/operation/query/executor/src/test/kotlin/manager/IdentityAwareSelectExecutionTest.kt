@@ -8,7 +8,7 @@ import gog.my_project.data_base.core.annotations.models.QBQuerySelect
 import gog.my_project.data_base.core.annotations.models.QBTable
 import gog.my_project.data_base.core.managers.models.IModelBase
 import gog.my_project.data_base.core.query.reader.QueryParameterBinding
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.relations.Cte
 import gog.my_project.data_base_query.api.interfaces.relations.ICteDeclaration
 import gog.my_project.data_base_query.ast.enums.DataType

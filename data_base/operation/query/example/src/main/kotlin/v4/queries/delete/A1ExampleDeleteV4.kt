@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.example.v4.queries.delete
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.builder.ast.delete_builder.query_render_delete.QueryRenderDeleteBuilder
 import gog.my_project.data_base_query.example.v4.queries.IExampleV4

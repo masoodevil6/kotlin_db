@@ -3,9 +3,8 @@ package gog.my_project.data_base.migration.executor.manager
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
 import gog.my_project.data_base_schema.ast.interfaces.drop_column.ISchemaDropColumnAst
 import gog.my_project.data_base_schema.ast.schema.drop_column.SchemaDropColumnAst
@@ -234,7 +233,6 @@ class MigrationExecutorDropColumnTest {
                 metadata.name = "display_name"
                 metadata.ifExists = ifExists
             }
-            override var params: MutableList<SqlParameter<*>> = mutableListOf()
 
             override fun tableName(table: String): ISchemaDropColumnApi {
                 ast.metadata.tableName = table

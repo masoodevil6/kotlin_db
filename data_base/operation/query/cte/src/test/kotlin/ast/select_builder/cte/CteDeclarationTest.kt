@@ -5,7 +5,7 @@ import gog.my_project.collection.ICollection
 import gog.my_project.data_base_query.api.interfaces.relations.Cte
 import gog.my_project.data_base_query.cte.declaration.CteDeclaration
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

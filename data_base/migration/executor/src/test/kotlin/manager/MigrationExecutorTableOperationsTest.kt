@@ -3,8 +3,8 @@ package gog.my_project.data_base.migration.executor.manager
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.builder.ast.drop_table.SchemaDropTableBuilder
 import gog.my_project.data_base_schema.builder.ast.rename_table.SchemaRenameTableBuilder
 import java.lang.reflect.Proxy

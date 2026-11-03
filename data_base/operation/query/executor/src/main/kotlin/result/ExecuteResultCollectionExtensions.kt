@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.executor.result
 
 import gog.my_project.collection.ICollection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import kotlin.jvm.JvmName
 
 /** Extracts an already-produced typed collection, throwing if the result is not a value. */

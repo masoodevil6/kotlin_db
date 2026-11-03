@@ -1,8 +1,9 @@
 package gog.my_project.data_base.migration.executor.manager
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationConfiguration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
@@ -385,6 +386,7 @@ class MigrationMigratorTest {
             when (method.name) {
                 "getQueryExecutor" -> database
                 "getDialectSelector" -> DialectSelector()
+                "getDatabaseContext" -> DatabaseContext.legacyDefault()
                 "transaction" -> {
                     @Suppress("UNCHECKED_CAST")
                     val block = args!![0] as (IMigrationExecutor) -> ExecuteResult<Any?>

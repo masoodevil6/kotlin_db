@@ -1,14 +1,13 @@
 package gog.my_project.data_base.migration.executor.manager
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.data_base.MARIA_DB
 import gog.my_project.data_base.core.data_base.MYSQL
 import gog.my_project.data_base.core.query.dialect.DialectQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.ast.interfaces.rename_column.ISchemaRenameColumnAst
 import gog.my_project.data_base_schema.ast.schema.rename_column.SchemaRenameColumnAst
 import gog.my_project.data_base_schema.api.interfaces.rename_column.ISchemaRenameColumnApi
@@ -28,7 +27,6 @@ class MigrationExecutorRenameColumnTest {
             override var ast: ISchemaRenameColumnAst = SchemaRenameColumnAst().apply {
                 metadata.tableName = "users"; metadata.name = "display_name"; metadata.to = "full_name"
             }
-            override var params: MutableList<SqlParameter<*>> = mutableListOf()
             override fun tableName(table: String) = apply { ast.metadata.tableName = table }
             override fun name(name: String) = apply { ast.metadata.name = name }
             override fun to(name: String) = apply { ast.metadata.to = name }
@@ -141,7 +139,6 @@ class MigrationExecutorRenameColumnTest {
         override var ast: ISchemaRenameColumnAst = SchemaRenameColumnAst().apply {
             metadata.tableName = "users"; metadata.name = "display_name"; metadata.to = "full_name"
         }
-        override var params: MutableList<SqlParameter<*>> = mutableListOf()
         override fun tableName(table: String) = apply { ast.metadata.tableName = table }
         override fun name(name: String) = apply { ast.metadata.name = name }
         override fun to(name: String) = apply { ast.metadata.to = name }

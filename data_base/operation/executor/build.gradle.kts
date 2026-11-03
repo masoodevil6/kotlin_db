@@ -12,7 +12,8 @@ repositories {
 
 dependencies {
     api(project(":data_base:manager:execute"))
-    implementation(project(":data_base:manager:connection"))
+    api(project(":data_base:core"))
+    api(project(":data_base:manager:connection"))
 
     testImplementation(kotlin("test"))
 }

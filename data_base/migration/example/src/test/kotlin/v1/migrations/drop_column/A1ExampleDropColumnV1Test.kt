@@ -96,8 +96,4 @@ class A1ExampleDropColumnV1Test {
         )
     }
 
-    @Test
-    fun identifiersDoNotCreateBindParameters() {
-        assertEquals(0, A1ExampleDropColumnV1().migration().params.size)
-    }
 }

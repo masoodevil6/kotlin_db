@@ -1,13 +1,11 @@
 package gog.my_project.data_base_schema.builder.ast.create_index
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.create_index.ISchemaCreateIndexApi
 import gog.my_project.data_base_schema.ast.interfaces.create_index.ISchemaCreateIndexAst
 import gog.my_project.data_base_schema.ast.interfaces.create_index.IndexMethod
 import gog.my_project.data_base_schema.ast.schema.create_index.SchemaCreateIndexAst
 
 class SchemaCreateIndexBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf(),
     override var ast: ISchemaCreateIndexAst = SchemaCreateIndexAst(),
 ) : ISchemaCreateIndexApi {
     override fun tableName(table: String): ISchemaCreateIndexApi = apply {

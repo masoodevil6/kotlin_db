@@ -1,4 +1,4 @@
-package gog.my_project.data_base.manager.execute.tools
+package gog.my_project.data_base_manager.execute.tools
 
 sealed class ExecuteResult<out T> {
 

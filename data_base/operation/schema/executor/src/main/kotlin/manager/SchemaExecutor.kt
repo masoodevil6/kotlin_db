@@ -1,10 +1,11 @@
 package gog.my_project.data_base_schema.executor.manager
 
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionCoordinator
 import gog.my_project.data_base_operation.executor.transaction.OperationTransactionExecutor
@@ -14,10 +15,21 @@ import gog.my_project.tools.scripts.StringTools
 
 /** Executes schema operations; transaction lifecycle is delegated to the shared Operation executor. */
 class SchemaExecutor(
-    private val queryExecutor: IQueryExecute = QueryExecute(),
+    queryExecutor: IQueryExecute? = null,
     private val dialectSelector: DialectSelector = DialectSelector(),
-    private val transactionExecutor: OperationTransactionExecutor = OperationTransactionExecutor(),
+    transactionExecutor: OperationTransactionExecutor? = null,
+    val databaseContext: DatabaseContext = DatabaseContext.legacyDefault(),
 ) {
+    private val queryExecutor: IQueryExecute = queryExecutor ?: QueryExecute(databaseContext)
+    private val transactionExecutor: OperationTransactionExecutor =
+        transactionExecutor ?: OperationTransactionExecutor(databaseContext)
+
+    constructor(
+        queryExecutor: IQueryExecute,
+        dialectSelector: DialectSelector,
+        transactionExecutor: OperationTransactionExecutor,
+    ) : this(queryExecutor, dialectSelector, transactionExecutor, DatabaseContext.legacyDefault())
+
     private val executionCoordinator = OperationExecutionCoordinator("root schema operation")
 
     fun <T> transaction(
@@ -32,7 +44,7 @@ class SchemaExecutor(
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
     ) {
         withRootOperation(blockExecute) {
-            val query = render(operation, blockQueryInfo)
+            val query = render(operation, databaseContext.platformConfig, blockQueryInfo)
             executeRenderedOwned(query, blockExecute)
         }
     }
@@ -112,21 +124,21 @@ class SchemaExecutor(
             blockExecute(failure)
             return
         }
-        executeRendered(render(operation, blockQueryInfo), scope, blockExecute)
+        executeRendered(render(operation, scope.databasePlatformConfig, blockQueryInfo), scope, blockExecute)
     }
 
     private fun render(
         operation: ISchemaApi<*>,
+        platform: DatabasePlatformConfig,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ): BuiltQuery {
-        val dialect = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
+        val dialect = dialectSelector.select(platform.dialect, platform.targetDatabaseVersion)
         val sql = requireNotNull(dialect.render(operation.ast)) { "rendered schema SQL is null" }
-        val params = operation.params
         blockQueryInfo?.invoke(
             StringTools.formatSql(sql),
-            params.associateTo(linkedMapOf()) { it.name to it.value },
+            linkedMapOf(),
         )
-        return BuiltQuery(sql, params.toMutableList())
+        return BuiltQuery(sql, mutableListOf())
     }
 }
 

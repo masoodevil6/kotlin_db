@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.example.v4.queries.update
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base_query.builder.ast.update_builder.query_render_update.QueryRenderUpdateBuilder
 import gog.my_project.data_base_query.example.v4.queries.IExampleV4

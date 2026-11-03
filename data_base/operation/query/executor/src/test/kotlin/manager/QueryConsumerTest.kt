@@ -6,7 +6,7 @@ import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
 import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.relations.Cte
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi

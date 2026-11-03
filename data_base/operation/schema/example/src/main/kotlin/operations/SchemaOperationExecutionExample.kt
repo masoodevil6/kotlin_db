@@ -1,21 +1,23 @@
 package gog.my_project.data_base_schema.example.operations
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
-import gog.my_project.data_base_schema.executor.manager.SchemaExecutor
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
+import gog.my_project.data_base_schema.Schema
+import gog.my_project.data_base_schema.SchemaOperation
 
-/** Executes one already-built public Schema operation using the library's SchemaExecutor. */
+/** Executes a Schema operation in an existing Operation-owned connection or transaction scope. */
 fun executeSchemaOperation(
-    executor: SchemaExecutor,
-    operation: ISchemaApi<*>,
-    onResult: (ExecuteResult<Boolean>) -> Unit,
-) {
-    executor.execute(
-        operation = operation,
-        blockExecute = onResult,
-        blockQueryInfo = { sql, params ->
-            println("SQL: $sql")
-            println("Parameters: $params")
-        },
-    )
+    operation: SchemaOperation,
+    scope: OperationExecutionContext,
+): ExecuteResult<Boolean> = Schema.execute(operation, scope) { sql, parameters ->
+    println("SQL: $sql")
+    println("Parameters: $parameters")
+}
+
+/** Independent execution delegates connection ownership to Operation. */
+fun executeSchemaOperationIndependently(
+    operation: SchemaOperation,
+): ExecuteResult<Boolean> = Schema.execute(operation) { sql, parameters ->
+    println("SQL: $sql")
+    println("Parameters: $parameters")
 }

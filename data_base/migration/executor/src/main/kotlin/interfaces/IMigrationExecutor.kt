@@ -1,10 +1,10 @@
 package gog.my_project.data_base.migration.executor.interfaces
 
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
 import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
 import gog.my_project.data_base_schema.api.interfaces.create_foreign_key.ISchemaCreateForeignKeyApi
@@ -29,6 +29,9 @@ interface IMigrationExecutor {
 
     val queryExecutor: IQueryExecute
     val dialectSelector: DialectSelector
+    @Suppress("DEPRECATION")
+    val databaseContext: DatabaseContext
+        get() = DatabaseContext.legacyDefault()
 
     /** Executes migration operations inside one shared Operation transaction when supported. */
     fun <T> transaction(block: (tx: IMigrationExecutor) -> ExecuteResult<T>): ExecuteResult<T> =
@@ -139,20 +142,19 @@ interface IMigrationExecutor {
     ){
         val db = queryExecutor
 
-        val dialect = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
+        val platform = databaseContext.platformConfig
+        val dialect = dialectSelector.select(platform.dialect, platform.targetDatabaseVersion)
 
         val query = dialect.render(schemaBuilder.ast) ?: throw IllegalStateException("rendered sql is null")
 
-        val params = schemaBuilder.params
-
         if (blockQueryInfo != null){
-            val paramsMap: MutableMap<String , Any?> = params.associate { it -> it.name to it.value }.toMutableMap()
+            val paramsMap: MutableMap<String , Any?> = mutableMapOf()
             val queryString = StringTools.formatSql(query)
 
             blockQueryInfo(queryString , paramsMap)
         }
 
-        blockResult(db , BuiltQuery(query, params));
+        blockResult(db, BuiltQuery(query, mutableListOf()))
     }
 
 }

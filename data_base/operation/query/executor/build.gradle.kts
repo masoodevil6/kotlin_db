@@ -26,7 +26,7 @@ dependencies {
     implementation(project(":data_base:operation:query:renderer"))
 
     api(project(":data_base:manager:execute"))
-    implementation(project(":data_base:manager:connection"))
+    api(project(":data_base:manager:connection"))
     api(project(":data_base:operation:executor"))
 
     testImplementation(kotlin("test"))

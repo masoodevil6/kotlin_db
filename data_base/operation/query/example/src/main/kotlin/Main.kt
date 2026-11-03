@@ -1,9 +1,12 @@
 package gog.my_project.data_base_query.example
 
 import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base.core.data_base.DatabasePoolConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.example.runners.ExampleRunOptions
 import gog.my_project.data_base_query.example.runners.ExampleVersionRunner
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
@@ -13,19 +16,27 @@ import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 fun main(args: Array<String>) {
 
 
-    DefaultDatabaseConfig.config=
-        DatabaseConfig(
-            dbDomain = "jdbc:mysql://127.0.0.1",
-            dbPort = 3306,
-            dbName = "kotlin_db",
-            dbUserName = "root",
-            dbPassword = "",
-            dbPoolSize = 10,
-            dialect = DialectQuery.MY_SQL
-        );
+    val databaseContext = DatabaseContext(
+        name = "query-example",
+        config = DatabaseConfig(
+            connection = DatabaseConnectionConfig(
+                dbDomain = "jdbc:mysql://127.0.0.1",
+                dbPort = 3306,
+                dbName = "kotlin_db",
+                dbUserName = "root",
+                dbPassword = "",
+            ),
+            pool = DatabasePoolConfig(
+                maxPoolSize = 10
+            ),
+            platform = DatabasePlatformConfig(
+                dialect = DialectQuery.MY_SQL
+            ),
+        ),
+    )
 
 
-    val queryManager = QueryBuilderExecutor()
+    val queryManager = QueryBuilderExecutor(databaseContext)
     val selectedVersion = args.firstOrNull()?.takeIf { it.isNotBlank() }?.lowercase() ?: "v3"
     val options = ExampleRunOptions(
         runSelect = configuredRunOption("query.example.run.select", true),

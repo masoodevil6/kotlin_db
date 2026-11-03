@@ -1,12 +1,14 @@
 package gog.my_project.data_base.migration.executor.internal.system_migration
 
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
 
 /** Validates and records one successfully applied migration. */
 internal class SystemMigrationRecorder(
     private val queryExecutor: IQueryExecute,
+    private val platformConfig: DatabasePlatformConfig,
 ) {
     fun recordSuccessfulMigration(
         migration: String,
@@ -33,7 +35,7 @@ internal class SystemMigrationRecorder(
             setValue { paramValue(batch) }
         }
 
-        queryExecutor.executeUpdate(queryBuilder.toBuiltQuery()) { result ->
+        queryExecutor.executeUpdate(queryBuilder.toBuiltQuery(platformConfig)) { result ->
             when (result) {
                 is ExecuteResult.Failure -> block(result)
                 is ExecuteResult.Success<*> -> {

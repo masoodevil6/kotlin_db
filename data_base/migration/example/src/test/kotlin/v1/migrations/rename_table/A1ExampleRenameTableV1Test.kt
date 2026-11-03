@@ -58,10 +58,4 @@ class A1ExampleRenameTableV1Test {
         assertEquals("RENAME TABLE `users` TO ``", MySqlDialect().render(migration.ast))
     }
 
-    @Test
-    fun keepsIdentifierParametersEmpty() {
-        val migration = A1ExampleRenameTableV1().migration()
-
-        assertEquals(0, migration.params.size)
-    }
 }

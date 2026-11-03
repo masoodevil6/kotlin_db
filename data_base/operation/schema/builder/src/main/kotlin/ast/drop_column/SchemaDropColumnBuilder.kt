@@ -1,12 +1,10 @@
 package gog.my_project.data_base_schema.builder.ast.drop_column
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
 import gog.my_project.data_base_schema.ast.interfaces.drop_column.ISchemaDropColumnAst
 import gog.my_project.data_base_schema.ast.schema.drop_column.SchemaDropColumnAst
 
 class SchemaDropColumnBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf(),
     override var ast: ISchemaDropColumnAst = SchemaDropColumnAst(),
 ) : ISchemaDropColumnApi {
 

@@ -1,6 +1,5 @@
 package gog.my_project.data_base.migration.api.interfaces
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

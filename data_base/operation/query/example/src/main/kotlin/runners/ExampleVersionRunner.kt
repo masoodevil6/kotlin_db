@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.example.runners
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.example.managers.IManagerExample
 import gog.my_project.data_base_query.example.managers.ManagerExampleV1
 import gog.my_project.data_base_query.example.managers.ManagerExampleV2

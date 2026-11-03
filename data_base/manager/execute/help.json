@@ -153,7 +153,7 @@
       },
       "runner": {
         "type": "gradle-test",
-        "testFilter": "gog.my_project.data_base.manager.execute.manager.QueryExecuteMySqlIntegrationTest"
+        "testFilter": "gog.my_project.data_base_manager.execute.manager.QueryExecuteMySqlIntegrationTest"
       },
       "parameters": [
         {

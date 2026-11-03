@@ -1,6 +1,6 @@
 package gog.my_project.data_base_operation.executor.transaction
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
 import java.sql.Connection

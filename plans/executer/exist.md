@@ -94,7 +94,7 @@ import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
 import gog.my_project.data_base.query.executer.result.QueryRow
 import gog.my_project.data_base.query.executer.result.error
 import gog.my_project.data_base.query.executer.result.success
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 private fun userById(userId: Int): IQueryRenderSelectApi = QueryRenderSelectBuilder()
     .select {
@@ -206,8 +206,8 @@ fun main() {
 ~~~kotlin
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 fun main() {
     val query = BuiltQuery(
@@ -813,7 +813,7 @@ import gog.my_project.data_base.migration.builder.migration
 import gog.my_project.data_base.migration.builder.migrationConfig
 import gog.my_project.data_base.migration.executor.manager.MigrationMigrator
 import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 @MigrationId("create_customers")
 class CreateCustomersTableMigration : Migration {
@@ -892,7 +892,7 @@ AST عمومی schema در `data_base/migration/ast` روی `IMigrationAst` بن
 ~~~kotlin
 import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
 import gog.my_project.data_base.query.executer.result.QueryRow
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 val queryManager = QueryBuilderExecutor()
 
@@ -924,7 +924,7 @@ val transactionResult: ExecuteResult<String> = queryManager.transaction { ctx ->
 import gog.my_project.collection.ICollection
 import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base.query.executer.result.QueryRow
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 data class UserView(val id: Int, val name: String?)
 
@@ -956,7 +956,7 @@ import gog.my_project.collection.ICollection
 import gog.my_project.data_base.query.executer.result.QueryRow
 import gog.my_project.data_base.query.executer.result.toCollection
 import gog.my_project.data_base.query.executer.result.toList
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 
 // فرض شده selectQuery، insertQuery، updateQuery و deleteQuery با DSL ساخته شده‌اند.
 

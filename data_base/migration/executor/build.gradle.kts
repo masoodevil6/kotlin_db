@@ -14,6 +14,7 @@ dependencies {
     implementation(project(":tools"))
 
     api(project(":data_base:core"))
+    api(project(":data_base:manager:connection"))
     api(project(":data_base:manager:execute"))
     api(project(":data_base:migration:api"))
     api(project(":data_base:operation:schema:api"))

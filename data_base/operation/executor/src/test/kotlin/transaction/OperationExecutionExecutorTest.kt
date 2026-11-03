@@ -1,6 +1,12 @@
 package gog.my_project.data_base_operation.executor.transaction
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.core.data_base.DatabaseConfig
+import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -14,6 +20,31 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OperationExecutionExecutorTest {
+    @Test
+    fun `selected database platform is carried into the operation scope`() {
+        val events = mutableListOf<String>()
+        val connection = connection(events)
+        val platform = DatabasePlatformConfig(dialect = DialectQuery.MARIA_DB)
+        val context = DatabaseContext(
+            name = "maria-test",
+            config = DatabaseConfig(
+                connection = DatabaseConnectionConfig("jdbc:mariadb://localhost", 3306, "test", "user", ""),
+                platform = platform,
+            ),
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection = connection
+            },
+        )
+
+        val result = OperationExecutionExecutor(context).connection { scope ->
+            assertEquals(platform, scope.databasePlatformConfig)
+            ExecuteResult.Success(Unit)
+        }
+
+        assertIs<ExecuteResult.Success<Unit>>(result)
+        assertEquals(listOf("close"), events)
+    }
+
     @Test
     fun `connection scope owns one connection without transaction control`() {
         val events = mutableListOf<String>()

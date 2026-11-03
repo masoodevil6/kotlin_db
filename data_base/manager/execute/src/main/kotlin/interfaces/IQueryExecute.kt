@@ -1,11 +1,11 @@
-package gog.my_project.data_base.manager.execute.interfaces
+package gog.my_project.data_base_manager.execute.interfaces
 
 import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
-import gog.my_project.data_base.manager.execute.connection.withOwnedConnection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.manager.execute.query.BoundQuery
+import gog.my_project.data_base_manager.execute.connection.withOwnedConnection
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.query.BoundQuery
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet

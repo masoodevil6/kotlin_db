@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.executor.manager
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.executor.result.error
 import gog.my_project.data_base_query.executor.result.success
 import gog.my_project.data_base_query.executor.result.then

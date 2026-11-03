@@ -1,12 +1,12 @@
 package gog.my_project.data_base_query.executor.manager
 
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
-import gog.my_project.data_base.manager.execute.query.BoundQuery
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.query.BoundQuery
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
@@ -27,17 +27,28 @@ class QueryBuilderExecutor private constructor(
     private val transactionScope: TransactionExecutionScope?,
     private val transactionGuard: TransactionGuard,
     private val rootExecutionCoordinator: RootExecutionCoordinator,
+    override val databaseContext: DatabaseContext,
 ) : IQueryBuilderExecutor {
 
-    constructor() : this(
-        OperationExecutionExecutor(),
+    @Suppress("DEPRECATION")
+    constructor() : this(DatabaseContext.legacyDefault())
+
+    constructor(databaseContext: DatabaseContext) : this(
+        OperationExecutionExecutor(databaseContext),
         null,
         TransactionGuardRegistry.shared,
         RootExecutionCoordinator(),
+        databaseContext,
     )
 
     internal constructor(connectionFactory: () -> Connection) :
-        this(OperationExecutionExecutor(connectionFactory), null, TransactionGuardRegistry.shared, RootExecutionCoordinator())
+        this(
+            OperationExecutionExecutor(connectionFactory),
+            null,
+            TransactionGuardRegistry.shared,
+            RootExecutionCoordinator(),
+            DatabaseContext.legacyDefault(),
+        )
 
     /** Retains the pre-adapter JVM constructor descriptor for existing internal integrations. */
     internal constructor(
@@ -50,6 +61,7 @@ class QueryBuilderExecutor private constructor(
         transactionScope,
         transactionGuard,
         rootExecutionCoordinator,
+        DatabaseContext.legacyDefault(),
     )
 
     override fun <T> connection(
@@ -70,6 +82,7 @@ class QueryBuilderExecutor private constructor(
                     scope,
                     transactionGuard,
                     rootExecutionCoordinator,
+                    databaseContext,
                 )
                 block(scopedExecutor)
             }
@@ -96,6 +109,7 @@ class QueryBuilderExecutor private constructor(
                     scope,
                     transactionGuard,
                     rootExecutionCoordinator,
+                    databaseContext,
                 )
                 try {
                     block(scopedExecutor)
@@ -121,11 +135,11 @@ class QueryBuilderExecutor private constructor(
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) = executeInScope(blockExecute) { callback ->
-        val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+        val dialect = DialectSelector().select(databaseContext.platformConfig.dialect)
         when (val rendered = QueryParameterRendering.render(queryBuilder.ast, dialect)) {
             is LegacyQueryRenderResult -> {
                 val builtQuery = legacyBuiltQuery(rendered, blockQueryInfo)
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 if (transactionScope == null) {
                     executor.executeSelect(builtQuery, callback)
                 } else {
@@ -135,7 +149,7 @@ class QueryBuilderExecutor private constructor(
             is IdentityAwareQueryRenderResult -> {
                 reportIdentityAwareQuery(rendered, blockQueryInfo)
                 val boundQuery = BoundQuery(rendered.jdbcSql, rendered.parameterOccurrences)
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 if (transactionScope == null) {
                     executor.executeSelect(boundQuery, callback)
                 } else {
@@ -150,10 +164,10 @@ class QueryBuilderExecutor private constructor(
         blockExecute: (ExecuteResult<Long>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) = executeInScope(blockExecute) { callback ->
-        val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+        val dialect = DialectSelector().select(databaseContext.platformConfig.dialect)
         when (val rendered = QueryParameterRendering.renderDml(queryBuilder.ast, dialect)) {
             is LegacyQueryRenderResult -> {
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 val builtQuery = legacyBuiltQuery(rendered, blockQueryInfo)
                 if (transactionScope == null) executor.executeInsert(builtQuery, callback)
                 else executor.executeInsert(transactionScope.connection, builtQuery, callback)
@@ -161,7 +175,7 @@ class QueryBuilderExecutor private constructor(
             is IdentityAwareQueryRenderResult -> {
                 reportIdentityAwareQuery(rendered, blockQueryInfo)
                 val boundQuery = BoundQuery(rendered.jdbcSql, rendered.parameterOccurrences)
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 if (transactionScope == null) executor.executeInsert(boundQuery, callback)
                 else executor.executeInsert(transactionScope.connection, boundQuery, callback)
             }
@@ -173,10 +187,10 @@ class QueryBuilderExecutor private constructor(
         blockExecute: (ExecuteResult<Int>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) = executeInScope(blockExecute) { callback ->
-        val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+        val dialect = DialectSelector().select(databaseContext.platformConfig.dialect)
         when (val rendered = QueryParameterRendering.renderDml(queryBuilder.ast, dialect)) {
             is LegacyQueryRenderResult -> {
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 val builtQuery = legacyBuiltQuery(rendered, blockQueryInfo)
                 if (transactionScope == null) executor.executeUpdate(builtQuery, callback)
                 else executor.executeUpdate(transactionScope.connection, builtQuery, callback)
@@ -184,7 +198,7 @@ class QueryBuilderExecutor private constructor(
             is IdentityAwareQueryRenderResult -> {
                 reportIdentityAwareQuery(rendered, blockQueryInfo)
                 val boundQuery = BoundQuery(rendered.jdbcSql, rendered.parameterOccurrences)
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 if (transactionScope == null) executor.executeUpdate(boundQuery, callback)
                 else executor.executeUpdate(transactionScope.connection, boundQuery, callback)
             }
@@ -196,10 +210,10 @@ class QueryBuilderExecutor private constructor(
         blockExecute: (ExecuteResult<Int>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) = executeInScope(blockExecute) { callback ->
-        val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+        val dialect = DialectSelector().select(databaseContext.platformConfig.dialect)
         when (val rendered = QueryParameterRendering.renderDml(queryBuilder.ast, dialect)) {
             is LegacyQueryRenderResult -> {
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 val builtQuery = legacyBuiltQuery(rendered, blockQueryInfo)
                 if (transactionScope == null) executor.executeDelete(builtQuery, callback)
                 else executor.executeDelete(transactionScope.connection, builtQuery, callback)
@@ -207,7 +221,7 @@ class QueryBuilderExecutor private constructor(
             is IdentityAwareQueryRenderResult -> {
                 reportIdentityAwareQuery(rendered, blockQueryInfo)
                 val boundQuery = BoundQuery(rendered.jdbcSql, rendered.parameterOccurrences)
-                val executor = QueryExecute()
+                val executor = QueryExecute(databaseContext)
                 if (transactionScope == null) executor.executeDelete(boundQuery, callback)
                 else executor.executeDelete(transactionScope.connection, boundQuery, callback)
             }
@@ -237,7 +251,7 @@ class QueryBuilderExecutor private constructor(
     override fun <Ast : IQueryAst<*>, Api : IQueryApi<Ast>> executeOut(
         queryBuilder: Api,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
-        blockResult: (db: gog.my_project.data_base.manager.execute.interfaces.IQueryExecute, builtQuery: BuiltQuery) -> Unit,
+        blockResult: (db: gog.my_project.data_base_manager.execute.interfaces.IQueryExecute, builtQuery: BuiltQuery) -> Unit,
     ) {
         val activeScope = transactionScope ?: transactionGuard.activeScope()
         if (activeScope != null) {

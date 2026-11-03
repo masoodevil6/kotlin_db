@@ -1,6 +1,5 @@
 package gog.my_project.data_base_schema.builder.ast.add_column
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
 import gog.my_project.data_base_schema.ast.interfaces.add_column.ISchemaAddColumnAst
 import gog.my_project.data_base_schema.ast.schema.add_column.SchemaAddColumnAst
@@ -8,11 +7,10 @@ import gog.my_project.data_base_schema.ast.schema.create_table.column.SchemaColu
 import gog.my_project.data_base_schema.builder.ast.create_table.column.SchemaColumnBuilder
 import gog.my_project.data_base_schema.params.data_types.SchemaColumnDataType
 class SchemaAddColumnBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf(),
     override var ast: ISchemaAddColumnAst = SchemaAddColumnAst(),
 ) : ISchemaAddColumnApi {
     private val column = SchemaColumnAst()
-    private val columnBuilder = SchemaColumnBuilder(params, column)
+    private val columnBuilder = SchemaColumnBuilder(ast = column)
 
     init {
         ast.columnAst = column

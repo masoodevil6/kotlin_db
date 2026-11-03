@@ -1,6 +1,5 @@
 package gog.my_project.data_base_schema.builder.ast.create_table.render_schema_create_table
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
 import gog.my_project.data_base_schema.api.interfaces.create_table.table.ISchemaTableApi
 import gog.my_project.data_base_schema.api.interfaces.create_table.table_column.ISchemaColumnApi
@@ -25,7 +24,6 @@ import gog.my_project.data_base_schema.params.data_types.DateTimeType
 
 
 class SchemaRenderCreateTableBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf<SqlParameter<*>>(),
     override var ast: ISchemaRenderCreateTableAst = SchemaRenderCreateTableAst()
 ) : ISchemaRenderCreateTableApi {
 
@@ -34,9 +32,7 @@ class SchemaRenderCreateTableBuilder(
     ): ISchemaRenderCreateTableApi {
 
         val ast = SchemaTableAst();
-        SchemaTableBuilder(
-            params , ast
-        ).apply(blockTable);
+        SchemaTableBuilder(ast = ast).apply(blockTable);
         this.ast.schemaTableAst = ast;
         return this;
 
@@ -47,7 +43,7 @@ class SchemaRenderCreateTableBuilder(
     ): ISchemaRenderCreateTableApi {
 
         val columnAst = SchemaColumnAst()
-        SchemaColumnBuilder(params, columnAst).apply(blockColumn)
+        SchemaColumnBuilder(ast = columnAst).apply(blockColumn)
         appendColumn(columnAst)
         return this
 

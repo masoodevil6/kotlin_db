@@ -1,14 +1,14 @@
 package gog.my_project.data_base.migration.executor.manager
 
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.data_base.DatabaseProduct
 import gog.my_project.data_base.core.data_base.MARIA_DB
 import gog.my_project.data_base.core.data_base.MYSQL
 import gog.my_project.data_base.core.data_base.ProductDatabaseVersion
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
 import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
 import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
@@ -26,7 +26,7 @@ import gog.my_project.data_base_schema.api.interfaces.create_spatial_index.ISche
 import gog.my_project.data_base_schema.api.interfaces.create_foreign_key.ISchemaCreateForeignKeyApi
 import gog.my_project.data_base_schema.api.interfaces.drop_foreign_key.ISchemaDropForeignKeyApi
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
-import gog.my_project.data_base.manager.execute.manager.QueryExecute
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_schema.renderer.manager.DialectSelector
 import gog.my_project.data_base_schema.executor.manager.SchemaExecutor
 import gog.my_project.data_base_schema.dialect.nodes.rename_column.IRenameColumnSqlDialect
@@ -37,17 +37,19 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import gog.my_project.tools.scripts.StringTools
 
-class MigrationExecutor(
-    queryExecutor: IQueryExecute = QueryExecute(),
-    override val dialectSelector: DialectSelector = DialectSelector()
+class MigrationExecutor private constructor(
+    queryExecutor: IQueryExecute,
+    override val dialectSelector: DialectSelector,
+    override val databaseContext: DatabaseContext,
 ) : IMigrationExecutor {
     private val lowLevelQueryExecutor = queryExecutor
     private var schemaExecutor = SchemaExecutor(
         queryExecutor = lowLevelQueryExecutor,
         dialectSelector = dialectSelector,
+        databaseContext = databaseContext,
     )
     private var operationScope: OperationExecutionScope? = null
-    private var transactionExecutor = OperationTransactionExecutor()
+    private var transactionExecutor = OperationTransactionExecutor(databaseContext)
 
     override var queryExecutor: IQueryExecute = MigrationQueryExecute(
         delegate = lowLevelQueryExecutor,
@@ -56,11 +58,23 @@ class MigrationExecutor(
     )
         private set
 
+    @Suppress("DEPRECATION")
+    constructor(
+        queryExecutor: IQueryExecute = QueryExecute(),
+        dialectSelector: DialectSelector = DialectSelector(),
+    ) : this(queryExecutor, dialectSelector, DatabaseContext.legacyDefault())
+
+    constructor(databaseContext: DatabaseContext) : this(
+        QueryExecute(databaseContext),
+        DialectSelector(),
+        databaseContext,
+    )
+
     internal constructor(
         queryExecutor: IQueryExecute,
         dialectSelector: DialectSelector,
         transactionExecutor: OperationTransactionExecutor,
-    ) : this(queryExecutor, dialectSelector) {
+    ) : this(queryExecutor, dialectSelector, DatabaseContext.legacyDefault()) {
         this.transactionExecutor = transactionExecutor
     }
 
@@ -69,7 +83,8 @@ class MigrationExecutor(
         dialectSelector: DialectSelector,
         schemaExecutor: SchemaExecutor,
         scope: OperationExecutionScope,
-    ) : this(queryExecutor, dialectSelector) {
+        databaseContext: DatabaseContext,
+    ) : this(queryExecutor, dialectSelector, databaseContext) {
         this.schemaExecutor = schemaExecutor
         this.operationScope = scope
         this.queryExecutor = MigrationQueryExecute(queryExecutor, schemaExecutor, scope)
@@ -90,6 +105,7 @@ class MigrationExecutor(
                 dialectSelector,
                 schemaExecutor,
                 scope,
+                databaseContext,
             )
             block(scopedExecutor)
         }
@@ -101,16 +117,16 @@ class MigrationExecutor(
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
         blockResult: (db: IQueryExecute, builtQuery: BuiltQuery) -> Unit,
     ) {
+        val platform = databaseContext.platformConfig
         val query = dialectSelector
-            .select(DefaultDatabaseConfig.config.dialect)
+            .select(platform.dialect, platform.targetDatabaseVersion)
             .render(schemaBuilder.ast)
             ?: throw IllegalStateException("rendered schema sql is null")
-        val params = schemaBuilder.params
         blockQueryInfo?.invoke(
             StringTools.formatSql(query),
-            params.associateTo(linkedMapOf()) { it.name to it.value },
+            linkedMapOf(),
         )
-        blockResult(queryExecutor, BuiltQuery(query, params))
+        blockResult(queryExecutor, BuiltQuery(query, mutableListOf()))
     }
 
     private fun executeSchema(
@@ -247,9 +263,9 @@ class MigrationExecutor(
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        val config = DefaultDatabaseConfig.config
-        val target = config.targetDatabaseVersion
-        val dialect = dialectSelector.select(config.dialect, target)
+        val platform = databaseContext.platformConfig
+        val target = platform.targetDatabaseVersion
+        val dialect = dialectSelector.select(platform.dialect, target)
         val renameDialect = dialect as? IRenameColumnSqlDialect
             ?: throw IllegalStateException("Selected dialect does not support RENAME COLUMN")
         val schemaOperation = queryBuilder
@@ -337,20 +353,19 @@ class MigrationExecutor(
                         blockExecute(ExecuteResult.Failure(error))
                         return@executeSelect
                     }
-                    executeRenameDdl(queryBuilder.params, sql, blockQueryInfo, blockExecute)
+                    executeRenameDdl(sql, blockQueryInfo, blockExecute)
                 }
             }
         }
     }
 
     private fun executeRenameDdl(
-        params: MutableList<SqlParameter<*>>,
         sql: String,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
     ) {
-        reportQuery(blockQueryInfo, sql, params.associate { it.name to it.value }.toMutableMap())
-        queryExecutor.executeTable(BuiltQuery(sql, params), blockExecute)
+        reportQuery(blockQueryInfo, sql, mutableMapOf())
+        queryExecutor.executeTable(BuiltQuery(sql, mutableListOf()), blockExecute)
     }
 
     /** Runtime capability is derived exclusively from manager-detected server metadata. */
@@ -386,7 +401,8 @@ class MigrationExecutor(
         }
 
         // Render first so malformed AST is rejected before any query is issued.
-        val dialect = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
+        val platform = databaseContext.platformConfig
+        val dialect = dialectSelector.select(platform.dialect, platform.targetDatabaseVersion)
         val ddl = dialect.render(queryBuilder.ast) ?: throw IllegalStateException("rendered sql is null")
         val tableName = requireNotNull(ast.metadata.tableName)
         val columnName = requireNotNull(ast.metadata.name)
@@ -410,12 +426,11 @@ class MigrationExecutor(
                     if (!exists) {
                         blockExecute(ExecuteResult.Success(true))
                     } else {
-                        val ddlParams = queryBuilder.params
                         blockQueryInfo?.invoke(
                             StringTools.formatSql(ddl),
-                            ddlParams.associate { it.name to it.value }.toMutableMap(),
+                            mutableMapOf(),
                         )
-                        executeSchemaRendered(BuiltQuery(ddl, ddlParams)) { result ->
+                        executeSchemaRendered(BuiltQuery(ddl, mutableListOf())) { result ->
                             if (result is ExecuteResult.Failure && result.exception.isMissingMySqlDropTarget()) {
                                 blockExecute(ExecuteResult.Success(true))
                             } else {

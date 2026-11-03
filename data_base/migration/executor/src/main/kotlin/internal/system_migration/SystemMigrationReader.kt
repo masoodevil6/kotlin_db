@@ -1,13 +1,15 @@
 package gog.my_project.data_base.migration.executor.internal.system_migration
 
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import java.sql.ResultSet
 
 /** Reads and validates persisted migration history. */
 internal class SystemMigrationReader(
     private val queryExecutor: IQueryExecute,
+    private val platformConfig: DatabasePlatformConfig,
 ) {
     fun read(block: (ExecuteResult<SystemMigrationState>) -> Unit) {
         val queryBuilder = QueryRenderSelectBuilder()
@@ -22,7 +24,7 @@ internal class SystemMigrationReader(
             orderAsc()
         }
 
-        queryExecutor.executeSelect(queryBuilder.toBuiltQuery()) { result ->
+        queryExecutor.executeSelect(queryBuilder.toBuiltQuery(platformConfig)) { result ->
             when (result) {
                 is ExecuteResult.Failure -> block(result)
                 is ExecuteResult.Success<*> -> {

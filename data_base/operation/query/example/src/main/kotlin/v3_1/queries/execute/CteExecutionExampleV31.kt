@@ -2,7 +2,7 @@ package gog.my_project.data_base_query.example.v3_1.queries.execute
 
 import gog.my_project.data_base_query.example.v3_1.queries.IExampleV31
 import gog.my_project.collection.ICollection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.error
 import gog.my_project.data_base_query.executor.result.success

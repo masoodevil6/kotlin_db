@@ -1,12 +1,44 @@
 package gog.my_project.data_base_operation.executor.transaction
 
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.core.query.reader.BuiltQuery
+import gog.my_project.data_base.core.query.reader.QueryParameterBinding
+import gog.my_project.data_base_manager.execute.manager.QueryExecute
+import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import java.sql.Connection
+
+/**
+ * Opaque, lifecycle-neutral view of an active Operation scope for operation-family facades.
+ * Implementations retain Connection ownership; callers can submit work but cannot obtain JDBC.
+ */
+interface OperationExecutionContext {
+    /** Platform selected for the database whose scope owns this execution. */
+    @Suppress("DEPRECATION")
+    val databasePlatformConfig: DatabasePlatformConfig
+        get() = DefaultDatabaseConfig.config.platform
+
+    fun executeDdl(sql: String, parameters: List<OperationParameter> = emptyList()): ExecuteResult<Boolean>
+
+    /** Latches a failure so callers cannot accidentally commit after handling its result. */
+    fun <T> failed(failure: Throwable): ExecuteResult<T>
+}
+
+/** A named SQL binding passed across Operation boundaries without exposing JDBC classes. */
+data class OperationParameter(
+    val name: String,
+    val value: Any?,
+    val sqlTypeCode: Int,
+)
 
 /** Shared state for one synchronous operation scope. The scope owns no JDBC lifecycle by itself. */
 class OperationExecutionScope(
     connection: Connection,
-) {
+    override val databasePlatformConfig: DatabasePlatformConfig,
+) : OperationExecutionContext {
+    @Suppress("DEPRECATION")
+    constructor(connection: Connection) : this(connection, DefaultDatabaseConfig.config.platform)
+
     private val ownerThread = Thread.currentThread()
     private val jdbcConnection = connection
 
@@ -73,6 +105,36 @@ class OperationExecutionScope(
     }
 
     internal fun lifecycleConnection(): Connection = jdbcConnection
+
+    override fun executeDdl(
+        sql: String,
+        parameters: List<OperationParameter>,
+    ): ExecuteResult<Boolean> {
+        val rejection = rejectOperation()
+        if (rejection != null) return ExecuteResult.Failure(rejection)
+
+        return try {
+            var result: ExecuteResult<Boolean>? = null
+            val query = BuiltQuery(
+                sql,
+                parameters.map { QueryParameterBinding(it.name, it.value, it.sqlTypeCode) }.toMutableList(),
+            )
+            QueryExecute().executeTable(jdbcConnection, query) { result = it }
+            val completed = result ?: ExecuteResult.Failure(
+                IllegalStateException("Scoped DDL execution completed without a result"),
+            )
+            recordResult(completed)
+            completed
+        } catch (error: Error) {
+            recordFatal(error)
+            throw error
+        } catch (exception: Exception) {
+            failed(exception)
+        }
+    }
+
+    override fun <T> failed(failure: Throwable): ExecuteResult<T> =
+        ExecuteResult.Failure(recordFailure(failure))
 }
 
 /** Prevents nested managed scopes across Query, Schema, and Migration on one callback thread. */

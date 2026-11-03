@@ -37,7 +37,6 @@ class A1ExampleCreateMultiColumnIndexV1Test {
             "CREATE INDEX `Idx_User_Name` ON `Users` (`Last_Name`, `First_Name`, `Email`)",
             dialect.render(migration.ast),
         )
-        assertEquals(0, migration.params.size)
     }
 
     @Test

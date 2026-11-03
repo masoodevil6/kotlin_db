@@ -94,8 +94,4 @@ class A1ExampleAddColumnV1Test {
         )
     }
 
-    @Test
-    fun keepsIdentifierParametersEmpty() {
-        assertEquals(0, A1ExampleAddColumnV1().migration().params.size)
-    }
 }

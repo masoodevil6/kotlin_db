@@ -3,9 +3,9 @@ package gog.my_project.data_base.migration.executor.manager
 import gog.my_project.data_base.core.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.query.BoundQuery
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.query.BoundQuery
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.executor.manager.SchemaExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import java.sql.Connection

@@ -1,11 +1,12 @@
-package gog.my_project.data_base.manager.execute.manager
+package gog.my_project.data_base_manager.execute.manager
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
-import gog.my_project.data_base.manager.execute.connection.withOwnedConnection
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.query.BoundQuery
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_manager.execute.connection.withOwnedConnection
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.query.BoundQuery
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
@@ -13,7 +14,37 @@ import java.sql.SQLException
 import java.sql.Statement
 import kotlin.use
 
-class QueryExecute : IQueryExecute {
+class QueryExecute(
+    private val databaseContext: DatabaseContext = DatabaseContext.legacyDefault(),
+) : IQueryExecute {
+    override fun execute(
+        builtQuery: BuiltQuery,
+        blockExecute: (
+            conn: Connection,
+            query: String?,
+            params: MutableList<out IQueryParameterBinding>,
+            paramsName: List<String>,
+            error: Throwable?,
+        ) -> Unit,
+    ) {
+        val query = builtQuery.getReadyQuery()
+        val params = builtQuery.params
+        val paramsNames = builtQuery.getListParamNames()
+        withOwnedConnection(databaseContext) { conn ->
+            if (query == null) {
+                blockExecute(
+                    conn,
+                    null,
+                    params,
+                    paramsNames,
+                    IllegalArgumentException("BuiltQuery query must not be null"),
+                )
+            } else {
+                blockExecute(conn, query, params, paramsNames, null)
+            }
+        }
+    }
+
     override fun executeSelect(
         builtQuery: BuiltQuery,
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,
@@ -36,7 +67,7 @@ class QueryExecute : IQueryExecute {
     override fun executeSelect(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,
-    ) = withOwnedConnection { connection -> executeSelect(connection, boundQuery, blockExecute) }
+    ) = withOwnedConnection(databaseContext) { connection -> executeSelect(connection, boundQuery, blockExecute) }
 
     override fun executeSelect(
         connection: Connection,
@@ -71,7 +102,7 @@ class QueryExecute : IQueryExecute {
     override fun executeInsert(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<Long>) -> Unit,
-    ) = withOwnedConnection { connection -> executeInsert(connection, boundQuery, blockExecute) }
+    ) = withOwnedConnection(databaseContext) { connection -> executeInsert(connection, boundQuery, blockExecute) }
 
     override fun executeInsert(
         connection: Connection,
@@ -124,7 +155,7 @@ class QueryExecute : IQueryExecute {
     override fun executeUpdate(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
-    ) = withOwnedConnection { connection -> executeUpdate(connection, boundQuery, blockExecute) }
+    ) = withOwnedConnection(databaseContext) { connection -> executeUpdate(connection, boundQuery, blockExecute) }
 
     override fun executeUpdate(
         connection: Connection,
@@ -159,7 +190,7 @@ class QueryExecute : IQueryExecute {
     override fun executeDelete(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
-    ) = withOwnedConnection { connection -> executeDelete(connection, boundQuery, blockExecute) }
+    ) = withOwnedConnection(databaseContext) { connection -> executeDelete(connection, boundQuery, blockExecute) }
 
     override fun executeDelete(
         connection: Connection,

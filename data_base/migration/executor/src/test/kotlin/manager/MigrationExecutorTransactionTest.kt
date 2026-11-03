@@ -2,8 +2,8 @@ package gog.my_project.data_base.migration.executor.manager
 
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
 import gog.my_project.data_base.migration.executor.internal.system_migration.SystemMigrationRecorder
 import gog.my_project.data_base_schema.renderer.manager.DialectSelector
@@ -48,7 +48,8 @@ class MigrationExecutorTransactionTest {
                 tx.execute(first, blockExecute = { })
                 tx.execute(second, blockExecute = { })
                 var historyResult: ExecuteResult<Unit>? = null
-                SystemMigrationRecorder(tx.queryExecutor).recordSuccessfulMigration("test_migration", 1) {
+                SystemMigrationRecorder(tx.queryExecutor, tx.databaseContext.platformConfig)
+                    .recordSuccessfulMigration("test_migration", 1) {
                     historyResult = it
                 }
                 assertEquals(ExecuteResult.Success(Unit), historyResult)
@@ -127,7 +128,8 @@ class MigrationExecutorTransactionTest {
                 tx.execute(operation, blockExecute = { })
 
                 var historyResult: ExecuteResult<Unit>? = null
-                SystemMigrationRecorder(tx.queryExecutor).recordSuccessfulMigration("test_migration", 1) {
+                SystemMigrationRecorder(tx.queryExecutor, tx.databaseContext.platformConfig)
+                    .recordSuccessfulMigration("test_migration", 1) {
                     historyResult = it
                 }
                 assertSame(queryFailure, assertIs<ExecuteResult.Failure>(historyResult).exception)

@@ -13,8 +13,31 @@ class DatabaseConfigDialectTest {
             .targetDatabaseVersion(MARIA_DB.Version(10, 4, 28))
             .build()
 
-        assertEquals(DialectQuery.MARIA_DB, config.dialect)
-        assertEquals(MARIA_DB.Version(10, 4, 28), config.targetDatabaseVersion)
+        assertEquals(DialectQuery.MARIA_DB, config.platform.dialect)
+        assertEquals(MARIA_DB.Version(10, 4, 28), config.platform.targetDatabaseVersion)
+        assertEquals(10, config.pool.maxPoolSize)
+    }
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun flatCompatibilityConstructorAndCopyDelegateToSeparatedConfig() {
+        val config = DatabaseConfig(
+            dbDomain = "jdbc:mysql://localhost",
+            dbPort = 3307,
+            dbName = "legacy",
+            dbUserName = "user",
+            dbPassword = "secret",
+            dbPoolSize = 4,
+        ).copy(dialect = DialectQuery.MARIA_DB)
+
+        assertEquals("jdbc:mysql://localhost:3307/legacy", config.getDbUrl())
+        assertEquals("legacy", config.dbName)
+        assertEquals(4, config.pool.maxPoolSize)
+        assertEquals(DialectQuery.MARIA_DB, config.platform.dialect)
+        assertEquals(
+            DatabaseConnectionConfig("jdbc:mysql://localhost", 3307, "legacy", "user", "secret"),
+            config.connection,
+        )
     }
 
     @Test

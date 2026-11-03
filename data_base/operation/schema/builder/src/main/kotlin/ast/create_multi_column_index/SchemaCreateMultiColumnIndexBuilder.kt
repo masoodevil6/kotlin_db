@@ -1,12 +1,10 @@
 package gog.my_project.data_base_schema.builder.ast.create_multi_column_index
 
-import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_schema.api.interfaces.create_multi_column_index.ISchemaCreateMultiColumnIndexApi
 import gog.my_project.data_base_schema.ast.interfaces.create_multi_column_index.ISchemaCreateMultiColumnIndexAst
 import gog.my_project.data_base_schema.ast.schema.create_multi_column_index.SchemaCreateMultiColumnIndexAst
 
 class SchemaCreateMultiColumnIndexBuilder(
-    override var params: MutableList<SqlParameter<*>> = mutableListOf(),
     override var ast: ISchemaCreateMultiColumnIndexAst = SchemaCreateMultiColumnIndexAst(),
 ) : ISchemaCreateMultiColumnIndexApi {
     override fun tableName(table: String): ISchemaCreateMultiColumnIndexApi = apply {

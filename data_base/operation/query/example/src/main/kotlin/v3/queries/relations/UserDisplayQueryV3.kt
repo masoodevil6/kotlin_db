@@ -2,7 +2,7 @@ package gog.my_project.data_base_query.example.v3.queries.relations
 
 import gog.my_project.data_base.core.annotations.models.QBQuery
 import gog.my_project.data_base.core.annotations.models.QBQuerySelect
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.relations.Cte
 import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.cte.declaration.CteDeclaration

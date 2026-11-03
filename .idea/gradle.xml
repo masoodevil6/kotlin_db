@@ -29,6 +29,7 @@
             <option value="$PROJECT_DIR$/data_base/core" />
             <option value="$PROJECT_DIR$/data_base/manager" />
             <option value="$PROJECT_DIR$/data_base/manager/connection" />
+            <option value="$PROJECT_DIR$/data_base/manager/example" />
             <option value="$PROJECT_DIR$/data_base/manager/execute" />
             <option value="$PROJECT_DIR$/data_base/migration" />
             <option value="$PROJECT_DIR$/data_base/migration/api" />

@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.example.v3
 
 import gog.my_project.collection.ICollection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 

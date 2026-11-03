@@ -1,7 +1,7 @@
 package gog.my_project.data_base.migration.executor.internal.system_migration
 
-import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 import gog.my_project.data_base.migration.executor.manager.MigrationExecutor
 
@@ -13,8 +13,8 @@ internal class SystemMigrationStateStore(
     queryExecutor: IQueryExecute,
     private val migrationExecutor: IMigrationExecutor = MigrationExecutor(queryExecutor),
 ) {
-    private val reader = SystemMigrationReader(queryExecutor)
-    private val recorder = SystemMigrationRecorder(queryExecutor)
+    private val reader = SystemMigrationReader(queryExecutor, migrationExecutor.databaseContext.platformConfig)
+    private val recorder = SystemMigrationRecorder(queryExecutor, migrationExecutor.databaseContext.platformConfig)
 
     fun initialize(block: (ExecuteResult<SystemMigrationState>) -> Unit) {
         migrationExecutor.execute(

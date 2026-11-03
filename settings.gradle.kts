@@ -45,6 +45,7 @@ include(":data_base:models:eloquent")
 include(":data_base:manager")
 include(":data_base:manager:connection")
 include(":data_base:manager:execute")
+include(":data_base:manager:example")
 
 
 /// data_base -> operation -> query

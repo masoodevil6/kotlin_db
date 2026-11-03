@@ -11,7 +11,6 @@ repositories {
 }
 
 dependencies {
-    api(project(":data_base:core"))
     api(project(":data_base:operation:schema:params"))
     api(project(":data_base:operation:schema:ast"))
     api(project(":data_base:operation:schema:api"))

@@ -2,8 +2,7 @@ package gog.my_project.data_base_query.executor.result
 
 import gog.my_project.collection.Collection
 import gog.my_project.collection.ICollection
-import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
 import gog.my_project.data_base_query.api.metadata.EffectiveQueryMetadata
@@ -64,7 +63,7 @@ class QueryConsumer internal constructor(
     }
 
     fun sql(): BuiltQuery {
-        val dialect = DialectSelector().select(DefaultDatabaseConfig.config.dialect)
+        val dialect = DialectSelector().select(executor.databasePlatformConfig.dialect)
         return when (val rendered = QueryParameterRendering.render(query.ast, dialect)) {
             is LegacyQueryRenderResult -> BuiltQuery(
                 requireNotNull(rendered.sql) { "rendered sql is null" },
