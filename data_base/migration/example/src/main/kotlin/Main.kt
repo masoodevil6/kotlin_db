@@ -6,7 +6,7 @@ import gog.my_project.data_base.core.data_base.MARIA_DB
 import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.migration.example.managers.ManagerExampleV1
 import gog.my_project.data_base.migration.executor.manager.MigrationExecutor
-import gog.my_project.data_base.migration.renderer.manager.DialectSelector
+import gog.my_project.data_base_schema.renderer.manager.DialectSelector
 
 fun main() {
     DefaultDatabaseConfig.config = DatabaseConfig(

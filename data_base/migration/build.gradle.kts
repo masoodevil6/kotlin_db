@@ -15,14 +15,17 @@ dependencies {
     testImplementation(project(":data_base:core"))
     testImplementation(project(":data_base:manager:execute"))
     testImplementation(project(":data_base:migration:api"))
-    testImplementation(project(":data_base:migration:ast"))
     testImplementation(project(":data_base:migration:builder"))
-    testImplementation(project(":data_base:migration:params"))
     testImplementation(project(":data_base:migration:executor"))
-    testImplementation(project(":data_base:query:api"))
-    testImplementation(project(":data_base:query:ast"))
-    testImplementation(project(":data_base:query:builder"))
-    testImplementation(project(":data_base:query:executor"))
+    testImplementation(project(":data_base:operation:schema:api"))
+    testImplementation(project(":data_base:operation:schema:ast"))
+    testImplementation(project(":data_base:operation:schema:builder"))
+    testImplementation(project(":data_base:operation:schema:params"))
+    testImplementation(project(":data_base:operation:schema:renderer"))
+    testImplementation(project(":data_base:operation:query:api"))
+    testImplementation(project(":data_base:operation:query:ast"))
+    testImplementation(project(":data_base:operation:query:builder"))
+    testImplementation(project(":data_base:operation:query:executor"))
 }
 
 val migrationTestDatabaseProperties = listOf(

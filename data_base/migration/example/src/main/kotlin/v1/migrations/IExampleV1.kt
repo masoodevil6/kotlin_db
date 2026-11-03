@@ -1,11 +1,11 @@
 package gog.my_project.data_base.migration.example.v1.migrations
 
-import gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
 interface IExampleV1 {
-    fun migration(): IMigrationRenderCreateTableApi
+    fun migration(): ISchemaRenderCreateTableApi
 
     fun render(dialect: ISqlDialect) {
         val sql = dialect.render(migration().ast)

@@ -2,7 +2,7 @@ package gog.my_project.data_base.migration.executor.internal.system_migration
 
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import java.sql.ResultSet
 
 /** Reads and validates persisted migration history. */

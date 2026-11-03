@@ -1,0 +1,45 @@
+package gog.my_project.data_base_query.example.v1.queries.delete
+
+import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
+import gog.my_project.data_base_query.builder.ast.delete_builder.query_render_delete.QueryRenderDeleteBuilder
+import gog.my_project.data_base_query.example.v1.queries.IExampleV1
+import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base_query.executor.result.error
+import gog.my_project.data_base_query.executor.result.success
+
+class A1ExampleDeleteV1 : IExampleV1<IQueryRenderDeleteApi> {
+    override fun query(): IQueryRenderDeleteApi = QueryRenderDeleteBuilder()
+        .table {
+            table("user_users")
+        }
+        .where {
+            conditions {
+                addCondition {
+                    logicalAnd()
+                    sideSelector {
+                        tableSelector("")
+                        columnSelector("id")
+                    }
+                    operationEqual()
+                    sideValueParam {
+                        paramName("id1")
+                        paramValue(5)
+                    }
+                }
+            }
+        }
+
+    override fun execute(queryManager: IQueryBuilderExecutor) {
+        val consumer = queryManager
+            .queryBuilder(query())
+            .sql { (query, params) ->
+                println("\n=============================================\nV1-Ex1: Delete Sample\nquery: $query\nparams: $params")
+            }
+            .execute()
+            .success { affectedRows ->
+                println("deleted rows: $affectedRows")
+                affectedRows
+            }
+            .error { failure -> println("error: $failure") }
+    }
+}

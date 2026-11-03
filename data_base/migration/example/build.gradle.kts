@@ -16,12 +16,13 @@ dependencies {
     implementation(project(":data_base:core"))
     implementation(project(":data_base:manager:execute"))
     implementation(project(":data_base:migration:api"))
-    implementation(project(":data_base:migration:ast"))
-    implementation(project(":data_base:migration:params"))
     implementation(project(":data_base:migration:builder"))
-    implementation(project(":data_base:migration:dialect"))
-    implementation(project(":data_base:migration:renderer"))
     implementation(project(":data_base:migration:executor"))
+    implementation(project(":data_base:operation:schema:api"))
+    implementation(project(":data_base:operation:schema:builder"))
+    implementation(project(":data_base:operation:schema:dialect"))
+    implementation(project(":data_base:operation:schema:params"))
+    implementation(project(":data_base:operation:schema:renderer"))
 }
 
 application {

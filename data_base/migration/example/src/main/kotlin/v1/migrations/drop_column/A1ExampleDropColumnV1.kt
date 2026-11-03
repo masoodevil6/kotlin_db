@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_column
 
-import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationDropColumnApi
-import gog.my_project.data_base.migration.builder.ast.drop_column.MigrationDropColumnBuilder
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
+import gog.my_project.data_base_schema.builder.ast.drop_column.SchemaDropColumnBuilder
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
 
@@ -13,8 +13,8 @@ class A1ExampleDropColumnV1(
     private val column: String = "display_name",
     private val useIfExists: Boolean = false,
 ) {
-    fun migration(): IMigrationDropColumnApi =
-        MigrationDropColumnBuilder().apply {
+    fun migration(): ISchemaDropColumnApi =
+        SchemaDropColumnBuilder().apply {
             tableName(table)
             name(column)
             if (useIfExists) ifExists()

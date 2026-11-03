@@ -1,0 +1,87 @@
+package gog.my_project.data_base_query.example.v2.queries.select
+
+import gog.my_project.data_base_query.example.metadata.formatEffectiveQueryMetadata
+import gog.my_project.data_base_query.executor.result.success
+import gog.my_project.data_base_query.executor.result.error
+
+import gog.my_project.data_base_query.example.v2.queries.models.UserModelV2
+import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.example.v2.queries.IExampleV2
+
+import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
+
+class A5ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
+    override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
+        .select {
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::name)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::family)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::age)
+                }
+            }
+        }
+        .from {
+            model(UserModelV2::class)
+        }
+        .where {
+            conditions {
+                addCondition {
+                    logicalAnd()
+                    sideSelector {
+                        tableSelector(UserModelV2::class)
+                        columnSelector(UserModelV2::age)
+                    }
+                    operationIs()
+                    sideValueParam {
+                        paramName("user_age")
+                        paramValue(1)
+                    }
+                }
+            }
+        }
+
+    override fun execute(queryManager: IQueryBuilderExecutor) {
+        val query = query()
+
+        queryManager
+            .queryBuilder(query)
+            .sql { (queryText, params) ->
+                println("\n=============================================\nV2-Ex5: Original invalid condition\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
+            }
+            .execute()
+            .success { rows ->
+                rows.forEach { row ->
+                    println(
+                        "row: user_id=${row.getValue(UserModelV2::id)}, " +
+                            "user_name=${row.getValue(UserModelV2::name)}, " +
+                            "user_family=${row.getValue(UserModelV2::family)}, " +
+                            "user_age=${row.getValue(UserModelV2::age)}",
+                    )
+                }
+                rows
+            }
+            .error { failure -> println("error: $failure") }
+    }
+}

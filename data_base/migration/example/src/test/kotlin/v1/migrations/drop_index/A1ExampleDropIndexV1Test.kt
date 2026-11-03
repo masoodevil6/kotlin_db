@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_index
 
-import gog.my_project.data_base.migration.ast.schema.drop_index.MigrationDropIndexAst
-import gog.my_project.data_base.migration.builder.ast.drop_index.MigrationDropIndexBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.schema.drop_index.SchemaDropIndexAst
+import gog.my_project.data_base_schema.builder.ast.drop_index.SchemaDropIndexBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -23,7 +23,7 @@ class A1ExampleDropIndexV1Test {
 
     @Test
     fun trimsWhitespaceAndPreservesIdentifierCasing() {
-        val migration = MigrationDropIndexBuilder().apply {
+        val migration = SchemaDropIndexBuilder().apply {
             tableName("  Users  ")
             name("  Idx_User_Email  ")
         }
@@ -35,7 +35,7 @@ class A1ExampleDropIndexV1Test {
 
     @Test
     fun primaryIsAnOrdinaryIndexNameAndIsQuoted() {
-        val migration = MigrationDropIndexBuilder().apply {
+        val migration = SchemaDropIndexBuilder().apply {
             tableName("users")
             name("PRIMARY")
         }
@@ -46,19 +46,19 @@ class A1ExampleDropIndexV1Test {
 
     @Test
     fun rendersBlankIdentifiersAndRejectsIncompleteDirectAst() {
-        assertEquals("DROP INDEX `idx` ON ``", dialect.render(MigrationDropIndexBuilder().apply { tableName(" "); name("idx") }.ast))
-        assertEquals("DROP INDEX `` ON `users`", dialect.render(MigrationDropIndexBuilder().apply { tableName("users"); name(" ") }.ast))
+        assertEquals("DROP INDEX `idx` ON ``", dialect.render(SchemaDropIndexBuilder().apply { tableName(" "); name("idx") }.ast))
+        assertEquals("DROP INDEX `` ON `users`", dialect.render(SchemaDropIndexBuilder().apply { tableName("users"); name(" ") }.ast))
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationDropIndexAst().apply { metadata.tableName = "users" })
+            dialect.render(SchemaDropIndexAst().apply { metadata.tableName = "users" })
         }
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationDropIndexAst().apply { metadata.indexName = "idx_users_email" })
+            dialect.render(SchemaDropIndexAst().apply { metadata.indexName = "idx_users_email" })
         }
     }
 
     @Test
     fun quotesReservedWordsAndEscapesBackticksWithoutAddingOptions() {
-        val sql = MigrationDropIndexBuilder().apply {
+        val sql = SchemaDropIndexBuilder().apply {
             tableName("order")
             name("select`index")
         }.let { dialect.render(it.ast)!! }
@@ -70,8 +70,8 @@ class A1ExampleDropIndexV1Test {
 
     @Test
     fun setterCallOrderDoesNotAffectSql() {
-        val first = MigrationDropIndexBuilder().apply { name("idx_users_email"); tableName("users") }
-        val second = MigrationDropIndexBuilder().apply { tableName("users"); name("idx_users_email") }
+        val first = SchemaDropIndexBuilder().apply { name("idx_users_email"); tableName("users") }
+        val second = SchemaDropIndexBuilder().apply { tableName("users"); name("idx_users_email") }
 
         assertEquals(dialect.render(second.ast), dialect.render(first.ast))
     }

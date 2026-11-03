@@ -9,9 +9,9 @@ import gog.my_project.data_base.core.data_base.MYSQL
 import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.ast.interfaces.rename_column.IMigrationRenameColumnAst
-import gog.my_project.data_base.migration.ast.schema.rename_column.MigrationRenameColumnAst
-import gog.my_project.data_base.migration.api.interfaces.rename_column.IMigrationRenameColumnApi
+import gog.my_project.data_base_schema.ast.interfaces.rename_column.ISchemaRenameColumnAst
+import gog.my_project.data_base_schema.ast.schema.rename_column.SchemaRenameColumnAst
+import gog.my_project.data_base_schema.api.interfaces.rename_column.ISchemaRenameColumnApi
 import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import kotlin.test.Test
@@ -24,8 +24,8 @@ class MigrationExecutorRenameColumnTest {
         val failure = IllegalStateException("database refused rename")
         val db = RecordingQueryExecute()
         val executor = MigrationExecutor(queryExecutor = db)
-        val migration = object : IMigrationRenameColumnApi {
-            override var ast: IMigrationRenameColumnAst = MigrationRenameColumnAst().apply {
+        val migration = object : ISchemaRenameColumnApi {
+            override var ast: ISchemaRenameColumnAst = SchemaRenameColumnAst().apply {
                 metadata.tableName = "users"; metadata.name = "display_name"; metadata.to = "full_name"
             }
             override var params: MutableList<SqlParameter<*>> = mutableListOf()
@@ -137,8 +137,8 @@ class MigrationExecutorRenameColumnTest {
         assert(received is ExecuteResult.Failure)
     }
 
-    private fun migrationForTest() = object : IMigrationRenameColumnApi {
-        override var ast: IMigrationRenameColumnAst = MigrationRenameColumnAst().apply {
+    private fun migrationForTest() = object : ISchemaRenameColumnApi {
+        override var ast: ISchemaRenameColumnAst = SchemaRenameColumnAst().apply {
             metadata.tableName = "users"; metadata.name = "display_name"; metadata.to = "full_name"
         }
         override var params: MutableList<SqlParameter<*>> = mutableListOf()

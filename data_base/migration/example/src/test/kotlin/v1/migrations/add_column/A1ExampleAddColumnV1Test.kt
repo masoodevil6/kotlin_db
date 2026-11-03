@@ -1,9 +1,9 @@
 package gog.my_project.data_base.migration.example.v1.migrations.add_column
 
-import gog.my_project.data_base.migration.builder.ast.add_column.MigrationAddColumnBuilder
-import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.VarcharType
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.builder.ast.add_column.SchemaAddColumnBuilder
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -24,7 +24,7 @@ class A1ExampleAddColumnV1Test {
 
     @Test
     fun reusesColumnModifiersCorrectly() {
-        val migration = MigrationAddColumnBuilder().apply {
+        val migration = SchemaAddColumnBuilder().apply {
             tableName("users")
             name("id")
             dataType(IntType())
@@ -41,7 +41,7 @@ class A1ExampleAddColumnV1Test {
 
     @Test
     fun reusesExistingDefaultRendering() {
-        val migration = MigrationAddColumnBuilder().apply {
+        val migration = SchemaAddColumnBuilder().apply {
             tableName("users")
             name("display_name")
             dataType(VarcharType(120))
@@ -57,7 +57,7 @@ class A1ExampleAddColumnV1Test {
 
     @Test
     fun escapesTableAndColumnIdentifiers() {
-        val migration = MigrationAddColumnBuilder().apply {
+        val migration = SchemaAddColumnBuilder().apply {
             tableName("user`data")
             name("display`name")
             dataType(VarcharType(255))
@@ -72,7 +72,7 @@ class A1ExampleAddColumnV1Test {
 
     @Test
     fun rejectsMissingColumn() {
-        val migration = MigrationAddColumnBuilder().apply { tableName("users") }
+        val migration = SchemaAddColumnBuilder().apply { tableName("users") }
 
         assertFailsWith<IllegalArgumentException> {
             MySqlDialect().render(migration.ast)
@@ -81,7 +81,7 @@ class A1ExampleAddColumnV1Test {
 
     @Test
     fun rendersAutoIncrementWithoutRevalidatingDatabaseKeyRules() {
-        val migration = MigrationAddColumnBuilder().apply {
+        val migration = SchemaAddColumnBuilder().apply {
             tableName("users")
             name("id")
             dataType(IntType())

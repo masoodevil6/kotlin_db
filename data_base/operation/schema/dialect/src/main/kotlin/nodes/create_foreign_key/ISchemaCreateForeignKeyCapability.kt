@@ -1,0 +1,7 @@
+package gog.my_project.data_base_schema.dialect.nodes.create_foreign_key
+
+import gog.my_project.data_base_schema.ast.interfaces.create_foreign_key.ISchemaCreateForeignKeyAst
+import gog.my_project.data_base_schema.dialect.data_class.SchemaDataClass
+import gog.my_project.data_base_schema.dialect.interfaces.IAstRenderer
+
+interface ISchemaCreateForeignKeyCapability : IAstRenderer<ISchemaCreateForeignKeyAst, SchemaDataClass?>

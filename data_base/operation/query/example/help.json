@@ -1,0 +1,166 @@
+{
+    "schemaVersion": 2,
+    "module": {
+        "title": "نمونه‌های Query Builder",
+        "description": "نمونه‌های V1 تا V4 برای ساخت و اجرای Queryها. V3.1 هر CTE را مستقیماً اجرا می‌کند. V4 نمونه‌های SELECT مبتنی بر CTE، عملیات CRUD و تراکنش را دارد. اکشن Run، Main.kt را با تنظیم فعلی اجرا می‌کند و به MySQL وصل می‌شود؛ عملیات تغییردهنده و تراکنش به‌صورت پیش‌فرض غیرفعال‌اند.",
+        "icon": "code",
+        "actions": [
+            {
+                "title": "اجرای نمونه‌ها",
+                "description": "اجرای Main.kt از طریق Gradle؛ نسخهٔ انتخابی از طریق property به برنامه داده می‌شود و به MySQL وصل می‌شود.",
+                "task": "run",
+                "id": "run",
+                "parameters": [
+                    {
+                        "id": "version",
+                        "label": "نسخهٔ اجرا",
+                        "description": "اگر نسخه‌ای انتخاب نشود، V3 به‌صورت پیش‌فرض اجرا می‌شود. V3.1 هر CTE را مستقیماً اجرا می‌کند. V4 نمونه‌های CTE، CRUD و تراکنش دارد.",
+                        "type": "select",
+                        "required": false,
+                        "secret": false,
+                        "options": [
+                            {
+                                "value": "v1",
+                                "label": "V1 (Smart Result)"
+                            },
+                            {
+                                "value": "v2",
+                                "label": "V2"
+                            },
+                            {
+                                "value": "v3",
+                                "label": "V3"
+                            },
+                            {
+                                "value": "v3.1",
+                                "label": "V3.1 (Direct CTE execution)"
+                            },
+                            {
+                                "value": "v4",
+                                "label": "V4 (CTE, CRUD, and transactions)"
+                            }
+                        ],
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.version"
+                        }
+                    },
+                    {
+                        "id": "run-select",
+                        "label": "اجرای SELECT",
+                        "description": "در صورت خالی بودن مقدار، SELECT به‌صورت پیش‌فرض اجرا می‌شود.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": true,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.select"
+                        }
+                    },
+                    {
+                        "id": "run-insert",
+                        "label": "اجرای INSERT",
+                        "description": "برای اجرای INSERT این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.insert"
+                        }
+                    },
+                    {
+                        "id": "run-update",
+                        "label": "اجرای UPDATE",
+                        "description": "برای اجرای UPDATE این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.update"
+                        }
+                    },
+                    {
+                        "id": "run-delete",
+                        "label": "اجرای DELETE",
+                        "description": "برای اجرای DELETE این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.delete"
+                        }
+                    },
+                    {
+                        "id": "run-transaction",
+                        "label": "اجرای Transaction",
+                        "description": "برای اجرای سناریوهای تراکنش V4 این گزینه را فعال کنید.",
+                        "type": "boolean",
+                        "required": false,
+                        "default": false,
+                        "secret": false,
+                        "binding": {
+                            "type": "gradle-project-property",
+                            "name": "query.example.run.transaction"
+                        }
+                    }
+                ]
+            },
+            {
+                "title": "ساخت ماژول",
+                "description": "اجرای Gradle build برای ماژول Query Example.",
+                "task": "build",
+                "id": "build"
+            }
+        ],
+        "projectDependencies": [
+            {
+                "path": ":tools",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:core",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:models:eloquent",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:manager:execute",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:operation:query:api",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:operation:query:ast",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:operation:query:builder",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:operation:query:cte",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:operation:query:renderer",
+                "scope": "implementation"
+            },
+            {
+                "path": ":data_base:operation:query:executor",
+                "scope": "implementation"
+            }
+        ]
+    },
+    "tests": []
+}

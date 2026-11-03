@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_spatial_index
 
-import gog.my_project.data_base.migration.api.interfaces.create_spatial_index.IMigrationCreateSpatialIndexApi
-import gog.my_project.data_base.migration.builder.ast.create_spatial_index.MigrationCreateSpatialIndexBuilder
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.api.interfaces.create_spatial_index.ISchemaCreateSpatialIndexApi
+import gog.my_project.data_base_schema.builder.ast.create_spatial_index.SchemaCreateSpatialIndexBuilder
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
 
@@ -13,8 +13,8 @@ class A1ExampleCreateSpatialIndexV1(
     private val index: String = "spx_places_geom",
     private val column: String = "geom",
 ) {
-    fun migration(): IMigrationCreateSpatialIndexApi =
-        MigrationCreateSpatialIndexBuilder().apply {
+    fun migration(): ISchemaCreateSpatialIndexApi =
+        SchemaCreateSpatialIndexBuilder().apply {
             tableName(table)
             name(index)
             column(column)

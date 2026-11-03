@@ -9,217 +9,241 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi
-import gog.my_project.data_base.migration.api.interfaces.add_column.IMigrationAddColumnApi
-import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationDropColumnApi
-import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
-import gog.my_project.data_base.migration.api.interfaces.rename_table.IMigrationRenameTableApi
-import gog.my_project.data_base.migration.api.interfaces.rename_column.IMigrationRenameColumnApi
-import gog.my_project.data_base.migration.api.interfaces.modify_column.IMigrationModifyColumnApi
-import gog.my_project.data_base.migration.api.interfaces.create_index.IMigrationCreateIndexApi
-import gog.my_project.data_base.migration.api.interfaces.drop_index.IMigrationDropIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_unique_index.IMigrationCreateUniqueIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_multi_column_index.IMigrationCreateMultiColumnIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_full_text_index.IMigrationCreateFullTextIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_spatial_index.IMigrationCreateSpatialIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_foreign_key.IMigrationCreateForeignKeyApi
-import gog.my_project.data_base.migration.api.interfaces.drop_foreign_key.IMigrationDropForeignKeyApi
+import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
+import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
+import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
+import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
+import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
+import gog.my_project.data_base_schema.api.interfaces.rename_table.ISchemaRenameTableApi
+import gog.my_project.data_base_schema.api.interfaces.rename_column.ISchemaRenameColumnApi
+import gog.my_project.data_base_schema.api.interfaces.modify_column.ISchemaModifyColumnApi
+import gog.my_project.data_base_schema.api.interfaces.create_index.ISchemaCreateIndexApi
+import gog.my_project.data_base_schema.api.interfaces.drop_index.ISchemaDropIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_unique_index.ISchemaCreateUniqueIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_multi_column_index.ISchemaCreateMultiColumnIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_full_text_index.ISchemaCreateFullTextIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_spatial_index.ISchemaCreateSpatialIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_foreign_key.ISchemaCreateForeignKeyApi
+import gog.my_project.data_base_schema.api.interfaces.drop_foreign_key.ISchemaDropForeignKeyApi
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 import gog.my_project.data_base.manager.execute.manager.QueryExecute
-import gog.my_project.data_base.migration.renderer.manager.DialectSelector
-import gog.my_project.data_base.migration.dialect.nodes.rename_column.IRenameColumnSqlDialect
-import gog.my_project.data_base.migration.dialect.nodes.rename_column.RenameColumnSqlStrategy
+import gog.my_project.data_base_schema.renderer.manager.DialectSelector
+import gog.my_project.data_base_schema.executor.manager.SchemaExecutor
+import gog.my_project.data_base_schema.dialect.nodes.rename_column.IRenameColumnSqlDialect
+import gog.my_project.data_base_schema.dialect.nodes.rename_column.RenameColumnSqlStrategy
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.executor.transaction.OperationTransactionExecutor
 import java.sql.ResultSet
 import java.sql.SQLException
 import gog.my_project.tools.scripts.StringTools
 
 class MigrationExecutor(
-    override val queryExecutor: IQueryExecute = QueryExecute(),
+    queryExecutor: IQueryExecute = QueryExecute(),
     override val dialectSelector: DialectSelector = DialectSelector()
 ) : IMigrationExecutor {
+    private val lowLevelQueryExecutor = queryExecutor
+    private var schemaExecutor = SchemaExecutor(
+        queryExecutor = lowLevelQueryExecutor,
+        dialectSelector = dialectSelector,
+    )
+    private var operationScope: OperationExecutionScope? = null
+    private var transactionExecutor = OperationTransactionExecutor()
 
-    override fun execute(
-        queryBuilder: IMigrationCreateIndexApi,
+    override var queryExecutor: IQueryExecute = MigrationQueryExecute(
+        delegate = lowLevelQueryExecutor,
+        schemaExecutor = schemaExecutor,
+        scope = null,
+    )
+        private set
+
+    internal constructor(
+        queryExecutor: IQueryExecute,
+        dialectSelector: DialectSelector,
+        transactionExecutor: OperationTransactionExecutor,
+    ) : this(queryExecutor, dialectSelector) {
+        this.transactionExecutor = transactionExecutor
+    }
+
+    private constructor(
+        queryExecutor: IQueryExecute,
+        dialectSelector: DialectSelector,
+        schemaExecutor: SchemaExecutor,
+        scope: OperationExecutionScope,
+    ) : this(queryExecutor, dialectSelector) {
+        this.schemaExecutor = schemaExecutor
+        this.operationScope = scope
+        this.queryExecutor = MigrationQueryExecute(queryExecutor, schemaExecutor, scope)
+    }
+
+    override fun <T> transaction(
+        block: (tx: IMigrationExecutor) -> ExecuteResult<T>,
+    ): ExecuteResult<T> {
+        val activeScope = operationScope
+        if (activeScope != null) {
+            val failure = IllegalStateException("Nested migration transactions are not supported")
+            activeScope.recordFailure(failure)
+            return ExecuteResult.Failure(failure)
+        }
+        return transactionExecutor.transaction { scope ->
+            val scopedExecutor = MigrationExecutor(
+                lowLevelQueryExecutor,
+                dialectSelector,
+                schemaExecutor,
+                scope,
+            )
+            block(scopedExecutor)
+        }
+    }
+
+    /** Renders and executes the supplied Operation Schema API through the shared query scope. */
+    override fun executeOut(
+        schemaBuilder: ISchemaApi<*>,
+        blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
+        blockResult: (db: IQueryExecute, builtQuery: BuiltQuery) -> Unit,
+    ) {
+        val query = dialectSelector
+            .select(DefaultDatabaseConfig.config.dialect)
+            .render(schemaBuilder.ast)
+            ?: throw IllegalStateException("rendered schema sql is null")
+        val params = schemaBuilder.params
+        blockQueryInfo?.invoke(
+            StringTools.formatSql(query),
+            params.associateTo(linkedMapOf()) { it.name to it.value },
+        )
+        blockResult(queryExecutor, BuiltQuery(query, params))
+    }
+
+    private fun executeSchema(
+        migrationOperation: ISchemaApi<*>,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        val scope = operationScope
+        if (scope == null) {
+            schemaExecutor.execute(migrationOperation, blockExecute, blockQueryInfo)
+        } else {
+            schemaExecutor.execute(migrationOperation, scope, blockExecute, blockQueryInfo)
+        }
+    }
+
+    private fun executeSchemaRendered(
+        query: BuiltQuery,
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+    ) {
+        val scope = operationScope
+        if (scope == null) schemaExecutor.executeRendered(query, blockExecute)
+        else schemaExecutor.executeRendered(query, scope, blockExecute)
     }
 
     override fun execute(
-        queryBuilder: IMigrationDropIndexApi,
+        queryBuilder: ISchemaCreateIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationCreateUniqueIndexApi,
+        queryBuilder: ISchemaDropIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationCreateMultiColumnIndexApi,
+        queryBuilder: ISchemaCreateUniqueIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationCreateFullTextIndexApi,
+        queryBuilder: ISchemaCreateMultiColumnIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationCreateSpatialIndexApi,
+        queryBuilder: ISchemaCreateFullTextIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationCreateForeignKeyApi,
+        queryBuilder: ISchemaCreateSpatialIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationDropForeignKeyApi,
+        queryBuilder: ISchemaCreateForeignKeyApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationModifyColumnApi,
+        queryBuilder: ISchemaDropForeignKeyApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
+    }
+
+    override fun execute(
+        queryBuilder: ISchemaModifyColumnApi,
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+        blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
+    ) {
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
 
     override fun execute(
-        queryBuilder: IMigrationRenderCreateTableApi,
+        queryBuilder: ISchemaRenderCreateTableApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?
     ) {
 
-        return executeOut(
-            migrationBuilder =    queryBuilder,
-            blockQueryInfo =  blockQueryInfo,
-            blockResult=   {
-                    db: IQueryExecute, builtQuery: BuiltQuery->
-                db.executeTable(
-                    builtQuery =   builtQuery,
-                    blockExecute = blockExecute
-                )
-            }
-        );
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
 
     }
 
     override fun execute(
-        queryBuilder: IMigrationDropTableApi,
+        queryBuilder: ISchemaDropTableApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery ->
-                db.executeTable(
-                    builtQuery = builtQuery,
-                    blockExecute = blockExecute,
-                )
-            },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationRenameTableApi,
+        queryBuilder: ISchemaRenameTableApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery ->
-                db.executeTable(
-                    builtQuery = builtQuery,
-                    blockExecute = blockExecute,
-                )
-            },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationAddColumnApi,
+        queryBuilder: ISchemaAddColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
-        executeOut(
-            migrationBuilder = queryBuilder,
-            blockQueryInfo = blockQueryInfo,
-            blockResult = { db, builtQuery ->
-                db.executeTable(
-                    builtQuery = builtQuery,
-                    blockExecute = blockExecute,
-                )
-            },
-        )
+        executeSchema(queryBuilder, blockExecute, blockQueryInfo)
     }
 
     override fun execute(
-        queryBuilder: IMigrationRenameColumnApi,
+        queryBuilder: ISchemaRenameColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
@@ -228,6 +252,7 @@ class MigrationExecutor(
         val dialect = dialectSelector.select(config.dialect, target)
         val renameDialect = dialect as? IRenameColumnSqlDialect
             ?: throw IllegalStateException("Selected dialect does not support RENAME COLUMN")
+        val schemaOperation = queryBuilder
 
         queryExecutor.getDatabaseServerInfo { infoResult ->
             when (infoResult) {
@@ -255,9 +280,7 @@ class MigrationExecutor(
                                             "${info.version.major}.${info.version.minor}.${info.version.patch}",
                                     )))
                                 } else {
-                                    val sql = dialect.render(queryBuilder.ast)
-                                        ?: throw IllegalStateException("rendered sql is null")
-                                    executeRenameDdl(queryBuilder.params, sql, blockQueryInfo, blockExecute)
+                                    executeSchema(queryBuilder, blockExecute, blockQueryInfo)
                                 }
                             }
                             RenameColumnSqlStrategy.CHANGE_COLUMN -> {
@@ -268,7 +291,7 @@ class MigrationExecutor(
                                     )))
                                 } else {
                                     resolveLegacyDefinitionAndExecute(
-                                        queryBuilder = queryBuilder,
+                                        queryBuilder = schemaOperation,
                                         dialect = renameDialect,
                                         blockQueryInfo = blockQueryInfo,
                                         blockExecute = blockExecute,
@@ -283,7 +306,7 @@ class MigrationExecutor(
     }
 
     private fun resolveLegacyDefinitionAndExecute(
-        queryBuilder: IMigrationRenameColumnApi,
+        queryBuilder: ISchemaRenameColumnApi,
         dialect: IRenameColumnSqlDialect,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
@@ -352,23 +375,19 @@ class MigrationExecutor(
     }
 
     override fun execute(
-        queryBuilder: IMigrationDropColumnApi,
+        queryBuilder: ISchemaDropColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
     ) {
         val ast = queryBuilder.ast
         if (!ast.metadata.ifExists) {
-            executeOut(
-                migrationBuilder = queryBuilder,
-                blockQueryInfo = blockQueryInfo,
-                blockResult = { db, builtQuery -> db.executeTable(builtQuery, blockExecute) },
-            )
+            executeSchema(queryBuilder, blockExecute, blockQueryInfo)
             return
         }
 
         // Render first so malformed AST is rejected before any query is issued.
         val dialect = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
-        val ddl = dialect.render(ast) ?: throw IllegalStateException("rendered sql is null")
+        val ddl = dialect.render(queryBuilder.ast) ?: throw IllegalStateException("rendered sql is null")
         val tableName = requireNotNull(ast.metadata.tableName)
         val columnName = requireNotNull(ast.metadata.name)
         val checkQuery = BuiltQuery(
@@ -396,7 +415,7 @@ class MigrationExecutor(
                             StringTools.formatSql(ddl),
                             ddlParams.associate { it.name to it.value }.toMutableMap(),
                         )
-                        queryExecutor.executeTable(BuiltQuery(ddl, ddlParams)) { result ->
+                        executeSchemaRendered(BuiltQuery(ddl, ddlParams)) { result ->
                             if (result is ExecuteResult.Failure && result.exception.isMissingMySqlDropTarget()) {
                                 blockExecute(ExecuteResult.Success(true))
                             } else {

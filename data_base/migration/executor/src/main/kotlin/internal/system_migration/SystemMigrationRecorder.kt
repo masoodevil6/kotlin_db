@@ -2,7 +2,7 @@ package gog.my_project.data_base.migration.executor.internal.system_migration
 
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
+import gog.my_project.data_base_query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
 
 /** Validates and records one successfully applied migration. */
 internal class SystemMigrationRecorder(

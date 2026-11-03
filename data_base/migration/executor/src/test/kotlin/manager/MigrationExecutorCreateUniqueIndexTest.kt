@@ -5,7 +5,7 @@ import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.ast.create_unique_index.MigrationCreateUniqueIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.create_unique_index.SchemaCreateUniqueIndexBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
 import kotlin.test.assertEquals
@@ -26,7 +26,7 @@ class MigrationExecutorCreateUniqueIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = MigrationCreateUniqueIndexBuilder().apply {
+                queryBuilder = SchemaCreateUniqueIndexBuilder().apply {
                     tableName("users")
                     name("uq_users_email")
                     column("email")
@@ -56,7 +56,7 @@ class MigrationExecutorCreateUniqueIndexTest {
         try {
             DefaultDatabaseConfig.config = previous.copy(dialect = DialectQuery.MY_SQL)
             executor.execute(
-                queryBuilder = MigrationCreateUniqueIndexBuilder().apply {
+                queryBuilder = SchemaCreateUniqueIndexBuilder().apply {
                     tableName("users")
                     name("uq_users_email")
                     column("email")

@@ -1,24 +1,24 @@
 package gog.my_project.data_base.migration.builder
 
-import gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi
-import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationDropColumnApi
-import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
-import gog.my_project.data_base.migration.api.interfaces.rename_column.IMigrationRenameColumnApi
-import gog.my_project.data_base.migration.builder.ast.add_column.MigrationAddColumnBuilder
-import gog.my_project.data_base.migration.builder.ast.create_foreign_key.MigrationCreateForeignKeyBuilder
-import gog.my_project.data_base.migration.builder.ast.create_full_text_index.MigrationCreateFullTextIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.create_index.MigrationCreateIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.create_multi_column_index.MigrationCreateMultiColumnIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.create_spatial_index.MigrationCreateSpatialIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
-import gog.my_project.data_base.migration.builder.ast.create_unique_index.MigrationCreateUniqueIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.drop_column.MigrationDropColumnBuilder
-import gog.my_project.data_base.migration.builder.ast.drop_foreign_key.MigrationDropForeignKeyBuilder
-import gog.my_project.data_base.migration.builder.ast.drop_index.MigrationDropIndexBuilder
-import gog.my_project.data_base.migration.builder.ast.drop_table.MigrationDropTableBuilder
-import gog.my_project.data_base.migration.builder.ast.modify_column.MigrationModifyColumnBuilder
-import gog.my_project.data_base.migration.builder.ast.rename_column.MigrationRenameColumnBuilder
-import gog.my_project.data_base.migration.builder.ast.rename_table.MigrationRenameTableBuilder
+import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
+import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
+import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
+import gog.my_project.data_base_schema.api.interfaces.rename_column.ISchemaRenameColumnApi
+import gog.my_project.data_base_schema.builder.ast.add_column.SchemaAddColumnBuilder
+import gog.my_project.data_base_schema.builder.ast.create_foreign_key.SchemaCreateForeignKeyBuilder
+import gog.my_project.data_base_schema.builder.ast.create_full_text_index.SchemaCreateFullTextIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.create_multi_column_index.SchemaCreateMultiColumnIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.create_spatial_index.SchemaCreateSpatialIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.create_table.render_schema_create_table.SchemaRenderCreateTableBuilder
+import gog.my_project.data_base_schema.builder.ast.create_unique_index.SchemaCreateUniqueIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_column.SchemaDropColumnBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_foreign_key.SchemaDropForeignKeyBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_index.SchemaDropIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_table.SchemaDropTableBuilder
+import gog.my_project.data_base_schema.builder.ast.modify_column.SchemaModifyColumnBuilder
+import gog.my_project.data_base_schema.builder.ast.rename_column.SchemaRenameColumnBuilder
+import gog.my_project.data_base_schema.builder.ast.rename_table.SchemaRenameTableBuilder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -31,7 +31,7 @@ class MigrationDefinitionBuilderTest {
         val definition = migration { dropTable { tableName("only") } }
 
         assertEquals(1, definition.operations.size)
-        val operation = assertIs<IMigrationDropTableApi>(definition.operations.single())
+        val operation = assertIs<ISchemaDropTableApi>(definition.operations.single())
         assertEquals("only", operation.ast.metadata.tableName)
     }
 
@@ -67,8 +67,8 @@ class MigrationDefinitionBuilderTest {
             }
         }
 
-        val dropColumn = assertIs<IMigrationDropColumnApi>(dropDefinition.operations.single())
-        val renameColumn = assertIs<IMigrationRenameColumnApi>(renameDefinition.operations.single())
+        val dropColumn = assertIs<ISchemaDropColumnApi>(dropDefinition.operations.single())
+        val renameColumn = assertIs<ISchemaRenameColumnApi>(renameDefinition.operations.single())
         assertTrue(dropColumn.ast.metadata.ifExists)
         assertEquals("full_name", renameColumn.ast.metadata.to)
     }
@@ -94,21 +94,21 @@ class MigrationDefinitionBuilderTest {
         )
 
         val concreteBuilders = listOf(
-            MigrationRenderCreateTableBuilder(),
-            MigrationDropTableBuilder(),
-            MigrationRenameTableBuilder(),
-            MigrationAddColumnBuilder(),
-            MigrationDropColumnBuilder(),
-            MigrationRenameColumnBuilder(),
-            MigrationModifyColumnBuilder(),
-            MigrationCreateIndexBuilder(),
-            MigrationDropIndexBuilder(),
-            MigrationCreateUniqueIndexBuilder(),
-            MigrationCreateMultiColumnIndexBuilder(),
-            MigrationCreateFullTextIndexBuilder(),
-            MigrationCreateSpatialIndexBuilder(),
-            MigrationCreateForeignKeyBuilder(),
-            MigrationDropForeignKeyBuilder(),
+            SchemaRenderCreateTableBuilder(),
+            SchemaDropTableBuilder(),
+            SchemaRenameTableBuilder(),
+            SchemaAddColumnBuilder(),
+            SchemaDropColumnBuilder(),
+            SchemaRenameColumnBuilder(),
+            SchemaModifyColumnBuilder(),
+            SchemaCreateIndexBuilder(),
+            SchemaDropIndexBuilder(),
+            SchemaCreateUniqueIndexBuilder(),
+            SchemaCreateMultiColumnIndexBuilder(),
+            SchemaCreateFullTextIndexBuilder(),
+            SchemaCreateSpatialIndexBuilder(),
+            SchemaCreateForeignKeyBuilder(),
+            SchemaDropForeignKeyBuilder(),
         )
 
         val operations = definitions.map { it.operations.single() }
@@ -133,8 +133,8 @@ class MigrationDefinitionBuilderTest {
             }
         }
 
-        val createTable = assertIs<IMigrationRenderCreateTableApi>(definition.operations.single())
-        assertEquals("customers", createTable.ast.migrationTableAst?.metadata?.tableName)
+        val createTable = assertIs<ISchemaRenderCreateTableApi>(definition.operations.single())
+        assertEquals("customers", createTable.ast.schemaTableAst?.metadata?.tableName)
         assertEquals(2, createTable.ast.columns.size)
     }
 }

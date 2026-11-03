@@ -1,0 +1,8 @@
+package gog.my_project.data_base_query.dialect.nodes.select_nodes.condition_item_collection
+
+import gog.my_project.data_base_query.ast.interfaces.select_interface.condition_item_collection.IQueryConditionsCollectionAst
+import gog.my_project.data_base_query.dialect.data_class.select_data.conditions_item_collection.QueryConditionCollectionData
+import gog.my_project.data_base_query.renderer.interfaces.IAstRenderer
+
+interface IQueryConditionCollectionCapability: IAstRenderer<IQueryConditionsCollectionAst, QueryConditionCollectionData> {
+}

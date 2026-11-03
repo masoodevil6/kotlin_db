@@ -13,8 +13,8 @@
 در این قطعه فرض شده `selectQuery`، `insertQuery` و `updateQuery` پیش‌تر با DSL ساخته شده‌اند. هر دو scope نتیجه‌ای از نوع `ExecuteResult<T>` برمی‌گردانند:
 
 ~~~kotlin
-import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
-import gog.my_project.data_base.query.executer.result.QueryRow
+import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
+import gog.my_project.data_base_query.executor.result.QueryRow
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 
 val queryManager = QueryBuilderExecutor()
@@ -45,8 +45,8 @@ val transactionResult: ExecuteResult<String> = queryManager.transaction { ctx ->
 
 ~~~kotlin
 import gog.my_project.collection.ICollection
-import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
-import gog.my_project.data_base.query.executer.result.QueryRow
+import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base_query.executor.result.QueryRow
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 
 data class UserView(val id: Int, val name: String?)
@@ -76,9 +76,9 @@ val typedResult: ExecuteResult<ICollection<UserView>> = queryManager
 
 ~~~kotlin
 import gog.my_project.collection.ICollection
-import gog.my_project.data_base.query.executer.result.QueryRow
-import gog.my_project.data_base.query.executer.result.toCollection
-import gog.my_project.data_base.query.executer.result.toList
+import gog.my_project.data_base_query.executor.result.QueryRow
+import gog.my_project.data_base_query.executor.result.toCollection
+import gog.my_project.data_base_query.executor.result.toList
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 
 // فرض شده selectQuery، insertQuery، updateQuery و deleteQuery با DSL ساخته شده‌اند.

@@ -7,18 +7,18 @@ import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.api.interfaces.MigrationId
-import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
-import gog.my_project.data_base.migration.builder.ast.drop_foreign_key.MigrationDropForeignKeyBuilder
-import gog.my_project.data_base.migration.builder.ast.drop_table.MigrationDropTableBuilder
+import gog.my_project.data_base_schema.ast.interfaces.create_index.IndexMethod
+import gog.my_project.data_base_schema.builder.ast.drop_foreign_key.SchemaDropForeignKeyBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_table.SchemaDropTableBuilder
 import gog.my_project.data_base.migration.builder.migration
 import gog.my_project.data_base.migration.builder.migrationConfig
 import gog.my_project.data_base.migration.executor.manager.MigrationExecutor
 import gog.my_project.data_base.migration.executor.manager.MigrationMigrator
-import gog.my_project.data_base.migration.params.data_types.DateTimeType
-import gog.my_project.data_base.migration.params.data_types.DecimalType
-import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.TextType
-import gog.my_project.data_base.migration.params.data_types.VarcharType
+import gog.my_project.data_base_schema.params.data_types.DateTimeType
+import gog.my_project.data_base_schema.params.data_types.DecimalType
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.TextType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
 import java.sql.Connection
 import java.sql.DatabaseMetaData
 import java.sql.DriverManager
@@ -217,7 +217,7 @@ class MigrationSchemaIntegrationTest {
     private fun dropForeignKey(foreignKey: ForeignKeyToDrop) {
         var result: ExecuteResult<Boolean>? = null
         MigrationExecutor().execute(
-            queryBuilder = MigrationDropForeignKeyBuilder().apply {
+            queryBuilder = SchemaDropForeignKeyBuilder().apply {
                 tableName(foreignKey.table)
                 name(foreignKey.name)
             },
@@ -232,7 +232,7 @@ class MigrationSchemaIntegrationTest {
     private fun dropTableIfPresent(tableName: String) {
         var result: ExecuteResult<Boolean>? = null
         MigrationExecutor().execute(
-            queryBuilder = MigrationDropTableBuilder().apply {
+            queryBuilder = SchemaDropTableBuilder().apply {
                 tableName(tableName)
                 ifExists()
             },

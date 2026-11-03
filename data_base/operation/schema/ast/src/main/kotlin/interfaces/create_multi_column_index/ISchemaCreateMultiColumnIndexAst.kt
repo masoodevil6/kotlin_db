@@ -1,0 +1,8 @@
+package gog.my_project.data_base_schema.ast.interfaces.create_multi_column_index
+
+import gog.my_project.data_base_schema.ast.interfaces.ISchemaAst
+import gog.my_project.data_base_schema.ast.metadata.create_multi_column_index.SchemaCreateMultiColumnIndexAstMetadata
+
+interface ISchemaCreateMultiColumnIndexAst : ISchemaAst<SchemaCreateMultiColumnIndexAstMetadata> {
+
+}

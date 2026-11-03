@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    id("java-library")
 }
 
 group = "gog.my_project.data_base.migration.executor"
@@ -10,27 +11,27 @@ repositories {
 }
 
 dependencies {
-
     implementation(project(":tools"))
 
-    implementation(project(":data_base:core"))
+    api(project(":data_base:core"))
+    api(project(":data_base:manager:execute"))
+    api(project(":data_base:migration:api"))
+    api(project(":data_base:operation:schema:api"))
+    api(project(":data_base:operation:schema:renderer"))
 
-    implementation(project(":data_base:migration:api"))
-    implementation(project(":data_base:migration:ast"))
-    implementation(project(":data_base:migration:builder"))
-    implementation(project(":data_base:migration:dialect"))
-    implementation(project(":data_base:migration:params"))
-    implementation(project(":data_base:migration:renderer"))
+    implementation(project(":data_base:operation:query:api"))
+    implementation(project(":data_base:operation:query:ast"))
+    implementation(project(":data_base:operation:query:builder"))
+    implementation(project(":data_base:operation:query:dialect"))
+    implementation(project(":data_base:operation:query:renderer"))
 
-    implementation(project(":data_base:query:api"))
-    implementation(project(":data_base:query:ast"))
-    implementation(project(":data_base:query:builder"))
-    implementation(project(":data_base:query:dialect"))
-    implementation(project(":data_base:query:renderer"))
-
-    implementation(project(":data_base:manager:execute"))
+    implementation(project(":data_base:operation:executor"))
+    implementation(project(":data_base:operation:schema:executor"))
+    implementation(project(":data_base:operation:schema:builder"))
+    implementation(project(":data_base:operation:schema:dialect"))
 
     testImplementation(kotlin("test"))
+    testImplementation(project(":data_base:migration:builder"))
 }
 
 tasks.test {

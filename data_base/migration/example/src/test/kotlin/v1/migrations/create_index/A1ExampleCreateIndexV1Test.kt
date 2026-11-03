@@ -1,10 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_index
 
-import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
-import gog.my_project.data_base.migration.ast.schema.create_index.MigrationCreateIndexAst
-import gog.my_project.data_base.migration.builder.ast.create_index.MigrationCreateIndexBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MariaDbDialect
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.interfaces.create_index.IndexMethod
+import gog.my_project.data_base_schema.ast.schema.create_index.SchemaCreateIndexAst
+import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MariaDbDialect
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -26,7 +26,7 @@ class A1ExampleCreateIndexV1Test {
 
     @Test
     fun trimsSurroundingWhitespaceAndPreservesRemainingIdentifier() {
-        val migration = MigrationCreateIndexBuilder().apply {
+        val migration = SchemaCreateIndexBuilder().apply {
             tableName("  Users  ")
             name("  Idx_User_Email  ")
             column("  Email  ")
@@ -45,19 +45,19 @@ class A1ExampleCreateIndexV1Test {
     fun rendersBlankIdentifiersAndRejectsMissingAstFields() {
         assertEquals(
             "CREATE INDEX `idx` ON `` (`email`)",
-            dialect.render(MigrationCreateIndexBuilder().apply { tableName(" "); name("idx"); column("email") }.ast),
+            dialect.render(SchemaCreateIndexBuilder().apply { tableName(" "); name("idx"); column("email") }.ast),
         )
         assertEquals(
             "CREATE INDEX `` ON `users` (`email`)",
-            dialect.render(MigrationCreateIndexBuilder().apply { tableName("users"); name(" "); column("email") }.ast),
+            dialect.render(SchemaCreateIndexBuilder().apply { tableName("users"); name(" "); column("email") }.ast),
         )
         assertEquals(
             "CREATE INDEX `idx` ON `users` (``)",
-            dialect.render(MigrationCreateIndexBuilder().apply { tableName("users"); name("idx"); column(" ") }.ast),
+            dialect.render(SchemaCreateIndexBuilder().apply { tableName("users"); name("idx"); column(" ") }.ast),
         )
 
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationCreateIndexAst().apply {
+            dialect.render(SchemaCreateIndexAst().apply {
                 metadata.tableName = "users"
                 metadata.indexName = "idx_users_email"
             })
@@ -66,7 +66,7 @@ class A1ExampleCreateIndexV1Test {
 
     @Test
     fun escapesAllIdentifierPositionsAndDoesNotAddUnique() {
-        val migration = MigrationCreateIndexBuilder().apply {
+        val migration = SchemaCreateIndexBuilder().apply {
             tableName("order")
             name("select")
             column("user`email")
@@ -78,10 +78,10 @@ class A1ExampleCreateIndexV1Test {
 
     @Test
     fun setterCallOrderDoesNotAffectSql() {
-        val first = MigrationCreateIndexBuilder().apply {
+        val first = SchemaCreateIndexBuilder().apply {
             column("email"); name("idx_users_email"); tableName("users")
         }
-        val second = MigrationCreateIndexBuilder().apply {
+        val second = SchemaCreateIndexBuilder().apply {
             tableName("users"); name("idx_users_email"); column("email")
         }
 
@@ -90,13 +90,13 @@ class A1ExampleCreateIndexV1Test {
 
     @Test
     fun rendersOptionalBtreeAndHashMethods() {
-        val btree = MigrationCreateIndexBuilder().apply {
+        val btree = SchemaCreateIndexBuilder().apply {
             tableName("lookup")
             name("idx_lookup_code")
             column("code")
             using(IndexMethod.BTREE)
         }
-        val hash = MigrationCreateIndexBuilder().apply {
+        val hash = SchemaCreateIndexBuilder().apply {
             tableName("lookup")
             name("idx_lookup_code")
             column("code")
@@ -119,13 +119,13 @@ class A1ExampleCreateIndexV1Test {
 
     @Test
     fun indexMethodDoesNotDependOnDslCallOrder() {
-        val methodFirst = MigrationCreateIndexBuilder().apply {
+        val methodFirst = SchemaCreateIndexBuilder().apply {
             using(IndexMethod.HASH)
             column("code")
             name("idx_lookup_code")
             tableName("lookup")
         }
-        val methodLast = MigrationCreateIndexBuilder().apply {
+        val methodLast = SchemaCreateIndexBuilder().apply {
             tableName("lookup")
             name("idx_lookup_code")
             column("code")

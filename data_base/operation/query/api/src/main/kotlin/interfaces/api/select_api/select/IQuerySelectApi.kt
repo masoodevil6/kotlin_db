@@ -1,0 +1,13 @@
+package gog.my_project.data_base_query.api.interfaces.api.select_api.select
+
+import gog.my_project.data_base_query.api.interfaces.api.IQueryApi
+import gog.my_project.data_base_query.api.interfaces.api.select_api.column.IQueryColumnsApi
+import gog.my_project.data_base_query.ast.interfaces.select_interface.select.IQuerySelectAst
+
+interface IQuerySelectApi : IQueryApi<IQuerySelectAst> {
+
+
+    fun distinct(isDistinct : Boolean= true): IQuerySelectApi;
+    fun addColumn(blockColumn: IQueryColumnsApi.() -> Unit): IQuerySelectApi;
+
+}

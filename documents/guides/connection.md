@@ -57,13 +57,13 @@ $env:DB_USER = "<restricted_database_user>"
 نمونهٔ کامل زیر ابتدا کاربر را می‌خواند و سپس تلفن‌های همان کاربر را می‌خواند. هر دو SELECT در یک Connection اجرا می‌شوند:
 
 ~~~kotlin
-import gog.my_project.data_base.query.ast.enums.DataType
-import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
-import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
-import gog.my_project.data_base.query.executer.result.QueryRow
-import gog.my_project.data_base.query.executer.result.error
-import gog.my_project.data_base.query.executer.result.success
+import gog.my_project.data_base_query.ast.enums.DataType
+import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
+import gog.my_project.data_base_query.executor.result.QueryRow
+import gog.my_project.data_base_query.executor.result.error
+import gog.my_project.data_base_query.executor.result.success
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 
 private fun userById(userId: Int): IQueryRenderSelectApi = QueryRenderSelectBuilder()
@@ -219,12 +219,12 @@ fun main() {
 `manager:execute` برای اجرای مستقیم `BuiltQuery` متدچین `success/error` ندارد؛ callback آن `ExecuteResult<ResultSet>` را هنگام بازبودن منابع JDBC دریافت می‌کند. اگر متدچین می‌خواهید، از لایهٔ `data_base:query:executor` استفاده کنید. در این مسیر Query با DSL ساخته می‌شود و `execute()` ردیف‌ها را پیش از بستن منابع به `List<QueryRow>` تبدیل می‌کند:
 
 ~~~kotlin
-import gog.my_project.data_base.query.ast.enums.DataType
-import gog.my_project.data_base.query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
-import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.executer.interfaces.IQueryBuilderExecutor
-import gog.my_project.data_base.query.executer.result.error
-import gog.my_project.data_base.query.executer.result.success
+import gog.my_project.data_base_query.ast.enums.DataType
+import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
+import gog.my_project.data_base_query.executor.result.error
+import gog.my_project.data_base_query.executor.result.success
 
 fun findUser(queryManager: IQueryBuilderExecutor, userId: Long) {
     val query: IQueryRenderSelectApi = QueryRenderSelectBuilder()

@@ -22,7 +22,7 @@
 `QueryConsumer.details()`، Metadata مؤثر SELECT را از Provider همان Query دریافت می‌کند. نسخهٔ callback یعنی `details { metadata -> ... }` Metadata را به callback می‌دهد و همان Consumer را برمی‌گرداند؛ بنابراین می‌توان آن را میان `.sql { ... }` و `.execute()` زنجیره کرد:
 
 ~~~kotlin
-import gog.my_project.data_base.query.example.metadata.formatEffectiveQueryMetadata
+import gog.my_project.data_base_query.example.metadata.formatEffectiveQueryMetadata
 
 queryManager.queryBuilder(query)
     .sql { builtQuery -> println(builtQuery.query + "\n" + builtQuery.params) }

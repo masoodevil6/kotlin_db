@@ -1,6 +1,7 @@
 package gog.my_project.data_base.migration.executor.manager
 
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationConfiguration
 import gog.my_project.data_base.migration.api.interfaces.MigrationGroup
@@ -53,8 +54,10 @@ class MigrationMigrator(
         }
     }
 
-    private fun stateStore(): SystemMigrationStateStore =
-        SystemMigrationStateStore(executor.queryExecutor, executor)
+    private fun stateStore(
+        queryExecutor: IQueryExecute = executor.queryExecutor,
+        migrationExecutor: IMigrationExecutor = executor,
+    ): SystemMigrationStateStore = SystemMigrationStateStore(queryExecutor, migrationExecutor)
 
     private fun runPending(
         pending: List<RegisteredMigration>,
@@ -73,39 +76,48 @@ class MigrationMigrator(
             val migration = instantiate(registered)
             val definition = migration.up()
             val operation = definition.operations.single()
-
-            executor.execute(operation, blockExecute = { executionResult ->
-                safely(completion) {
+            val transactionResult = executor.transaction { tx ->
+                var result: ExecuteResult<Unit>? = null
+                var delivered = false
+                tx.execute(operation, blockExecute = { executionResult ->
+                    check(!delivered) { "Migration operation completed more than once" }
+                    delivered = true
                     when (executionResult) {
-                        is ExecuteResult.Failure -> completion.fail(executionResult)
+                        is ExecuteResult.Failure -> result = executionResult
                         is ExecuteResult.Success -> {
                             if (executionResult.result != true) {
-                                completion.fail(
-                                    ExecuteResult.Failure(
-                                        IllegalStateException(
-                                            "Migration '${registered.id.value}' operation did not report Success(true)",
-                                        ),
+                                result = ExecuteResult.Failure(
+                                    IllegalStateException(
+                                        "Migration '${registered.id.value}' operation did not report Success(true)",
                                     ),
                                 )
                             } else {
-                                stateStore().recordSuccessfulMigration(registered.id.value, batch) { recordResult ->
-                                    safely(completion) {
-                                        when (recordResult) {
-                                            is ExecuteResult.Failure -> completion.fail(recordResult)
-                                            is ExecuteResult.Success -> runPending(
-                                                pending = pending,
-                                                index = index + 1,
-                                                batch = batch,
-                                                completion = completion,
-                                            )
+                                stateStore(tx.queryExecutor, tx)
+                                    .recordSuccessfulMigration(registered.id.value, batch) { recordResult ->
+                                        check(result == null) { "Migration history recording completed more than once" }
+                                        result = when (recordResult) {
+                                            is ExecuteResult.Failure -> recordResult
+                                            is ExecuteResult.Success -> ExecuteResult.Success(Unit)
                                         }
                                     }
-                                }
                             }
                         }
                     }
-                }
-            })
+                })
+                result ?: ExecuteResult.Failure(
+                    IllegalStateException("Migration transaction callbacks must complete synchronously"),
+                )
+            }
+
+            when (transactionResult) {
+                is ExecuteResult.Failure -> completion.fail(transactionResult)
+                is ExecuteResult.Success -> runPending(
+                    pending = pending,
+                    index = index + 1,
+                    batch = batch,
+                    completion = completion,
+                )
+            }
         }
     }
 

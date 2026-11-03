@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    id("java-library")
 }
 
 group = "gog.my_project.data_base.migration.builder"
@@ -10,10 +11,9 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":data_base:core"))
-    implementation(project(":data_base:migration:params"))
-    implementation(project(":data_base:migration:ast"))
-    implementation(project(":data_base:migration:api"))
+    api(project(":data_base:migration:api"))
+    api(project(":data_base:operation:schema:api"))
+    implementation(project(":data_base:operation:schema:builder"))
 
     testImplementation(kotlin("test"))
 }

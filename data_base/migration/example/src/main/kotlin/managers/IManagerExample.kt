@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.managers
 
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.example.v1.migrations.IExampleV1
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 import gog.my_project.data_base.migration.example.v1.migrations.drop_table.A1ExampleDropTableV1

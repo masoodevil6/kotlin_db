@@ -1,6 +1,5 @@
 package gog.my_project.data_base.migration.integration
 
-import gog.my_progtion
 import gog.my_project.data_base.core.data_base.DatabaseConfig
 import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.dialect.DialectQuery
@@ -8,16 +7,16 @@ import gog.my_project.data_base.manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.api.interfaces.MigrationId
-import gog.my_project.data_base.migration.builder.ast.drop_foreign_key.MigrationDropForeignKeyBuilder
-import gog.my_project.data_base.migration.builder.ast.drop_table.MigrationDropTableBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_foreign_key.SchemaDropForeignKeyBuilder
+import gog.my_project.data_base_schema.builder.ast.drop_table.SchemaDropTableBuilder
 import gog.my_project.data_base.migration.builder.migration
 import gog.my_project.data_base.migration.builder.migrationConfig
 import gog.my_project.data_base.migration.executor.manager.MigrationExecutor
 import gog.my_project.data_base.migration.executor.manager.MigrationMigrator
-import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.VarcharType
-import gog.my_project.data_base.query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
-import gog.my_project.data_base.query.executer.manager.QueryBuilderExecutor
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
@@ -394,7 +393,7 @@ class MigrationSystemIntegrationTest {
     private fun dropForeignKey(foreignKey: ForeignKeyToDrop) {
         var result: ExecuteResult<Boolean>? = null
         MigrationExecutor().execute(
-            queryBuilder = MigrationDropForeignKeyBuilder().apply {
+            queryBuilder = SchemaDropForeignKeyBuilder().apply {
                 tableName(foreignKey.table)
                 name(foreignKey.name)
             },
@@ -409,7 +408,7 @@ class MigrationSystemIntegrationTest {
     private fun dropTableIfPresent(tableName: String) {
         var result: ExecuteResult<Boolean>? = null
         MigrationExecutor().execute(
-            queryBuilder = MigrationDropTableBuilder().apply {
+            queryBuilder = SchemaDropTableBuilder().apply {
                 tableName(tableName)
                 ifExists()
             },
@@ -448,25 +447,25 @@ class MigrationSystemIntegrationTest {
 
     private fun migrationHistory(): List<HistoryRow> {
         val query = QueryRenderSelectBuilder()
-            .select {
-                addColumn {
-                    column { tableColumn("migration_history", "id") }
-                    alias("id")
-                }
-                addColumn {
-                    column { tableColumn("migration_history", "migration") }
-                    alias("migration")
-                }
-                addColumn {
-                    column { tableColumn("migration_history", "batch") }
-                    alias("batch")
-                }
+        query.select {
+            addColumn {
+                column { columnSelector("migration_history.id") }
+                alias("id")
             }
-            .table { table("system_migration").alias("migration_history") }
-            .order {
-                orderAsc()
-                addColumn { tableColumn("migration_history", "id") }
+            addColumn {
+                column { columnSelector("migration_history.migration") }
+                alias("migration")
             }
+            addColumn {
+                column { columnSelector("migration_history.batch") }
+                alias("batch")
+            }
+        }
+        query.from { table("system_migration").alias("migration_history") }
+        query.order {
+            addColumn { columnSelector("migration_history.id") }
+            orderAsc()
+        }
 
         var executionResult: ExecuteResult<List<HistoryRow>>? = null
         QueryBuilderExecutor().execute(

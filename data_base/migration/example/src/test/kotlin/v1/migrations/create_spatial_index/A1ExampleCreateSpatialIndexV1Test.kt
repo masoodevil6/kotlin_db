@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_spatial_index
 
-import gog.my_project.data_base.migration.ast.schema.create_spatial_index.MigrationCreateSpatialIndexAst
-import gog.my_project.data_base.migration.builder.ast.create_spatial_index.MigrationCreateSpatialIndexBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.schema.create_spatial_index.SchemaCreateSpatialIndexAst
+import gog.my_project.data_base_schema.builder.ast.create_spatial_index.SchemaCreateSpatialIndexBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -23,7 +23,7 @@ class A1ExampleCreateSpatialIndexV1Test {
 
     @Test
     fun trimsIdentifiersAndPreservesCasing() {
-        val migration = MigrationCreateSpatialIndexBuilder().apply {
+        val migration = SchemaCreateSpatialIndexBuilder().apply {
             tableName(" Places ")
             name(" Spx_Places_Geom ")
             column(" GeoM ")
@@ -40,7 +40,7 @@ class A1ExampleCreateSpatialIndexV1Test {
 
     @Test
     fun quotesAndEscapesIdentifiersAndRendersOnlyOneColumn() {
-        val migration = MigrationCreateSpatialIndexBuilder().apply {
+        val migration = SchemaCreateSpatialIndexBuilder().apply {
             tableName("order`data")
             name("spx`places")
             column("geo`metry")
@@ -56,34 +56,34 @@ class A1ExampleCreateSpatialIndexV1Test {
     @Test
     fun rendersBlankIdentifiersWithoutDatabaseSemanticValidation() {
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationCreateSpatialIndexBuilder().apply { name("spx_places_geom"); column("geom") }.ast)
+            dialect.render(SchemaCreateSpatialIndexBuilder().apply { name("spx_places_geom"); column("geom") }.ast)
         }
         assertEquals(
             "CREATE SPATIAL INDEX `spx_places_geom` ON `` (`geom`)",
-            dialect.render(MigrationCreateSpatialIndexBuilder().apply { tableName(" "); name("spx_places_geom"); column("geom") }.ast),
+            dialect.render(SchemaCreateSpatialIndexBuilder().apply { tableName(" "); name("spx_places_geom"); column("geom") }.ast),
         )
         assertEquals(
             "CREATE SPATIAL INDEX `` ON `places` (`geom`)",
-            dialect.render(MigrationCreateSpatialIndexBuilder().apply { tableName("places"); name(" "); column("geom") }.ast),
+            dialect.render(SchemaCreateSpatialIndexBuilder().apply { tableName("places"); name(" "); column("geom") }.ast),
         )
         assertEquals(
             "CREATE SPATIAL INDEX `spx_places_geom` ON `places` (``)",
-            dialect.render(MigrationCreateSpatialIndexBuilder().apply { tableName("places"); name("spx_places_geom"); column(" ") }.ast),
+            dialect.render(SchemaCreateSpatialIndexBuilder().apply { tableName("places"); name("spx_places_geom"); column(" ") }.ast),
         )
     }
 
     @Test
     fun rendererQuotesDirectAstIdentifiersWithoutSemanticChecks() {
-        assertFailsWith<IllegalArgumentException> { dialect.render(MigrationCreateSpatialIndexAst()) }
+        assertFailsWith<IllegalArgumentException> { dialect.render(SchemaCreateSpatialIndexAst()) }
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationCreateSpatialIndexAst().apply {
+            dialect.render(SchemaCreateSpatialIndexAst().apply {
                 metadata.tableName = "places"
                 metadata.indexName = "spx_places_geom"
             })
         }
         assertEquals(
             "CREATE SPATIAL INDEX `spx_places_geom` ON `places` (` `)",
-            dialect.render(MigrationCreateSpatialIndexAst().apply {
+            dialect.render(SchemaCreateSpatialIndexAst().apply {
                 metadata.tableName = "places"
                 metadata.indexName = "spx_places_geom"
                 metadata.columnName = " "

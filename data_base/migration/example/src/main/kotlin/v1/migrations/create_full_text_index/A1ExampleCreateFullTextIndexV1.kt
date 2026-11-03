@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_full_text_index
 
-import gog.my_project.data_base.migration.api.interfaces.create_full_text_index.IMigrationCreateFullTextIndexApi
-import gog.my_project.data_base.migration.builder.ast.create_full_text_index.MigrationCreateFullTextIndexBuilder
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.api.interfaces.create_full_text_index.ISchemaCreateFullTextIndexApi
+import gog.my_project.data_base_schema.builder.ast.create_full_text_index.SchemaCreateFullTextIndexBuilder
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
 
@@ -13,8 +13,8 @@ class A1ExampleCreateFullTextIndexV1(
     private val index: String = "ft_posts_title_body",
     private val columns: List<String> = listOf("title", "body"),
 ) {
-    fun migration(): IMigrationCreateFullTextIndexApi =
-        MigrationCreateFullTextIndexBuilder().apply {
+    fun migration(): ISchemaCreateFullTextIndexApi =
+        SchemaCreateFullTextIndexBuilder().apply {
             tableName(table)
             name(index)
             columns(*this@A1ExampleCreateFullTextIndexV1.columns.toTypedArray())

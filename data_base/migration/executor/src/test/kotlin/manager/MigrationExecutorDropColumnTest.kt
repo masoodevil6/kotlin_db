@@ -6,9 +6,9 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationDropColumnApi
-import gog.my_project.data_base.migration.ast.interfaces.drop_column.IMigrationDropColumnAst
-import gog.my_project.data_base.migration.ast.schema.drop_column.MigrationDropColumnAst
+import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
+import gog.my_project.data_base_schema.ast.interfaces.drop_column.ISchemaDropColumnAst
+import gog.my_project.data_base_schema.ast.schema.drop_column.SchemaDropColumnAst
 import java.sql.SQLException
 import java.lang.reflect.Proxy
 import kotlin.test.Test
@@ -227,26 +227,26 @@ class MigrationExecutorDropColumnTest {
         ) = error("Unexpected CRUD execution while testing DROP COLUMN")
     }
 
-    private fun migrationForTest(ifExists: Boolean = false): IMigrationDropColumnApi =
-        object : IMigrationDropColumnApi {
-            override var ast: IMigrationDropColumnAst = MigrationDropColumnAst().apply {
+    private fun migrationForTest(ifExists: Boolean = false): ISchemaDropColumnApi =
+        object : ISchemaDropColumnApi {
+            override var ast: ISchemaDropColumnAst = SchemaDropColumnAst().apply {
                 metadata.tableName = "users"
                 metadata.name = "display_name"
                 metadata.ifExists = ifExists
             }
             override var params: MutableList<SqlParameter<*>> = mutableListOf()
 
-            override fun tableName(table: String): IMigrationDropColumnApi {
+            override fun tableName(table: String): ISchemaDropColumnApi {
                 ast.metadata.tableName = table
                 return this
             }
 
-            override fun name(name: String): IMigrationDropColumnApi {
+            override fun name(name: String): ISchemaDropColumnApi {
                 ast.metadata.name = name
                 return this
             }
 
-            override fun ifExists(): IMigrationDropColumnApi {
+            override fun ifExists(): ISchemaDropColumnApi {
                 ast.metadata.ifExists = true
                 return this
             }

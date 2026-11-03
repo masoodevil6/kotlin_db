@@ -5,7 +5,7 @@ import gog.my_project.data_base.core.query.dialect.DialectQuery
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.builder.ast.create_spatial_index.MigrationCreateSpatialIndexBuilder
+import gog.my_project.data_base_schema.builder.ast.create_spatial_index.SchemaCreateSpatialIndexBuilder
 import gog.my_project.tools.scripts.StringTools
 import java.sql.ResultSet
 import kotlin.test.assertEquals
@@ -67,7 +67,7 @@ class MigrationExecutorCreateSpatialIndexTest {
         assertEquals(0, manager.executeSelectCalls)
     }
 
-    private fun spatialIndex() = MigrationCreateSpatialIndexBuilder().apply {
+    private fun spatialIndex() = SchemaCreateSpatialIndexBuilder().apply {
         tableName("places")
         name("spx_places_geom")
         column("geom")

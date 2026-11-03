@@ -5,24 +5,23 @@ import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base.manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.api.interfaces.IMigrationApi
-import gog.my_project.data_base.migration.api.interfaces.add_column.IMigrationAddColumnApi
-import gog.my_project.data_base.migration.api.interfaces.drop_column.IMigrationDropColumnApi
-import gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi
-import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
-import gog.my_project.data_base.migration.api.interfaces.rename_table.IMigrationRenameTableApi
-import gog.my_project.data_base.migration.api.interfaces.rename_column.IMigrationRenameColumnApi
-import gog.my_project.data_base.migration.api.interfaces.modify_column.IMigrationModifyColumnApi
-import gog.my_project.data_base.migration.api.interfaces.create_index.IMigrationCreateIndexApi
-import gog.my_project.data_base.migration.api.interfaces.drop_index.IMigrationDropIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_unique_index.IMigrationCreateUniqueIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_multi_column_index.IMigrationCreateMultiColumnIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_full_text_index.IMigrationCreateFullTextIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_spatial_index.IMigrationCreateSpatialIndexApi
-import gog.my_project.data_base.migration.api.interfaces.create_foreign_key.IMigrationCreateForeignKeyApi
-import gog.my_project.data_base.migration.api.interfaces.drop_foreign_key.IMigrationDropForeignKeyApi
-import gog.my_project.data_base.migration.ast.interfaces.IMigrationAst
-import gog.my_project.data_base.migration.renderer.manager.DialectSelector
+import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
+import gog.my_project.data_base_schema.api.interfaces.add_column.ISchemaAddColumnApi
+import gog.my_project.data_base_schema.api.interfaces.create_foreign_key.ISchemaCreateForeignKeyApi
+import gog.my_project.data_base_schema.api.interfaces.create_full_text_index.ISchemaCreateFullTextIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_index.ISchemaCreateIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_multi_column_index.ISchemaCreateMultiColumnIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_spatial_index.ISchemaCreateSpatialIndexApi
+import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
+import gog.my_project.data_base_schema.api.interfaces.create_unique_index.ISchemaCreateUniqueIndexApi
+import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
+import gog.my_project.data_base_schema.api.interfaces.drop_foreign_key.ISchemaDropForeignKeyApi
+import gog.my_project.data_base_schema.api.interfaces.drop_index.ISchemaDropIndexApi
+import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
+import gog.my_project.data_base_schema.api.interfaces.modify_column.ISchemaModifyColumnApi
+import gog.my_project.data_base_schema.api.interfaces.rename_column.ISchemaRenameColumnApi
+import gog.my_project.data_base_schema.api.interfaces.rename_table.ISchemaRenameTableApi
+import gog.my_project.data_base_schema.renderer.manager.DialectSelector
 import gog.my_project.tools.scripts.StringTools
 
 
@@ -31,93 +30,101 @@ interface IMigrationExecutor {
     val queryExecutor: IQueryExecute
     val dialectSelector: DialectSelector
 
+    /** Executes migration operations inside one shared Operation transaction when supported. */
+    fun <T> transaction(block: (tx: IMigrationExecutor) -> ExecuteResult<T>): ExecuteResult<T> =
+        ExecuteResult.Failure(
+            UnsupportedOperationException(
+                "${this::class.qualifiedName} does not support transaction-scoped migration execution",
+            ),
+        )
+
     //// [EXECUTE]: create table | alter table | drop table
     fun execute(
-        queryBuilder: IMigrationRenderCreateTableApi,
+        queryBuilder: ISchemaRenderCreateTableApi,
         blockExecute:    (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationDropTableApi,
+        queryBuilder: ISchemaDropTableApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationRenameTableApi,
+        queryBuilder: ISchemaRenameTableApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationAddColumnApi,
+        queryBuilder: ISchemaAddColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationRenameColumnApi,
+        queryBuilder: ISchemaRenameColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationDropColumnApi,
+        queryBuilder: ISchemaDropColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationModifyColumnApi,
+        queryBuilder: ISchemaModifyColumnApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationCreateIndexApi,
+        queryBuilder: ISchemaCreateIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationDropIndexApi,
+        queryBuilder: ISchemaDropIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationCreateUniqueIndexApi,
+        queryBuilder: ISchemaCreateUniqueIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationCreateMultiColumnIndexApi,
+        queryBuilder: ISchemaCreateMultiColumnIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationCreateFullTextIndexApi,
+        queryBuilder: ISchemaCreateFullTextIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationCreateSpatialIndexApi,
+        queryBuilder: ISchemaCreateSpatialIndexApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null
     )
 
     fun execute(
-        queryBuilder: IMigrationCreateForeignKeyApi,
+        queryBuilder: ISchemaCreateForeignKeyApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
     )
 
     fun execute(
-        queryBuilder: IMigrationDropForeignKeyApi,
+        queryBuilder: ISchemaDropForeignKeyApi,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
     )
@@ -125,18 +132,18 @@ interface IMigrationExecutor {
 
 
     //// [TOOLS]
-    fun <Ast : IMigrationAst<*>, Api : IMigrationApi<Ast>> executeOut(
-        migrationBuilder:    Api,
+    fun executeOut(
+        schemaBuilder: ISchemaApi<*>,
         blockQueryInfo:  ((query: String? , paramsMap: MutableMap<String , Any?>) -> Unit)? = null,
         blockResult:     (db: IQueryExecute ,builtQuery: BuiltQuery) -> Unit
     ){
         val db = queryExecutor
 
-        val dialect  = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
+        val dialect = dialectSelector.select(DefaultDatabaseConfig.config.dialect)
 
-        val query = dialect.render(migrationBuilder.ast) ?: throw IllegalStateException("rendered sql is null")
+        val query = dialect.render(schemaBuilder.ast) ?: throw IllegalStateException("rendered sql is null")
 
-        val params: MutableList<SqlParameter<*>> = migrationBuilder.params;
+        val params = schemaBuilder.params
 
         if (blockQueryInfo != null){
             val paramsMap: MutableMap<String , Any?> = params.associate { it -> it.name to it.value }.toMutableMap()

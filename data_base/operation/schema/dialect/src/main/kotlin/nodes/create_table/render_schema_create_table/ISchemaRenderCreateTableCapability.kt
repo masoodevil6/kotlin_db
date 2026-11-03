@@ -1,0 +1,8 @@
+package gog.my_project.data_base_schema.dialect.nodes.create_table.render_schema_create_table
+
+import gog.my_project.data_base_schema.ast.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableAst
+import gog.my_project.data_base_schema.dialect.data_class.create_table.render_schema_create_table.SchemaRenderCreateTableData
+import gog.my_project.data_base_schema.dialect.interfaces.IAstRenderer
+
+interface ISchemaRenderCreateTableCapability: IAstRenderer<ISchemaRenderCreateTableAst, SchemaRenderCreateTableData> {
+}

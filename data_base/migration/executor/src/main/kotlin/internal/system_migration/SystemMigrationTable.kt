@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.executor.internal.system_migration
 
-import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
-import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.VarcharType
+import gog.my_project.data_base_schema.builder.ast.create_table.render_schema_create_table.SchemaRenderCreateTableBuilder
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
 
 
 
@@ -12,7 +12,7 @@ internal object SystemMigrationTable {
     const val NAME = "system_migration"
     private const val MIGRATION_ID_LENGTH = 255
 
-    fun definition() = MigrationRenderCreateTableBuilder().apply {
+    fun definition() = SchemaRenderCreateTableBuilder().apply {
         table { tableName(NAME) }
         addColumn {
             name("id")

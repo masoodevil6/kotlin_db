@@ -1,0 +1,14 @@
+package gog.my_project.data_base_query.ast.interfaces.insert_interface.query_render_insert
+import gog.my_project.data_base_query.ast.metadata.insert.query_render_insert.QueryRenderInsertAstMetadata
+
+import gog.my_project.data_base_query.ast.interfaces.IQueryAst
+import gog.my_project.data_base_query.ast.interfaces.insert_interface.columns_insert.IQueryColumnInsertAst
+import gog.my_project.data_base_query.ast.interfaces.select_interface.table.IQueryTableAst
+
+
+interface IQueryRenderInsertAst : IQueryAst<QueryRenderInsertAstMetadata>{
+
+    var table:   IQueryTableAst? ;
+    var columns: MutableList<IQueryColumnInsertAst>;
+
+}

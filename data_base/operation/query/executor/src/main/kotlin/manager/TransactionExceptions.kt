@@ -1,0 +1,9 @@
+package gog.my_project.data_base_query.executor.manager
+
+import gog.my_project.data_base_operation.executor.transaction.OperationTransactionCommitException
+import gog.my_project.data_base_operation.executor.transaction.OperationTransactionCompletionError
+import gog.my_project.data_base_operation.executor.transaction.OperationTransactionCompletionException
+
+typealias TransactionCommitException = OperationTransactionCommitException
+typealias TransactionCompletionException = OperationTransactionCompletionException
+typealias TransactionCompletionError = OperationTransactionCompletionError

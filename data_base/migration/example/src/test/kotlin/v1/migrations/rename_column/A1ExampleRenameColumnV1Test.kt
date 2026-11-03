@@ -2,11 +2,11 @@ package gog.my_project.data_base.migration.example.v1.migrations.rename_column
 
 import gog.my_project.data_base.core.data_base.MARIA_DB
 import gog.my_project.data_base.core.data_base.MYSQL
-import gog.my_project.data_base.migration.ast.schema.rename_column.MigrationRenameColumnAst
-import gog.my_project.data_base.migration.builder.ast.rename_column.MigrationRenameColumnBuilder
-import gog.my_project.data_base.migration.dialect.nodes.rename_column.RenameColumnSqlStrategy
-import gog.my_project.data_base.migration.renderer.dialects.MariaDbDialect
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.schema.rename_column.SchemaRenameColumnAst
+import gog.my_project.data_base_schema.builder.ast.rename_column.SchemaRenameColumnBuilder
+import gog.my_project.data_base_schema.dialect.nodes.rename_column.RenameColumnSqlStrategy
+import gog.my_project.data_base_schema.renderer.dialects.MariaDbDialect
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -40,7 +40,7 @@ class A1ExampleRenameColumnV1Test {
 
     @Test
     fun rendersRenameOnlyWithEscapedIdentifiers() {
-        val migration = MigrationRenameColumnBuilder().apply {
+        val migration = SchemaRenameColumnBuilder().apply {
             tableName(" user`data ")
             name(" display`name ")
             to(" full`name ")
@@ -59,28 +59,28 @@ class A1ExampleRenameColumnV1Test {
     @Test
     fun rendererLeavesEqualAndBlankIdentifiersForDatabaseValidation() {
         val dialect = MySqlDialect()
-        val equalSourceFirst = MigrationRenameColumnBuilder().apply { tableName("users"); name(" display_name "); to("display_name") }
-        val equalTargetFirst = MigrationRenameColumnBuilder().apply { tableName("users"); to("display_name"); name(" display_name ") }
+        val equalSourceFirst = SchemaRenameColumnBuilder().apply { tableName("users"); name(" display_name "); to("display_name") }
+        val equalTargetFirst = SchemaRenameColumnBuilder().apply { tableName("users"); to("display_name"); name(" display_name ") }
         assertEquals("ALTER TABLE `users` RENAME COLUMN `display_name` TO `display_name`", dialect.render(equalSourceFirst.ast))
         assertEquals("ALTER TABLE `users` RENAME COLUMN `display_name` TO `display_name`", dialect.render(equalTargetFirst.ast))
         assertEquals(
             "ALTER TABLE `` RENAME COLUMN `source` TO `target`",
-            dialect.render(MigrationRenameColumnBuilder().apply { tableName("   "); name("source"); to("target") }.ast),
+            dialect.render(SchemaRenameColumnBuilder().apply { tableName("   "); name("source"); to("target") }.ast),
         )
         assertEquals(
             "ALTER TABLE `users` RENAME COLUMN `` TO `target`",
-            dialect.render(MigrationRenameColumnBuilder().apply { tableName("users"); name("  "); to("target") }.ast),
+            dialect.render(SchemaRenameColumnBuilder().apply { tableName("users"); name("  "); to("target") }.ast),
         )
         assertEquals(
             "ALTER TABLE `users` RENAME COLUMN `source` TO ``",
-            dialect.render(MigrationRenameColumnBuilder().apply { tableName("users"); name("source"); to("  ") }.ast),
+            dialect.render(SchemaRenameColumnBuilder().apply { tableName("users"); name("source"); to("  ") }.ast),
         )
     }
 
     @Test
     fun rendererPassesEqualNamesButRequiresTheSourceColumn() {
         val dialect = MySqlDialect()
-        val ast = MigrationRenameColumnAst().apply {
+        val ast = SchemaRenameColumnAst().apply {
             metadata.tableName = "users"; metadata.name = " email "; metadata.to = "email"
         }
         assertEquals("ALTER TABLE `users` RENAME COLUMN ` email ` TO `email`", dialect.render(ast))

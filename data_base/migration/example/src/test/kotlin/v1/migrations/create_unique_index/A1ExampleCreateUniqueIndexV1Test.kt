@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_unique_index
 
-import gog.my_project.data_base.migration.ast.schema.create_unique_index.MigrationCreateUniqueIndexAst
-import gog.my_project.data_base.migration.builder.ast.create_unique_index.MigrationCreateUniqueIndexBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.schema.create_unique_index.SchemaCreateUniqueIndexAst
+import gog.my_project.data_base_schema.builder.ast.create_unique_index.SchemaCreateUniqueIndexBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -23,7 +23,7 @@ class A1ExampleCreateUniqueIndexV1Test {
 
     @Test
     fun trimsWhitespaceAndPreservesIdentifierCasing() {
-        val migration = MigrationCreateUniqueIndexBuilder().apply {
+        val migration = SchemaCreateUniqueIndexBuilder().apply {
             tableName("  Users  ")
             name("  Uq_User_Email  ")
             column("  Email  ")
@@ -40,7 +40,7 @@ class A1ExampleCreateUniqueIndexV1Test {
 
     @Test
     fun primaryIsNotSpecialCasedAndIsQuotedLikeAnyIndexName() {
-        val migration = MigrationCreateUniqueIndexBuilder().apply {
+        val migration = SchemaCreateUniqueIndexBuilder().apply {
             tableName("users")
             name("PRIMARY")
             column("email")
@@ -58,18 +58,18 @@ class A1ExampleCreateUniqueIndexV1Test {
     fun rendersBlankValuesAndRejectsMissingDirectAstColumn() {
         assertEquals(
             "CREATE UNIQUE INDEX `uq` ON `` (`email`)",
-            dialect.render(MigrationCreateUniqueIndexBuilder().apply { tableName(" "); name("uq"); column("email") }.ast),
+            dialect.render(SchemaCreateUniqueIndexBuilder().apply { tableName(" "); name("uq"); column("email") }.ast),
         )
         assertEquals(
             "CREATE UNIQUE INDEX `` ON `users` (`email`)",
-            dialect.render(MigrationCreateUniqueIndexBuilder().apply { tableName("users"); name(" "); column("email") }.ast),
+            dialect.render(SchemaCreateUniqueIndexBuilder().apply { tableName("users"); name(" "); column("email") }.ast),
         )
         assertEquals(
             "CREATE UNIQUE INDEX `uq` ON `users` (``)",
-            dialect.render(MigrationCreateUniqueIndexBuilder().apply { tableName("users"); name("uq"); column(" ") }.ast),
+            dialect.render(SchemaCreateUniqueIndexBuilder().apply { tableName("users"); name("uq"); column(" ") }.ast),
         )
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationCreateUniqueIndexAst().apply {
+            dialect.render(SchemaCreateUniqueIndexAst().apply {
                 metadata.tableName = "users"
                 metadata.indexName = "uq_users_email"
             })
@@ -78,7 +78,7 @@ class A1ExampleCreateUniqueIndexV1Test {
 
     @Test
     fun quotesReservedIdentifiersEscapesBackticksAndAddsNoOptions() {
-        val sql = MigrationCreateUniqueIndexBuilder().apply {
+        val sql = SchemaCreateUniqueIndexBuilder().apply {
             tableName("order")
             name("select`email")
             column("user`email")
@@ -92,8 +92,8 @@ class A1ExampleCreateUniqueIndexV1Test {
 
     @Test
     fun setterCallOrderDoesNotAffectSql() {
-        val first = MigrationCreateUniqueIndexBuilder().apply { column("email"); name("uq_users_email"); tableName("users") }
-        val second = MigrationCreateUniqueIndexBuilder().apply { tableName("users"); name("uq_users_email"); column("email") }
+        val first = SchemaCreateUniqueIndexBuilder().apply { column("email"); name("uq_users_email"); tableName("users") }
+        val second = SchemaCreateUniqueIndexBuilder().apply { tableName("users"); name("uq_users_email"); column("email") }
 
         assertEquals(dialect.render(second.ast), dialect.render(first.ast))
     }

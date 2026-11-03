@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_column
 
-import gog.my_project.data_base.migration.ast.schema.drop_column.MigrationDropColumnAst
-import gog.my_project.data_base.migration.builder.ast.drop_column.MigrationDropColumnBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.schema.drop_column.SchemaDropColumnAst
+import gog.my_project.data_base_schema.builder.ast.drop_column.SchemaDropColumnBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -34,7 +34,7 @@ class A1ExampleDropColumnV1Test {
 
     @Test
     fun builderTrimsAndStoresIdentifiersInAst() {
-        val migration = MigrationDropColumnBuilder().apply {
+        val migration = SchemaDropColumnBuilder().apply {
             tableName("  users  ")
             name("  email  ")
         }
@@ -46,19 +46,19 @@ class A1ExampleDropColumnV1Test {
 
     @Test
     fun rendersBlankTableNameForDatabaseValidation() {
-        val migration = MigrationDropColumnBuilder().apply { tableName("   "); name("email") }
+        val migration = SchemaDropColumnBuilder().apply { tableName("   "); name("email") }
         assertEquals("ALTER TABLE `` DROP COLUMN `email`", MySqlDialect().render(migration.ast))
     }
 
     @Test
     fun rendersBlankColumnNameForDatabaseValidation() {
-        val migration = MigrationDropColumnBuilder().apply { tableName("users"); name("   ") }
+        val migration = SchemaDropColumnBuilder().apply { tableName("users"); name("   ") }
         assertEquals("ALTER TABLE `users` DROP COLUMN ``", MySqlDialect().render(migration.ast))
     }
 
     @Test
     fun defersMissingTableNameToRenderer() {
-        val migration = MigrationDropColumnBuilder().apply { name("email") }
+        val migration = SchemaDropColumnBuilder().apply { name("email") }
         assertFailsWith<IllegalArgumentException> {
             MySqlDialect().render(migration.ast)
         }
@@ -66,7 +66,7 @@ class A1ExampleDropColumnV1Test {
 
     @Test
     fun defersMissingColumnNameToRenderer() {
-        val migration = MigrationDropColumnBuilder().apply { tableName("users") }
+        val migration = SchemaDropColumnBuilder().apply { tableName("users") }
         assertFailsWith<IllegalArgumentException> {
             MySqlDialect().render(migration.ast)
         }
@@ -74,7 +74,7 @@ class A1ExampleDropColumnV1Test {
 
     @Test
     fun rendererRejectsIncompleteAstBeforeRendering() {
-        val ast = MigrationDropColumnAst().apply {
+        val ast = SchemaDropColumnAst().apply {
             metadata.tableName = "users"
         }
 
@@ -85,7 +85,7 @@ class A1ExampleDropColumnV1Test {
 
     @Test
     fun escapesTableAndColumnIdentifiers() {
-        val migration = MigrationDropColumnBuilder().apply {
+        val migration = SchemaDropColumnBuilder().apply {
             tableName("user`data")
             name("display`name")
         }

@@ -1,0 +1,35 @@
+package gog.my_project.data_base_query.api.interfaces.api.select_api.withs_item
+
+import gog.my_project.data_base_query.api.interfaces.api.IQueryApi
+import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base_query.api.interfaces.cte.ICte
+import gog.my_project.data_base_query.api.interfaces.relations.Cte
+import gog.my_project.data_base_query.ast.interfaces.select_interface.withs_item.IQueryWithsItemAst
+
+interface IQueryWithsItemApi : IQueryApi<IQueryWithsItemAst> {
+
+    //fun with(with : ICte): IQueryWithsItemApi;
+
+    /// TODO: REMOVE
+    fun with(
+        withName: String,
+        withClass : ICte
+    ): IQueryWithsItemApi;
+
+
+
+    fun with(cte: Cte): IQueryWithsItemApi;
+
+    fun with(
+        withName: String,
+        cte: Cte
+    ): IQueryWithsItemApi;
+
+
+
+    fun with(
+        withName: String,
+        blockWith: IQueryRenderSelectApi.() -> Unit
+    ): IQueryWithsItemApi;
+
+}

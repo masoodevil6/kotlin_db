@@ -1,0 +1,111 @@
+package gog.my_project.data_base_query.example.v2.queries.select
+
+import gog.my_project.data_base_query.example.metadata.formatEffectiveQueryMetadata
+import gog.my_project.data_base_query.executor.result.success
+import gog.my_project.data_base_query.executor.result.error
+
+import gog.my_project.data_base_query.example.v2.queries.models.UserModelV2
+import gog.my_project.data_base_query.example.v2.queries.models.UserPhoneModelV2
+import gog.my_project.data_base_query.api.interfaces.api.select_api.query_render_select.IQueryRenderSelectApi
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.example.v2.queries.IExampleV2
+import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
+
+class A1ExampleSelectV2 : IExampleV2<IQueryRenderSelectApi> {
+    override fun query(): IQueryRenderSelectApi = QueryRenderSelectBuilder()
+        .select {
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::id)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::name)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::family)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserModelV2::class)
+                    columnSelector(UserModelV2::age)
+                }
+            }
+            addColumn {
+                column {
+                    tableSelector(UserPhoneModelV2::class)
+                    columnSelector(UserPhoneModelV2::phone)
+                }
+            }
+        }
+        .from { model(UserModelV2::class) }
+        .joins {
+            addJoin {
+                innerJoin()
+                table { table(UserPhoneModelV2::class) }
+                condition {
+                    logicalOn()
+                    addCondition {
+                        sideSelector {
+                            tableSelector(UserModelV2::class)
+                            columnSelector(UserModelV2::id)
+                        }
+                        operationEqual()
+                        sideValueColumn {
+                            tableSelector(UserPhoneModelV2::class)
+                            columnSelector(UserPhoneModelV2::userId)
+                        }
+                    }
+                }
+            }
+        }
+        .where {
+            conditions {
+                addCondition {
+                    logicalAnd()
+                    sideSelector {
+                        tableSelector("uu"); columnSelector(UserModelV2::class, UserModelV2::id)
+                    }
+                    operationEqual()
+                    sideValueParam {
+                        paramName("id1")
+                        paramValue(1)
+                    }
+                }
+            }
+        }
+
+    override fun execute(queryManager: IQueryBuilderExecutor) {
+        val query = query()
+
+        queryManager
+            .queryBuilder(query)
+            .sql { (queryText, params) ->
+                println("\n=============================================\nV2-Ex1: Model-backed select with phone join\nquery: $queryText\nparams: $params")
+            }
+            .details { metadata ->
+                println(formatEffectiveQueryMetadata(metadata))
+            }
+            .execute()
+            .success { rows ->
+                rows.forEach { row ->
+                    println(
+                        "row: user_id=${row.getValue(UserModelV2::id)}, " +
+                            "user_name=${row.getValue(UserModelV2::name)}, " +
+                            "user_family=${row.getValue(UserModelV2::family)}, " +
+                            "user_age=${row.getValue(UserModelV2::age)}, " +
+                            "user_phone=${row.getValue(UserPhoneModelV2::phone)}",
+                    )
+                }
+                rows
+            }
+            .error { failure -> println("error: $failure") }
+    }
+}

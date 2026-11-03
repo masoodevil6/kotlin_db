@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_full_text_index
 
-import gog.my_project.data_base.migration.ast.schema.create_full_text_index.MigrationCreateFullTextIndexAst
-import gog.my_project.data_base.migration.builder.ast.create_full_text_index.MigrationCreateFullTextIndexBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.ast.schema.create_full_text_index.SchemaCreateFullTextIndexAst
+import gog.my_project.data_base_schema.builder.ast.create_full_text_index.SchemaCreateFullTextIndexBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -24,7 +24,7 @@ class A1ExampleCreateFullTextIndexV1Test {
 
     @Test
     fun acceptsSingleColumnAndPreservesTrimmedCasing() {
-        val migration = MigrationCreateFullTextIndexBuilder().apply {
+        val migration = SchemaCreateFullTextIndexBuilder().apply {
             tableName(" Posts ")
             name(" Ft_Posts_Title ")
             columns(" Title ")
@@ -39,7 +39,7 @@ class A1ExampleCreateFullTextIndexV1Test {
 
     @Test
     fun laterColumnsCallReplacesEarlierListAndKeepsOrder() {
-        val migration = MigrationCreateFullTextIndexBuilder().apply {
+        val migration = SchemaCreateFullTextIndexBuilder().apply {
             tableName("posts")
             name("ft_posts_content")
             columns("old_title", "old_body")
@@ -56,22 +56,22 @@ class A1ExampleCreateFullTextIndexV1Test {
     @Test
     fun rendersBlankAndDuplicateColumnsAndKeepsEmptyListAsStructuralError() {
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationCreateFullTextIndexBuilder().apply { tableName("posts"); name("ft_posts") }.ast)
+            dialect.render(SchemaCreateFullTextIndexBuilder().apply { tableName("posts"); name("ft_posts") }.ast)
         }
         assertEquals(
             "CREATE FULLTEXT INDEX `ft_posts` ON `posts` (``)",
-            dialect.render(MigrationCreateFullTextIndexBuilder().apply { tableName("posts"); name("ft_posts"); columns(" ") }.ast),
+            dialect.render(SchemaCreateFullTextIndexBuilder().apply { tableName("posts"); name("ft_posts"); columns(" ") }.ast),
         )
         assertEquals(
             "CREATE FULLTEXT INDEX `ft_posts` ON `posts` (`title`, `TITLE`)",
-            dialect.render(MigrationCreateFullTextIndexBuilder().apply { tableName("posts"); name("ft_posts"); columns("title", " TITLE ") }.ast),
+            dialect.render(SchemaCreateFullTextIndexBuilder().apply { tableName("posts"); name("ft_posts"); columns("title", " TITLE ") }.ast),
         )
     }
 
     @Test
     fun rendererValidatesDirectAstBeforeBuildingSql() {
         assertFailsWith<IllegalArgumentException> {
-            dialect.render(MigrationCreateFullTextIndexAst().apply {
+            dialect.render(SchemaCreateFullTextIndexAst().apply {
                 metadata.tableName = "posts"
                 metadata.indexName = "ft_posts"
                 metadata.columnNames = emptyList()
@@ -79,7 +79,7 @@ class A1ExampleCreateFullTextIndexV1Test {
         }
         assertEquals(
             "CREATE FULLTEXT INDEX `ft_posts` ON `posts` (`title`, ` TITLE `)",
-            dialect.render(MigrationCreateFullTextIndexAst().apply {
+            dialect.render(SchemaCreateFullTextIndexAst().apply {
                 metadata.tableName = "posts"
                 metadata.indexName = "ft_posts"
                 metadata.columnNames = listOf("title", " TITLE ")
@@ -89,7 +89,7 @@ class A1ExampleCreateFullTextIndexV1Test {
 
     @Test
     fun quotesEscapesAndDoesNotAddOtherIndexOptions() {
-        val sql = MigrationCreateFullTextIndexBuilder().apply {
+        val sql = SchemaCreateFullTextIndexBuilder().apply {
             tableName("order")
             name("ft`posts")
             columns("select", "body`text")

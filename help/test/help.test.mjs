@@ -81,8 +81,8 @@ test('loads the real migration Help Definition without changing its Gradle test 
 
 test('executor transaction MySQL Help accepts the exact allowlisted schema and prefixed test schemas', () => {
   const repositoryRoot = path.resolve(import.meta.dirname, '../..');
-  const projectDir = path.join(repositoryRoot, 'data_base', 'query', 'executor');
-  const loaded = loadHelpDefinition({ projectPath: ':data_base:query:executor', projectDir });
+  const projectDir = path.join(repositoryRoot, 'data_base', 'operation', 'query', 'executor');
+  const loaded = loadHelpDefinition({ projectPath: ':data_base:operation:query:executor', projectDir });
   const integrationTest = loaded.tests.find((item) => item.id === 'query-executor-transaction-mysql-integration');
   assert.ok(integrationTest);
 
@@ -109,8 +109,8 @@ test('executor transaction MySQL Help accepts the exact allowlisted schema and p
 
 test('Query Example helper exposes V3.1 and passes it to Gradle as the version property', async () => {
   const repositoryRoot = path.resolve(import.meta.dirname, '../..');
-  const projectDir = path.join(repositoryRoot, 'data_base', 'query', 'example');
-  const loaded = loadHelpDefinition({ projectPath: ':data_base:query:example', projectDir });
+  const projectDir = path.join(repositoryRoot, 'data_base', 'operation', 'query', 'example');
+  const loaded = loadHelpDefinition({ projectPath: ':data_base:operation:query:example', projectDir });
   const runAction = loaded.module.actions.find((action) => action.id === 'run');
   const versionParameter = runAction.parameters.find((parameter) => parameter.id === 'version');
 
@@ -123,7 +123,7 @@ test('Query Example helper exposes V3.1 and passes it to Gradle as the version p
     action: runAction,
     bindings,
     launchProcess: async (_command, args, options) => {
-      assert.ok(args.includes(':data_base:query:example:run'));
+      assert.ok(args.includes(':data_base:operation:query:example:run'));
       gradleEnvironment = options.env;
       return { code: 0, stdout: '', stderr: '' };
     },

@@ -12,10 +12,10 @@ import gog.my_project.data_base.migration.api.interfaces.MigrationIdentity
 import gog.my_project.data_base.migration.api.interfaces.MigrationRegistration
 import gog.my_project.data_base.migration.api.interfaces.RegisteredMigration
 import gog.my_project.data_base.migration.api.interfaces.SingleMigration
-import gog.my_project.data_base.migration.api.interfaces.drop_table.IMigrationDropTableApi
+import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
 import gog.my_project.data_base.migration.builder.migration
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
-import gog.my_project.data_base.migration.renderer.manager.DialectSelector
+import gog.my_project.data_base_schema.renderer.manager.DialectSelector
 import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.util.ArrayDeque
@@ -317,7 +317,7 @@ class MigrationMigratorTest {
 
     private fun FakeMigrationExecutor.operationTableNames(): List<String> =
         executedOperations.map { operation ->
-            assertIs<IMigrationDropTableApi>(operation).ast.metadata.tableName.orEmpty()
+            assertIs<ISchemaDropTableApi>(operation).ast.metadata.tableName.orEmpty()
         }
 
     data class Row(val id: Int, val migration: String, val batch: Int)
@@ -381,10 +381,15 @@ class MigrationMigratorTest {
         val instance: IMigrationExecutor = Proxy.newProxyInstance(
             IMigrationExecutor::class.java.classLoader,
             arrayOf(IMigrationExecutor::class.java),
-        ) { _, method, args ->
+        ) { proxy, method, args ->
             when (method.name) {
                 "getQueryExecutor" -> database
                 "getDialectSelector" -> DialectSelector()
+                "transaction" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val block = args!![0] as (IMigrationExecutor) -> ExecuteResult<Any?>
+                    block(proxy as IMigrationExecutor)
+                }
                 "executeOut" -> {
                     executeOutCalled = true
                     error("MigrationMigrator must use typed execute overloads, not executeOut")
@@ -394,7 +399,7 @@ class MigrationMigratorTest {
                     val operation = args!![0]
                     @Suppress("UNCHECKED_CAST")
                     val callback = args[1] as (ExecuteResult<Boolean>) -> Unit
-                    if (bootstrapNext && operation is gog.my_project.data_base.migration.api.interfaces.create_table.render_migration_create_table.IMigrationRenderCreateTableApi) {
+                    if (bootstrapNext && operation is gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi) {
                         bootstrapNext = false
                         callback(bootstrapResult)
                     } else {

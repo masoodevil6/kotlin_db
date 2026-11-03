@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_unique_index
 
-import gog.my_project.data_base.migration.api.interfaces.create_unique_index.IMigrationCreateUniqueIndexApi
-import gog.my_project.data_base.migration.builder.ast.create_unique_index.MigrationCreateUniqueIndexBuilder
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.api.interfaces.create_unique_index.ISchemaCreateUniqueIndexApi
+import gog.my_project.data_base_schema.builder.ast.create_unique_index.SchemaCreateUniqueIndexBuilder
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
 
@@ -13,8 +13,8 @@ class A1ExampleCreateUniqueIndexV1(
     private val index: String = "uq_users_email",
     private val column: String = "email",
 ) {
-    fun migration(): IMigrationCreateUniqueIndexApi =
-        MigrationCreateUniqueIndexBuilder().apply {
+    fun migration(): ISchemaCreateUniqueIndexApi =
+        SchemaCreateUniqueIndexBuilder().apply {
             tableName(table)
             name(index)
             column(column)

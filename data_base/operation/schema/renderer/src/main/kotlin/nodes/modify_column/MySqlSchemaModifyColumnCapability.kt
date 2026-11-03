@@ -1,0 +1,88 @@
+package gog.my_project.data_base_schema.renderer.nodes.modify_column
+
+import gog.my_project.data_base_schema.ast.interfaces.modify_column.ColumnNullability
+import gog.my_project.data_base_schema.ast.interfaces.modify_column.DefaultDefinition
+import gog.my_project.data_base_schema.ast.interfaces.modify_column.ISchemaModifyColumnAst
+import gog.my_project.data_base_schema.dialect.data_class.SchemaDataClass
+import gog.my_project.data_base_schema.dialect.interfaces.IRenderContext
+import gog.my_project.data_base_schema.dialect.nodes.modify_column.ISchemaModifyColumnCapability
+import gog.my_project.data_base_schema.params.data_types.BooleanType
+import gog.my_project.data_base_schema.params.data_types.DecimalType
+import gog.my_project.data_base_schema.params.data_types.DateType
+import gog.my_project.data_base_schema.params.data_types.DateTimeType
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.JsonType
+import gog.my_project.data_base_schema.params.data_types.SchemaColumnDataType
+import gog.my_project.data_base_schema.params.data_types.TimeType
+import gog.my_project.data_base_schema.params.data_types.TimestampType
+import gog.my_project.data_base_schema.params.data_types.TextType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
+
+class MySqlSchemaModifyColumnCapability : ISchemaModifyColumnCapability {
+    override fun render(
+        ast: ISchemaModifyColumnAst,
+        ctx: IRenderContext,
+        dataClass: SchemaDataClass?,
+    ): String {
+        val table = requireIdentifier(ast.metadata.tableName, "table")
+        val name = requireIdentifier(ast.metadata.columnName, "column")
+        val columnDataType = requireNotNull(ast.metadata.columnDataType) {
+            "MODIFY COLUMN requires a data type"
+        }
+        val typeSql = renderType(columnDataType)
+        val parts = mutableListOf(quoteIdentifier(name), typeSql)
+        parts += when (requireNotNull(ast.metadata.nullability) {
+            "MODIFY COLUMN requires explicit nullability"
+        }) {
+            ColumnNullability.NULL -> "NULL"
+            ColumnNullability.NOT_NULL -> "NOT NULL"
+        }
+        when (val default = requireNotNull(ast.metadata.defaultDefinition) {
+            "MODIFY COLUMN requires a default definition"
+        }) {
+            DefaultDefinition.NoDefaultClause -> Unit
+            DefaultDefinition.DefaultNull -> parts += "DEFAULT NULL"
+            is DefaultDefinition.DefaultValue -> {
+                parts += "DEFAULT ${renderDefault(default.value)}"
+            }
+        }
+        if (ast.metadata.autoIncrement) parts += "AUTO_INCREMENT"
+        return "ALTER TABLE ${quoteIdentifier(table)} MODIFY COLUMN ${parts.joinToString(" ")}"
+    }
+
+    private fun renderType(type: SchemaColumnDataType): String = when (type) {
+        is DateType -> "DATE"
+        is TimeType -> renderTemporalType("TIME", type.precision)
+        is DateTimeType -> renderTemporalType("DATETIME", type.precision)
+        is TimestampType -> renderTemporalType("TIMESTAMP", type.precision)
+        is VarcharType -> "VARCHAR(${type.length})"
+        is TextType -> "TEXT"
+        is IntType -> "INT"
+        is BooleanType -> "TINYINT(1)"
+        is DecimalType -> "DECIMAL(${type.precision}, ${type.scale})"
+        is JsonType -> "JSON"
+    }
+
+    private fun renderTemporalType(name: String, precision: Int?): String {
+        require(precision == null || precision in 0..6) {
+            "$name fractional-second precision must be between 0 and 6"
+        }
+        return "$name${precision?.let { "($it)" } ?: ""}"
+    }
+
+    private fun renderDefault(value: Any): String = when (value) {
+        is String -> "'${value.replace("'", "''")}'"
+        is Boolean -> if (value) "1" else "0"
+        is Byte, is Short, is Int, is Long -> value.toString()
+        is Float -> value.toDouble().takeIf(Double::isFinite)?.toString()
+            ?: throw IllegalArgumentException("DEFAULT must be a finite number")
+        is Double -> value.takeIf(Double::isFinite)?.toString()
+            ?: throw IllegalArgumentException("DEFAULT must be a finite number")
+        else -> throw IllegalArgumentException("Unsupported DEFAULT value type: ${value::class.qualifiedName}")
+    }
+
+    private fun requireIdentifier(value: String?, label: String): String =
+        requireNotNull(value) { "MODIFY COLUMN requires a $label name" }
+
+    private fun quoteIdentifier(value: String): String = "`${value.replace("`", "``")}`"
+}

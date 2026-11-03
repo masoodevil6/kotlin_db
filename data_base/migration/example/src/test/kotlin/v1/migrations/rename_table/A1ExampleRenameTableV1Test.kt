@@ -1,7 +1,7 @@
 package gog.my_project.data_base.migration.example.v1.migrations.rename_table
 
-import gog.my_project.data_base.migration.builder.ast.rename_table.MigrationRenameTableBuilder
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.builder.ast.rename_table.SchemaRenameTableBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.Test
@@ -22,7 +22,7 @@ class A1ExampleRenameTableV1Test {
 
     @Test
     fun trimsSourceAndTargetNames() {
-        val migration = MigrationRenameTableBuilder().apply {
+        val migration = SchemaRenameTableBuilder().apply {
             fromTableName("  users  ")
             toTableName("  customers  ")
         }
@@ -35,7 +35,7 @@ class A1ExampleRenameTableV1Test {
 
     @Test
     fun escapesMySqlIdentifiers() {
-        val migration = MigrationRenameTableBuilder().apply {
+        val migration = SchemaRenameTableBuilder().apply {
             fromTableName("old`table")
             toTableName("new`table")
         }
@@ -48,13 +48,13 @@ class A1ExampleRenameTableV1Test {
 
     @Test
     fun rendersBlankSourceNameForDatabaseValidation() {
-        val migration = MigrationRenameTableBuilder().apply { fromTableName("   "); toTableName("customers") }
+        val migration = SchemaRenameTableBuilder().apply { fromTableName("   "); toTableName("customers") }
         assertEquals("RENAME TABLE `` TO `customers`", MySqlDialect().render(migration.ast))
     }
 
     @Test
     fun rendersBlankTargetNameForDatabaseValidation() {
-        val migration = MigrationRenameTableBuilder().apply { fromTableName("users"); toTableName("   ") }
+        val migration = SchemaRenameTableBuilder().apply { fromTableName("users"); toTableName("   ") }
         assertEquals("RENAME TABLE `users` TO ``", MySqlDialect().render(migration.ast))
     }
 

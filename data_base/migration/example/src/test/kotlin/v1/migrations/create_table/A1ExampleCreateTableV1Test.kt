@@ -1,16 +1,16 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_table
 
-import gog.my_project.data_base.migration.ast.interfaces.create_index.IndexMethod
-import gog.my_project.data_base.migration.ast.interfaces.foreign_key.ForeignKeyAction
-import gog.my_project.data_base.migration.builder.ast.create_table.render_migration_create_table.MigrationRenderCreateTableBuilder
+import gog.my_project.data_base_schema.ast.interfaces.create_index.IndexMethod
+import gog.my_project.data_base_schema.ast.interfaces.foreign_key.ForeignKeyAction
+import gog.my_project.data_base_schema.builder.ast.create_table.render_schema_create_table.SchemaRenderCreateTableBuilder
 import gog.my_project.data_base.migration.example.managers.ManagerExampleV1
 import gog.my_project.data_base.migration.example.v1.migrations.create_table_constraints.A1ExampleCreateTableConstraintsV1
 import gog.my_project.data_base.migration.example.v1.migrations.create_table_timestamps.A1ExampleCreateTableTimestampsV1
-import gog.my_project.data_base.migration.params.data_types.DateTimeType
-import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.TextType
-import gog.my_project.data_base.migration.params.data_types.VarcharType
-import gog.my_project.data_base.migration.renderer.dialects.MySqlDialect
+import gog.my_project.data_base_schema.params.data_types.DateTimeType
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.TextType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -55,7 +55,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun ifNotExistsDefaultsToFalseInAst() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("users") }
         }
 
@@ -64,7 +64,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rejectsCreateTableWithoutColumns() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("empty_table") }
         }
 
@@ -75,11 +75,11 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersAutoIncrementWithoutRevalidatingPrimaryKeyRules() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("invalid_table") }
             addColumn {
                 name("id")
-                dataType(gog.my_project.data_base.migration.params.data_types.IntType())
+                dataType(gog.my_project.data_base_schema.params.data_types.IntType())
                 notNull()
                 autoIncrement()
             }
@@ -90,7 +90,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersTableLevelDefinitionsInDslOrderAndKeepsLegacyColumnsFirst() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("orders") }
             addColumn { name("tenant_id"); dataType(IntType()); notNull() }
             addColumn { name("order_id"); dataType(IntType()); notNull() }
@@ -167,7 +167,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun trimsIdentifiersAndPreservesTheirCasing() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("Users") }
             addColumn { name(" Email "); dataType(VarcharType(255)); notNull() }
             unique { name(" UQ_User_Email "); columns(" Email ") }
@@ -184,7 +184,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersRepeatedAndMixedPrimaryKeyDefinitionsForDatabaseValidation() {
-        val twoTablePrimaryKeys = MigrationRenderCreateTableBuilder().apply {
+        val twoTablePrimaryKeys = SchemaRenderCreateTableBuilder().apply {
             table { tableName("invalid_table") }
             addColumn { name("id"); dataType(IntType()); notNull() }
             primaryKey { columns("id") }
@@ -193,7 +193,7 @@ class A1ExampleCreateTableV1Test {
         val repeatedPrimaryKeySql = MySqlDialect().render(twoTablePrimaryKeys.ast).orEmpty()
         assertEquals(2, repeatedPrimaryKeySql.split("PRIMARY KEY").size - 1)
 
-        val mixedPrimaryKeys = MigrationRenderCreateTableBuilder().apply {
+        val mixedPrimaryKeys = SchemaRenderCreateTableBuilder().apply {
             table { tableName("invalid_table") }
             addColumn { name("id"); dataType(IntType()); notNull(); primaryKey() }
             addColumn { name("tenant_id"); dataType(IntType()); notNull() }
@@ -206,7 +206,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun tableLevelPrimaryKeySupportsExistingAutoIncrementColumnSemantics() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("users") }
             addColumn {
                 name("id")
@@ -230,7 +230,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersNullableColumnInTableLevelPrimaryKeyForDatabaseValidation() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("users") }
             addColumn { name("id"); dataType(IntType()); nullable() }
             primaryKey { columns("id") }
@@ -243,14 +243,14 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersBlankAndDuplicateDefinitionColumnsForDatabaseValidation() {
-        val blankColumn = MigrationRenderCreateTableBuilder().apply {
+        val blankColumn = SchemaRenderCreateTableBuilder().apply {
             table { tableName("invalid_table") }
             addColumn { name("id"); dataType(IntType()) }
             index { name("idx_bad"); columns(" ") }
         }
         assertContains(MySqlDialect().render(blankColumn.ast).orEmpty(), "INDEX `idx_bad` (``)")
 
-        val duplicateColumn = MigrationRenderCreateTableBuilder().apply {
+        val duplicateColumn = SchemaRenderCreateTableBuilder().apply {
             table { tableName("invalid_table") }
             addColumn { name("id"); dataType(IntType()) }
             index { name("idx_bad"); columns("id", " ID ") }
@@ -260,7 +260,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun timestampsAndSoftDeletesExpandToNullableDateTimeColumnsInDslOrder() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("posts") }
             addColumn { name("id"); dataType(IntType()); notNull() }
             timestamps()
@@ -290,7 +290,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersTimestampsShorthandAlone() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("events") }
             timestamps()
         }
@@ -306,7 +306,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersSoftDeletesShorthandAlone() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("events") }
             softDeletes()
         }
@@ -321,7 +321,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun shorthandColumnOrderFollowsShorthandCallOrder() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("posts") }
             softDeletes()
             timestamps()
@@ -340,7 +340,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersManualTimestampColumnCollisionsInEitherDslOrder() {
-        val manualBeforeShorthand = MigrationRenderCreateTableBuilder().apply {
+        val manualBeforeShorthand = SchemaRenderCreateTableBuilder().apply {
             table { tableName("posts") }
             addColumn { name("CREATED_AT"); dataType(DateTimeType()) }
             timestamps()
@@ -348,7 +348,7 @@ class A1ExampleCreateTableV1Test {
         val firstSql = MySqlDialect().render(manualBeforeShorthand.ast).orEmpty()
         assertContains(firstSql, "`CREATED_AT` DATETIME NOT NULL")
         assertContains(firstSql, "`created_at` DATETIME NULL")
-        val shorthandBeforeManual = MigrationRenderCreateTableBuilder().apply {
+        val shorthandBeforeManual = SchemaRenderCreateTableBuilder().apply {
             table { tableName("posts") }
             timestamps()
             addColumn { name(" Deleted_At "); dataType(DateTimeType()) }
@@ -361,19 +361,19 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersRepeatedTimestampShorthandsAndBlankColumnName() {
-        val repeatedTimestamps = MigrationRenderCreateTableBuilder().apply { table { tableName("posts") }; timestamps(); timestamps() }
+        val repeatedTimestamps = SchemaRenderCreateTableBuilder().apply { table { tableName("posts") }; timestamps(); timestamps() }
         val repeatedTimestampSql = MySqlDialect().render(repeatedTimestamps.ast).orEmpty()
         assertEquals(2, repeatedTimestampSql.split("`created_at`").size - 1)
         assertEquals(2, repeatedTimestampSql.split("`updated_at`").size - 1)
-        val repeatedSoftDeletes = MigrationRenderCreateTableBuilder().apply { table { tableName("posts") }; softDeletes(); softDeletes() }
+        val repeatedSoftDeletes = SchemaRenderCreateTableBuilder().apply { table { tableName("posts") }; softDeletes(); softDeletes() }
         assertEquals(2, MySqlDialect().render(repeatedSoftDeletes.ast).orEmpty().split("`deleted_at`").size - 1)
-        val blankColumn = MigrationRenderCreateTableBuilder().apply { table { tableName("posts") }; addColumn { name(" "); dataType(IntType()) } }
+        val blankColumn = SchemaRenderCreateTableBuilder().apply { table { tableName("posts") }; addColumn { name(" "); dataType(IntType()) } }
         assertContains(MySqlDialect().render(blankColumn.ast).orEmpty(), "`` INT NOT NULL")
     }
 
     @Test
     fun rendererPreservesCaseInsensitiveDuplicateColumnNamesInDirectAst() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("posts") }
             addColumn { name("created_at"); dataType(DateTimeType()); nullable() }
             addColumn { name("title"); dataType(VarcharType(120)) }
@@ -387,7 +387,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun rendersMismatchedForeignKeyListsForDatabaseValidation() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("orders") }
             addColumn { name("user_id"); dataType(IntType()) }
             foreignKey {
@@ -397,8 +397,8 @@ class A1ExampleCreateTableV1Test {
                 referencesColumns("id")
             }
         }
-        migration.ast.definitions += gog.my_project.data_base.migration.ast.interfaces.create_table.definition.ForeignKeyDefinitionAst(
-            gog.my_project.data_base.migration.ast.metadata.create_table.definition.ForeignKeyDefinitionAstMetadata(
+        migration.ast.definitions += gog.my_project.data_base_schema.ast.interfaces.create_table.definition.ForeignKeyDefinitionAst(
+            gog.my_project.data_base_schema.ast.metadata.create_table.definition.ForeignKeyDefinitionAstMetadata(
                 constraintName = "fk_bad",
                 columnNames = listOf("user_id"),
                 referencesTableName = "users",
@@ -411,7 +411,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun escapesBackticksInTableAndDefinitionIdentifiers() {
-        val migration = MigrationRenderCreateTableBuilder().apply {
+        val migration = SchemaRenderCreateTableBuilder().apply {
             table { tableName("order`data") }
             addColumn { name("user`id"); dataType(IntType()) }
             index { name("idx`orders"); columns("user`id") }

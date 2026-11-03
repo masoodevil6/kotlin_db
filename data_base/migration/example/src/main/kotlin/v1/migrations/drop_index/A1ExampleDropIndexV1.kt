@@ -1,8 +1,8 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_index
 
-import gog.my_project.data_base.migration.api.interfaces.drop_index.IMigrationDropIndexApi
-import gog.my_project.data_base.migration.builder.ast.drop_index.MigrationDropIndexBuilder
-import gog.my_project.data_base.migration.dialect.interfaces.ISqlDialect
+import gog.my_project.data_base_schema.api.interfaces.drop_index.ISchemaDropIndexApi
+import gog.my_project.data_base_schema.builder.ast.drop_index.SchemaDropIndexBuilder
+import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
 
 
@@ -12,8 +12,8 @@ class A1ExampleDropIndexV1(
     private val table: String = "users",
     private val index: String = "idx_users_email",
 ) {
-    fun migration(): IMigrationDropIndexApi =
-        MigrationDropIndexBuilder().apply {
+    fun migration(): ISchemaDropIndexApi =
+        SchemaDropIndexBuilder().apply {
             tableName(table)
             name(index)
         }

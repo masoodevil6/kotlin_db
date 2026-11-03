@@ -1,10 +1,12 @@
 package gog.my_project.data_base.migration.api.interfaces
 
+import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
+
 import java.util.ArrayList
 import java.util.Collections
 
-class MigrationDefinition(operations: List<IMigrationApi<*>>) {
-    val operations: List<IMigrationApi<*>> =
+class MigrationDefinition(operations: List<ISchemaApi<*>>) {
+    val operations: List<ISchemaApi<*>> =
         Collections.unmodifiableList(ArrayList(operations))
 
     init {

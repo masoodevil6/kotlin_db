@@ -3,8 +3,8 @@ package gog.my_project.data_base.migration.example.v1.migrations.composite
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.builder.migration
-import gog.my_project.data_base.migration.params.data_types.IntType
-import gog.my_project.data_base.migration.params.data_types.VarcharType
+import gog.my_project.data_base_schema.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.VarcharType
 
 class CreateCustomersMigrationV1 : Migration {
     override fun up(): MigrationDefinition = migration {

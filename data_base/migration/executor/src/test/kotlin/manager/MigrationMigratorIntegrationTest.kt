@@ -13,7 +13,7 @@ import gog.my_project.data_base.migration.api.interfaces.MigrationIdentity
 import gog.my_project.data_base.migration.api.interfaces.RegisteredMigration
 import gog.my_project.data_base.migration.api.interfaces.SingleMigration
 import gog.my_project.data_base.migration.builder.migration
-import gog.my_project.data_base.migration.params.data_types.IntType
+import gog.my_project.data_base_schema.params.data_types.IntType
 import java.sql.DriverManager
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
