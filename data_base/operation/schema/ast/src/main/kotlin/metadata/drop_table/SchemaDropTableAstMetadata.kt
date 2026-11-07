@@ -4,5 +4,4 @@ import gog.my_project.data_base_schema.ast.metadata.interfaces.ISchemaAstMetadat
 
 class SchemaDropTableAstMetadata : ISchemaAstMetadata {
     var tableName: String? = null
-    var ifExists: Boolean = false
 }

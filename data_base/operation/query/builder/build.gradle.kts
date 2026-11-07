@@ -15,6 +15,7 @@ dependencies {
     implementation(project(":data_base:operation:query:api"))
 
     testImplementation(kotlin("test"))
+    testImplementation(project(":data_base:operation:config"))
 
     implementation("org.jetbrains.kotlin:kotlin-reflect:1.8.20")
 

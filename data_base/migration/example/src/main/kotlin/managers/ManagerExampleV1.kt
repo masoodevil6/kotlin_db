@@ -21,7 +21,6 @@ import gog.my_project.data_base.migration.example.v1.migrations.drop_foreign_key
 
 class ManagerExampleV1(
     override val statusRunCreateTable:            Boolean = false,
-    override val statusExecute:                   Boolean = false,
     override val statusRunDropTable:              Boolean = false,
     override val statusRunRenameTable:            Boolean = false,
     override val statusRunAddColumn:              Boolean = false,

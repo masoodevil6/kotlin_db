@@ -4,9 +4,11 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base_manager.execute.manager.QueryExecute
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
+import java.math.BigDecimal
 import java.sql.Connection
+import java.sql.ResultSet
 
 /**
  * Opaque, lifecycle-neutral view of an active Operation scope for operation-family facades.
@@ -20,8 +22,55 @@ interface OperationExecutionContext {
 
     fun executeDdl(sql: String, parameters: List<OperationParameter> = emptyList()): ExecuteResult<Boolean>
 
+    /**
+     * Executes DDL with an explicit, per-failure policy. Implementations that do not support this
+     * capability fail closed through [failed] rather than falling back to unclassified DDL.
+     */
+    fun executeDdlWithPolicy(
+        sql: String,
+        parameters: List<OperationParameter>,
+        failurePolicy: DdlFailurePolicy,
+    ): DdlExecutionOutcome {
+        val unsupported = UnsupportedOperationException(
+            "Policy-based DDL execution is not supported by this OperationExecutionContext",
+        )
+        val recorded = failed<Boolean>(unsupported)
+        val failure = (recorded as? ExecuteResult.Failure)?.exception ?: unsupported
+        return DdlExecutionOutcome.Failure(failure, DdlFailureDisposition.FATAL)
+    }
+
+    /**
+     * Executes a read on this scope's Connection and lets the caller consume rows while their
+     * resources are open. The callback must not retain [OperationQueryRows] after it returns.
+     * Implementations that do not support scoped reads fail through the normal scope failure path.
+     */
+    fun <T> executeRead(
+        sql: String,
+        parameters: List<OperationParameter> = emptyList(),
+        read: (OperationQueryRows) -> T,
+    ): ExecuteResult<T> = failed(
+        UnsupportedOperationException("Scoped reads are not supported by this OperationExecutionContext"),
+    )
+
     /** Latches a failure so callers cannot accidentally commit after handling its result. */
     fun <T> failed(failure: Throwable): ExecuteResult<T>
+}
+
+/**
+ * JDBC-independent, callback-scoped access to query rows and their column labels.
+ * Column labels follow the result metadata order, and value access is by SQL column label.
+ */
+interface OperationQueryRows {
+    val columnLabels: List<String>
+
+    fun next(): Boolean
+    fun getString(columnLabel: String): String?
+    fun getInt(columnLabel: String): Int?
+    fun getLong(columnLabel: String): Long?
+    fun getBoolean(columnLabel: String): Boolean?
+    fun getDouble(columnLabel: String): Double?
+    fun getBigDecimal(columnLabel: String): BigDecimal?
+    fun getBytes(columnLabel: String): ByteArray?
 }
 
 /** A named SQL binding passed across Operation boundaries without exposing JDBC classes. */
@@ -41,6 +90,7 @@ class OperationExecutionScope(
 
     private val ownerThread = Thread.currentThread()
     private val jdbcConnection = connection
+    private val laterFailures = mutableListOf<Throwable>()
 
     @Volatile
     private var active = true
@@ -53,7 +103,8 @@ class OperationExecutionScope(
     var fatalError: Error? = null
         private set
 
-    /** The scope-owned connection, available only while the callback is active on its owner thread. */
+    /** Transitional compatibility access used by existing Query, Schema, and Migration executors. */
+    @Deprecated("Use OperationExecutionContext.executeRead/executeDdl; direct JDBC access is transitional")
     val connection: Connection
         get() {
             val rejection = rejectOperation()
@@ -84,24 +135,60 @@ class OperationExecutionScope(
     }
 
     private fun recordFailureLocked(failure: Throwable): Throwable {
-        if (firstFailure == null) firstFailure = failure
-        if (failure is Error && fatalError == null) fatalError = failure
+        val currentPrimary = firstFailure
+        if (currentPrimary == null) {
+            firstFailure = failure
+        } else if (currentPrimary !== failure && failure !is Error) {
+            if (fatalError != null) {
+                addSuppressedSafely(fatalError!!, failure)
+            } else if (laterFailures.none { it === failure }) {
+                laterFailures += failure
+            }
+        }
+
+        if (failure is Error) {
+            recordFatalLocked(failure)
+        } else {
+            fatalError?.let { addSuppressedSafely(it, failure) }
+        }
         return firstFailure ?: failure
     }
 
     fun recordFatal(error: Error) {
         synchronized(this) {
             if (!active) return
-            if (fatalError == null) fatalError = error
-            if (firstFailure == null) firstFailure = error
+            recordFatalLocked(error)
         }
     }
 
+    private fun recordFatalLocked(error: Error) {
+        val currentFatal = fatalError
+        if (currentFatal == null) {
+            fatalError = error
+            firstFailure?.let { prior ->
+                addSuppressedSafely(error, prior)
+                prior.suppressed.forEach { nested -> addSuppressedSafely(error, nested) }
+            }
+            laterFailures.forEach { later -> addSuppressedSafely(error, later) }
+            laterFailures.clear()
+        } else if (currentFatal !== error) {
+            addSuppressedSafely(currentFatal, error)
+        }
+        if (firstFailure == null) firstFailure = error
+    }
+
     /** Seals the callback phase. Lifecycle code may still use the private connection for cleanup. */
+    @Deprecated("Scope lifecycle is owned by Operation executors")
     fun end() {
         synchronized(this) {
-            active = false
+            if (!active) return
+            val misuse = IllegalStateException("Execution scope lifecycle is owned by Operation")
+            recordFailureLocked(misuse)
         }
+    }
+
+    internal fun endForLifecycle() {
+        synchronized(this) { active = false }
     }
 
     internal fun lifecycleConnection(): Connection = jdbcConnection
@@ -130,15 +217,238 @@ class OperationExecutionScope(
             throw error
         } catch (exception: Exception) {
             failed(exception)
+        } catch (failure: Throwable) {
+            failed(failure)
+        }
+    }
+
+    override fun executeDdlWithPolicy(
+        sql: String,
+        parameters: List<OperationParameter>,
+        failurePolicy: DdlFailurePolicy,
+    ): DdlExecutionOutcome {
+        val rejection = rejectOperation()
+        if (rejection != null) return DdlExecutionOutcome.Failure(rejection, DdlFailureDisposition.FATAL)
+
+        val completed = try {
+            executeDdlQuery(sql, parameters)
+        } catch (error: Error) {
+            recordFatal(error)
+            throw error
+        } catch (exception: Exception) {
+            return classifyDdlFailure(exception, failurePolicy)
+        } catch (failure: Throwable) {
+            return classifyDdlFailure(failure, failurePolicy)
+        }
+
+        return when (completed) {
+            is ExecuteResult.Success -> {
+                val value = completed.result
+                if (value != null) {
+                    DdlExecutionOutcome.Success(value)
+                } else {
+                    val missingValue = IllegalStateException("Scoped DDL completed without a success value")
+                    DdlExecutionOutcome.Failure(recordFailure(missingValue), DdlFailureDisposition.FATAL)
+                }
+            }
+            is ExecuteResult.Failure -> classifyDdlFailure(completed.exception, failurePolicy)
+        }
+    }
+
+    private fun executeDdlQuery(
+        sql: String,
+        parameters: List<OperationParameter>,
+    ): ExecuteResult<Boolean> {
+        var result: ExecuteResult<Boolean>? = null
+        val query = BuiltQuery(
+            sql,
+            parameters.map { QueryParameterBinding(it.name, it.value, it.sqlTypeCode) }.toMutableList(),
+        )
+        QueryExecute().executeTable(jdbcConnection, query) { result = it }
+        return result ?: ExecuteResult.Failure(
+            IllegalStateException("Scoped DDL execution completed without a result"),
+        )
+    }
+
+    private fun classifyDdlFailure(
+        failure: Throwable,
+        failurePolicy: DdlFailurePolicy,
+    ): DdlExecutionOutcome {
+        if (failure is Error) {
+            recordFatal(failure)
+            throw failure
+        }
+
+        val disposition = try {
+            requireNotNull(failurePolicy.classify(failure)) {
+                "DDL failure policy returned no disposition"
+            }
+        } catch (classifierFailure: Error) {
+            recordFailure(failure)
+            recordFatal(classifierFailure)
+            addSuppressedSafely(classifierFailure, failure)
+            throw classifierFailure
+        } catch (classifierFailure: Throwable) {
+            addSuppressedSafely(failure, classifierFailure)
+            val first = recordFailure(failure)
+            return DdlExecutionOutcome.Failure(first, DdlFailureDisposition.FATAL)
+        }
+
+        return when (disposition) {
+            DdlFailureDisposition.RECOVERABLE ->
+                DdlExecutionOutcome.Failure(failure, DdlFailureDisposition.RECOVERABLE)
+            DdlFailureDisposition.FATAL ->
+                DdlExecutionOutcome.Failure(recordFailure(failure), DdlFailureDisposition.FATAL)
+        }
+    }
+
+    override fun <T> executeRead(
+        sql: String,
+        parameters: List<OperationParameter>,
+        read: (OperationQueryRows) -> T,
+    ): ExecuteResult<T> {
+        val rejection = rejectOperation()
+        if (rejection != null) return ExecuteResult.Failure(rejection)
+
+        return try {
+            var result: ExecuteResult<T>? = null
+            val query = BuiltQuery(
+                sql,
+                parameters.map { QueryParameterBinding(it.name, it.value, it.sqlTypeCode) }.toMutableList(),
+            )
+            QueryExecute().executeSelect(jdbcConnection, query) { selected ->
+                result = when (selected) {
+                    is ExecuteResult.Failure -> selected
+                    is ExecuteResult.Success -> {
+                        val resultSet = selected.result
+                        if (resultSet == null) {
+                            ExecuteResult.Failure(
+                                IllegalStateException("Scoped read completed without a row result"),
+                            )
+                        } else {
+                            resultSet.use { rows ->
+                                val scopedRows = JdbcOperationQueryRows(
+                                    rows,
+                                    ownerThread,
+                                    ::rejectOperation,
+                                ) { failure -> recordFailure(failure) }
+                                try {
+                                    ExecuteResult.Success(read(scopedRows))
+                                } finally {
+                                    scopedRows.invalidate()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val completed = result ?: ExecuteResult.Failure(
+                IllegalStateException("Scoped read execution completed without a result"),
+            )
+            recordResult(completed)
+            completed
+        } catch (error: Error) {
+            recordFatal(error)
+            throw error
+        } catch (exception: Exception) {
+            failed(exception)
+        } catch (failure: Throwable) {
+            failed(failure)
         }
     }
 
     override fun <T> failed(failure: Throwable): ExecuteResult<T> =
         ExecuteResult.Failure(recordFailure(failure))
+
+    private fun addSuppressedSafely(primary: Throwable, secondary: Throwable) {
+        if (primary !== secondary && primary.suppressed.none { it === secondary }) {
+            primary.addSuppressed(secondary)
+        }
+    }
+
+}
+
+/** Bridges the JDBC cursor only inside OperationExecutionScope.executeRead. */
+private class JdbcOperationQueryRows(
+    private val resultSet: ResultSet,
+    private val ownerThread: Thread,
+    private val scopeRejection: () -> Throwable?,
+    private val onThreadViolation: (Throwable) -> Unit,
+) : OperationQueryRows {
+    @Volatile
+    private var active = true
+
+    override val columnLabels: List<String> by lazy {
+        ensureActive()
+        val metadata = resultSet.metaData
+        (1..metadata.columnCount).map { index ->
+            metadata.getColumnLabel(index).takeIf(String::isNotBlank) ?: metadata.getColumnName(index)
+        }
+    }
+
+    override fun next(): Boolean {
+        ensureActive()
+        return resultSet.next()
+    }
+
+    override fun getString(columnLabel: String): String? {
+        ensureActive()
+        return resultSet.getString(columnLabel)
+    }
+
+    override fun getInt(columnLabel: String): Int? {
+        ensureActive()
+        val value = resultSet.getInt(columnLabel)
+        return if (resultSet.wasNull()) null else value
+    }
+
+    override fun getLong(columnLabel: String): Long? {
+        ensureActive()
+        val value = resultSet.getLong(columnLabel)
+        return if (resultSet.wasNull()) null else value
+    }
+
+    override fun getBoolean(columnLabel: String): Boolean? {
+        ensureActive()
+        val value = resultSet.getBoolean(columnLabel)
+        return if (resultSet.wasNull()) null else value
+    }
+
+    override fun getDouble(columnLabel: String): Double? {
+        ensureActive()
+        val value = resultSet.getDouble(columnLabel)
+        return if (resultSet.wasNull()) null else value
+    }
+
+    override fun getBigDecimal(columnLabel: String): BigDecimal? {
+        ensureActive()
+        return resultSet.getBigDecimal(columnLabel)
+    }
+
+    override fun getBytes(columnLabel: String): ByteArray? {
+        ensureActive()
+        return resultSet.getBytes(columnLabel)
+    }
+
+    fun invalidate() {
+        active = false
+    }
+
+    private fun ensureActive() {
+        check(active) { "Scoped query rows are only available inside the executeRead callback" }
+        if (Thread.currentThread() !== ownerThread) {
+            val failure = IllegalStateException("Scoped query rows must be consumed on the executeRead callback thread")
+            onThreadViolation(failure)
+            throw failure
+        }
+        scopeRejection()?.let { rejection ->
+            throw IllegalStateException("Scoped query rows are unavailable after an Operation failure", rejection)
+        }
+    }
 }
 
 /** Prevents nested managed scopes across Query, Schema, and Migration on one callback thread. */
-object OperationScopeGuard {
+internal object OperationScopeGuard {
     private class State {
         var scope: OperationExecutionScope? = null
         var pendingFailure: Throwable? = null
@@ -147,7 +457,7 @@ object OperationScopeGuard {
     private val current = ThreadLocal<State?>()
 
     /** Claims the current thread for a managed scope, or latches a nested-scope rejection. */
-    fun enter(): Throwable? {
+    internal fun enter(): Throwable? {
         val state = current.get()
         if (state != null) {
             val failure = IllegalStateException("Nested managed operation scopes are not supported")
@@ -161,7 +471,7 @@ object OperationScopeGuard {
     }
 
     /** Publishes the callback scope and transfers any rejection seen while its connection was starting. */
-    fun activate(scope: OperationExecutionScope) {
+    internal fun activate(scope: OperationExecutionScope) {
         val state = checkNotNull(current.get()) { "Operation scope was not entered" }
         check(state.scope == null) { "Operation scope is already active" }
         state.scope = scope
@@ -169,7 +479,7 @@ object OperationScopeGuard {
         state.pendingFailure = null
     }
 
-    fun exit() {
+    internal fun exit() {
         current.remove()
     }
 }

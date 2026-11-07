@@ -1,9 +1,9 @@
 package gog.my_project.data_base_schema.renderer.dialects
 
-import gog.my_project.data_base.core.data_base.ProductDatabaseVersion
-import gog.my_project.data_base.core.data_base.DatabaseProduct
-import gog.my_project.data_base.core.data_base.MARIA_DB
-import gog.my_project.data_base.core.data_base.MYSQL
+import gog.my_project.data_base_operation.config.data_base.ProductDatabaseVersion
+import gog.my_project.data_base_operation.config.data_base.DatabaseProduct
+import gog.my_project.data_base_operation.config.data_base.MARIA_DB
+import gog.my_project.data_base_operation.config.data_base.MYSQL
 import gog.my_project.data_base_schema.ast.interfaces.add_column.ISchemaAddColumnAst
 import gog.my_project.data_base_schema.ast.interfaces.drop_column.ISchemaDropColumnAst
 import gog.my_project.data_base_schema.ast.interfaces.create_table.column.ISchemaColumnAst
@@ -22,6 +22,7 @@ import gog.my_project.data_base_schema.ast.interfaces.create_full_text_index.ISc
 import gog.my_project.data_base_schema.ast.interfaces.create_spatial_index.ISchemaCreateSpatialIndexAst
 import gog.my_project.data_base_schema.ast.interfaces.create_foreign_key.ISchemaCreateForeignKeyAst
 import gog.my_project.data_base_schema.ast.interfaces.drop_foreign_key.ISchemaDropForeignKeyAst
+import gog.my_project.data_base_schema.ast.interfaces.if_exist.ISchemaIfExistAst
 import gog.my_project.data_base_schema.dialect.manager.BaseSqlDialect
 import gog.my_project.data_base_schema.renderer.nodes.create_table.column.MySqlSchemaColumnCapability
 import gog.my_project.data_base_schema.renderer.nodes.create_table.definition.MySqlSchemaCreateTableDefinitionCapability
@@ -41,6 +42,7 @@ import gog.my_project.data_base_schema.renderer.nodes.create_full_text_index.MyS
 import gog.my_project.data_base_schema.renderer.nodes.create_spatial_index.MySqlSchemaCreateSpatialIndexCapability
 import gog.my_project.data_base_schema.renderer.nodes.create_foreign_key.MySqlSchemaCreateForeignKeyCapability
 import gog.my_project.data_base_schema.renderer.nodes.drop_foreign_key.MySqlSchemaDropForeignKeyCapability
+import gog.my_project.data_base_schema.renderer.nodes.if_exist.MySqlSchemaIfExistCapability
 import gog.my_project.data_base_schema.dialect.nodes.rename_column.IRenameColumnSqlDialect
 import gog.my_project.data_base_schema.dialect.nodes.rename_column.RenameColumnSqlStrategy
 
@@ -84,6 +86,7 @@ open class MySqlDialect(
 
         /// drop table
         _registry.register(ISchemaDropTableAst::class                , MySqlSchemaDropTableCapability());
+        _registry.register(ISchemaIfExistAst::class, MySqlSchemaIfExistCapability());
 
         /// rename table
         _registry.register(ISchemaRenameTableAst::class               , MySqlSchemaRenameTableCapability());
@@ -93,7 +96,10 @@ open class MySqlDialect(
         _registry.register(ISchemaAddColumnAst::class                  , MySqlSchemaAddColumnCapability());
 
         /// drop column
-        _registry.register(ISchemaDropColumnAst::class                  , MySqlSchemaDropColumnCapability());
+        _registry.register(
+            ISchemaDropColumnAst::class,
+            MySqlSchemaDropColumnCapability(),
+        );
 
         /// modify column
         _registry.register(ISchemaModifyColumnAst::class, MySqlSchemaModifyColumnCapability());

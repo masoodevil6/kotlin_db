@@ -33,12 +33,12 @@
             <option value="$PROJECT_DIR$/data_base/manager/execute" />
             <option value="$PROJECT_DIR$/data_base/migration" />
             <option value="$PROJECT_DIR$/data_base/migration/api" />
-            <option value="$PROJECT_DIR$/data_base/migration/builder" />
+            <option value="$PROJECT_DIR$/data_base/migration/core" />
             <option value="$PROJECT_DIR$/data_base/migration/example" />
-            <option value="$PROJECT_DIR$/data_base/migration/executor" />
             <option value="$PROJECT_DIR$/data_base/models" />
             <option value="$PROJECT_DIR$/data_base/models/eloquent" />
             <option value="$PROJECT_DIR$/data_base/operation" />
+            <option value="$PROJECT_DIR$/data_base/operation/config" />
             <option value="$PROJECT_DIR$/data_base/operation/executor" />
             <option value="$PROJECT_DIR$/data_base/operation/query" />
             <option value="$PROJECT_DIR$/data_base/operation/query/api" />
@@ -59,6 +59,7 @@
             <option value="$PROJECT_DIR$/data_base/operation/schema/executor" />
             <option value="$PROJECT_DIR$/data_base/operation/schema/params" />
             <option value="$PROJECT_DIR$/data_base/operation/schema/renderer" />
+            <option value="$PROJECT_DIR$/example" />
             <option value="$PROJECT_DIR$/tools" />
             <option value="$PROJECT_DIR$/utils" />
           </set>

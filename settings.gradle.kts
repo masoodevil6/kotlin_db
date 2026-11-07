@@ -23,6 +23,7 @@ plugins {
 rootProject.name = "my_project"
 
 include(":app")
+include(":example")
 include(":utils")
 
 include(":tools")
@@ -35,6 +36,7 @@ include(":collection:examples")
 include(":data_base")
 include(":data_base:core")
 include(":data_base:operation")
+include(":data_base:operation:config")
 include(":data_base:operation:executor")
 
 include(":data_base:models")
@@ -72,7 +74,6 @@ include(":data_base:operation:query:example")
 
 /// data_base -> migration
 include(":data_base:migration")
+include(":data_base:migration:core")
 include(":data_base:migration:api")
-include(":data_base:migration:builder")
-include(":data_base:migration:executor")
 include(":data_base:migration:example")

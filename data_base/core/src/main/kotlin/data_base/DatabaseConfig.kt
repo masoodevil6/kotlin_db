@@ -1,12 +1,13 @@
-package gog.my_project.data_base.core.data_base
+package gog.my_project.data_base_operation.config.data_base
 
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 
 /**
  * Composition root for one database's connection, pool, and SQL platform settings.
  *
  * The flat constructor, accessors, components, and copy method remain as a compatibility surface;
- * each delegates to the three configuration objects, which remain the only stored values.
+ * each delegates to the three configuration objects, which remain the only stored values. Its
+ * diagnostic string redacts the password; callers should still avoid logging configuration data.
  */
 class DatabaseConfig(
     val connection: DatabaseConnectionConfig,
@@ -85,6 +86,6 @@ class DatabaseConfig(
 
     override fun toString(): String =
         "DatabaseConfig(dbDomain=$dbDomain, dbPort=$dbPort, dbName=$dbName, " +
-            "dbUserName=$dbUserName, dbPassword=$dbPassword, dbPoolSize=$dbPoolSize, " +
+            "dbUserName=$dbUserName, dbPassword=<redacted>, dbPoolSize=$dbPoolSize, " +
             "dialect=$dialect, targetDatabaseVersion=$targetDatabaseVersion)"
 }

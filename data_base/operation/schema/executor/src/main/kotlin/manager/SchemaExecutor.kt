@@ -1,19 +1,23 @@
 package gog.my_project.data_base_schema.executor.manager
 
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionCoordinator
 import gog.my_project.data_base_operation.executor.transaction.OperationTransactionExecutor
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
+import gog.my_project.data_base_schema.executor.integration.SchemaExecutionIntegration
 import gog.my_project.data_base_schema.renderer.manager.DialectSelector
-import gog.my_project.tools.scripts.StringTools
 
-/** Executes schema operations; transaction lifecycle is delegated to the shared Operation executor. */
+/**
+ * Executes Schema statements while Operation owns Scope, Connection, and Transaction lifecycle.
+ * A custom [IQueryExecute] must support execution on a supplied Connection; SchemaExecutor never
+ * delegates Connection ownership to the low-level executor.
+ */
 class SchemaExecutor(
     queryExecutor: IQueryExecute? = null,
     private val dialectSelector: DialectSelector = DialectSelector(),
@@ -38,111 +42,120 @@ class SchemaExecutor(
         block(SchemaTransaction(this, scope))
     }
 
+    /** Executes one operation on a newly owned Operation connection scope. */
     fun execute(
         operation: ISchemaApi<*>,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
-    ) {
-        withRootOperation(blockExecute) {
-            val query = render(operation, databaseContext.platformConfig, blockQueryInfo)
-            executeRenderedOwned(query, blockExecute)
-        }
+    ) = executeRoot(blockExecute) { scope ->
+        SchemaExecutionIntegration.executeScoped(
+            operation,
+            scope,
+            dialectSelector,
+            queryExecutor,
+            blockQueryInfo.asQueryInfoCallback(),
+        )
     }
 
-    /** Executes already-rendered schema SQL using the low-level executor's normal owned-connection path. */
+    /** Executes already-rendered SQL on a newly owned Operation connection scope. */
     fun executeRendered(
         query: BuiltQuery,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
-    ) {
-        withRootOperation(blockExecute) {
-            executeRenderedOwned(query, blockExecute)
-        }
+    ) = executeRoot(blockExecute) { scope ->
+        SchemaExecutionIntegration.executeRenderedScoped(query, scope, queryExecutor)
     }
 
-    private fun executeRenderedOwned(
-        query: BuiltQuery,
-        blockExecute: (ExecuteResult<Boolean>) -> Unit,
-    ) {
-        queryExecutor.executeTable(query, blockExecute)
-    }
-
-    private fun withRootOperation(
-        blockExecute: (ExecuteResult<Boolean>) -> Unit,
-        operation: () -> Unit,
-    ) {
-        val failure = IllegalStateException(
-            "Root schema execution cannot run independently while a managed execution scope is active",
-        )
-        when (val admission = executionCoordinator.acquireRootOperation(failure)) {
-            is OperationExecutionCoordinator.OperationAdmission.Rejected -> {
-                try {
-                    blockExecute(ExecuteResult.Failure(admission.failure))
-                } catch (throwable: Throwable) {
-                    executionCoordinator.recordRejectedCallbackThrowable(throwable)
-                    throw throwable
-                }
-            }
-            is OperationExecutionCoordinator.OperationAdmission.Allowed -> try {
-                operation()
-            } finally {
-                admission.permit.release()
-            }
-        }
-    }
-
-    /** Executes a rendered schema operation through manager:execute on the supplied scope connection. */
+    /** Executes already-rendered SQL on an existing Operation scope without owning its lifecycle. */
     fun executeRendered(
         query: BuiltQuery,
         scope: OperationExecutionScope,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
+    ) = executeOnScope(scope, blockExecute) {
+        SchemaExecutionIntegration.executeRenderedScoped(query, scope, queryExecutor)
+    }
+
+    /** Executes an operation on an existing Operation scope without taking lifecycle ownership. */
+    fun execute(
+        operation: ISchemaApi<*>,
+        scope: OperationExecutionScope,
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+        blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
+    ) = executeOnScope(scope, blockExecute) {
+        SchemaExecutionIntegration.executeScoped(
+            operation,
+            scope,
+            dialectSelector,
+            queryExecutor,
+            blockQueryInfo.asQueryInfoCallback(),
+        )
+    }
+
+    private fun executeRoot(
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+        operation: (OperationExecutionScope) -> ExecuteResult<Boolean>,
     ) {
-        val rejection = scope.rejectOperation()
-        if (rejection != null) {
-            val failure = ExecuteResult.Failure(rejection)
-            scope.recordResult(failure)
-            blockExecute(failure)
+        var callbackDelivered = false
+        var callbackResult: ExecuteResult<Boolean>? = null
+        var callbackFailure: Throwable? = null
+
+        val outcome = OperationExecutionExecutor(databaseContext).connection(executionCoordinator) { scope ->
+            val result = operation(scope)
+            callbackDelivered = true
+            callbackResult = result
+            try {
+                blockExecute(result)
+            } catch (failure: Throwable) {
+                callbackFailure = failure
+                scope.recordFailure(failure)
+                throw failure
+            }
+            result
+        }
+
+        if (!callbackDelivered) {
+            blockExecute(outcome)
             return
         }
 
-        queryExecutor.executeTable(scope.connection, query) { result ->
-            scope.recordResult(result)
+        val finalFailure = outcome as? ExecuteResult.Failure
+        if (finalFailure != null && callbackResult !is ExecuteResult.Failure) {
+            throw finalFailure.exception
+        }
+
+        callbackFailure?.let { failure ->
+            val primary = (callbackResult as? ExecuteResult.Failure)?.exception ?: failure
+            if (primary !== failure) addSuppressedSafely(primary, failure)
+            throw primary
+        }
+    }
+
+    private fun executeOnScope(
+        scope: OperationExecutionScope,
+        blockExecute: (ExecuteResult<Boolean>) -> Unit,
+        operation: () -> ExecuteResult<Boolean>,
+    ) {
+        val result = operation()
+        try {
             blockExecute(result)
+        } catch (failure: Throwable) {
+            val primary = scope.firstFailure ?: failure
+            if (primary !== failure) addSuppressedSafely(primary, failure)
+            scope.recordFailure(failure)
+            throw primary
         }
     }
 
-    /** Executes an operation on an existing Operation scope without taking ownership of its lifecycle. */
-    fun execute(
-        operation: ISchemaApi<*>,
-        scope: OperationExecutionScope,
-        blockExecute: (ExecuteResult<Boolean>) -> Unit,
-        blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
-    ) {
-        val rejection = scope.rejectOperation()
-        if (rejection != null) {
-            val failure = ExecuteResult.Failure(rejection)
-            scope.recordResult(failure)
-            blockExecute(failure)
-            return
-        }
-        executeRendered(render(operation, scope.databasePlatformConfig, blockQueryInfo), scope, blockExecute)
+    private fun ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?.asQueryInfoCallback():
+        ((sql: String, parameters: Map<String, Any?>) -> Unit)? = this?.let { callback ->
+        { sql, parameters -> callback(sql, parameters.toMutableMap()) }
     }
 
-    private fun render(
-        operation: ISchemaApi<*>,
-        platform: DatabasePlatformConfig,
-        blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)?,
-    ): BuiltQuery {
-        val dialect = dialectSelector.select(platform.dialect, platform.targetDatabaseVersion)
-        val sql = requireNotNull(dialect.render(operation.ast)) { "rendered schema SQL is null" }
-        blockQueryInfo?.invoke(
-            StringTools.formatSql(sql),
-            linkedMapOf(),
-        )
-        return BuiltQuery(sql, mutableListOf())
+    private fun addSuppressedSafely(primary: Throwable, secondary: Throwable) {
+        if (primary !== secondary) primary.addSuppressed(secondary)
     }
 }
 
-/** A transaction-bound schema executor. All calls share the transaction's Operation scope. */
+/** A transaction-bound Schema executor. All calls share the transaction's Operation scope. */
 class SchemaTransaction internal constructor(
     private val schemaExecutor: SchemaExecutor,
     private val scope: OperationExecutionScope,

@@ -1,5 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_full_text_index
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.ast.schema.create_full_text_index.SchemaCreateFullTextIndexAst
 import gog.my_project.data_base_schema.builder.ast.create_full_text_index.SchemaCreateFullTextIndexBuilder
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
@@ -18,7 +23,7 @@ class A1ExampleCreateFullTextIndexV1Test {
     fun rendersMultiColumnFullTextIndex() {
         assertEquals(
             "CREATE FULLTEXT INDEX `ft_posts_title_body` ON `posts` (`title`, `body`)",
-            dialect.render(A1ExampleCreateFullTextIndexV1().migration().ast),
+            Schema.render(A1ExampleCreateFullTextIndexV1().migration(), SchemaDialect.MYSQL),
         )
     }
 

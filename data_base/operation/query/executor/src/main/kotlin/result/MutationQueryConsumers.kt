@@ -63,7 +63,7 @@ class DeleteQueryConsumer internal constructor(
 /** Uses one render result for named SQL and the corresponding parameter bindings. */
 private fun mutationBuiltQuery(
     ast: IQueryAst<*>,
-    platform: gog.my_project.data_base.core.data_base.DatabasePlatformConfig,
+    platform: gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig,
 ): BuiltQuery {
     val dialect = DialectSelector().select(platform.dialect)
     return when (val rendered = QueryParameterRendering.renderDml(ast, dialect)) {

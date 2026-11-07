@@ -127,6 +127,7 @@ interface SchemaCreateIndexDefinition {
 interface SchemaDropIndexDefinition {
     fun tableName(table: String)
     fun name(name: String)
+    fun ifExists()
 }
 
 @SchemaDsl
@@ -166,4 +167,5 @@ interface SchemaCreateForeignKeyDefinition : SchemaForeignKeyDefinition {
 interface SchemaDropForeignKeyDefinition {
     fun tableName(table: String)
     fun name(name: String)
+    fun ifExists()
 }

@@ -11,18 +11,14 @@ repositories {
 }
 
 dependencies {
-    testImplementation(kotlin("test"))
-
-    implementation(project(":data_base:core"))
-    implementation(project(":data_base:manager:execute"))
     implementation(project(":data_base:migration:api"))
-    implementation(project(":data_base:migration:builder"))
-    implementation(project(":data_base:migration:executor"))
-    implementation(project(":data_base:operation:schema:api"))
-    implementation(project(":data_base:operation:schema:builder"))
-    implementation(project(":data_base:operation:schema:dialect"))
-    implementation(project(":data_base:operation:schema:params"))
-    implementation(project(":data_base:operation:schema:renderer"))
+    testImplementation(kotlin("test"))
+    testImplementation(project(":data_base:operation:schema:ast"))
+    testImplementation(project(":data_base:operation:schema:builder"))
+    testImplementation(project(":data_base:operation:schema:params"))
+    testImplementation(project(":data_base:operation:schema:renderer"))
+
+    implementation(project(":data_base:operation:schema"))
 }
 
 application {

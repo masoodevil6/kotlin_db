@@ -1,5 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.rename_table
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.builder.ast.rename_table.SchemaRenameTableBuilder
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
@@ -13,9 +18,7 @@ class A1ExampleRenameTableV1Test {
 
     @Test
     fun rendersRenameTable() {
-        val sql = MySqlDialect().render(
-            A1ExampleRenameTableV1().migration().ast,
-        )
+        val sql = Schema.render(A1ExampleRenameTableV1().migration(), SchemaDialect.MYSQL)
 
         assertEquals("RENAME TABLE `users` TO `customers`", sql)
     }

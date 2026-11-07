@@ -1,5 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_unique_index
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.ast.schema.create_unique_index.SchemaCreateUniqueIndexAst
 import gog.my_project.data_base_schema.builder.ast.create_unique_index.SchemaCreateUniqueIndexBuilder
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
@@ -17,7 +22,7 @@ class A1ExampleCreateUniqueIndexV1Test {
     fun rendersSingleColumnUniqueIndex() {
         assertEquals(
             "CREATE UNIQUE INDEX `uq_users_email` ON `users` (`email`)",
-            dialect.render(A1ExampleCreateUniqueIndexV1().migration().ast),
+            Schema.render(A1ExampleCreateUniqueIndexV1().migration(), SchemaDialect.MYSQL),
         )
     }
 

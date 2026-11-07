@@ -2,7 +2,7 @@ package gog.my_project.data_base_operation.executor.transaction
 
 import gog.my_project.data_base_manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 
@@ -45,80 +45,87 @@ class OperationExecutionExecutor private constructor(
         }
 
         var scope: OperationExecutionScope? = null
+        var connection: Connection? = null
+        var connectionClosed = false
+
+        fun closeOnce(primary: Throwable?): Throwable? {
+            if (connectionClosed) return primary
+            val ownedConnection = connection ?: return primary
+            connectionClosed = true
+            return closeConnection(ownedConnection, primary)
+        }
+
         try {
-            val connection = try {
-                connectionFactory()
-            } catch (error: Error) {
-                throw error
-            } catch (exception: Exception) {
-                return ExecuteResult.Failure(exception)
-            }
+            connection = connectionFactory()
+            val ownedConnection = requireNotNull(connection)
 
             val activeScope = try {
-                OperationExecutionScope(connection, databasePlatformConfig).also {
+                OperationExecutionScope(ownedConnection, databasePlatformConfig).also {
                     scope = it
+                    coordinator.prepareScope(it)
                     OperationScopeGuard.activate(it)
-                    coordinator.activate(it)
+                    coordinator.activateOwned(it)
                 }
-            } catch (error: Error) {
-                closeConnection(connection, error)
-                throw error
-            } catch (exception: Exception) {
-                val closeFailure = closeConnection(connection, exception)
+            } catch (failure: Throwable) {
+                val closeFailure = closeOnce(failure)
+                if (failure is Error) throw failure
                 if (closeFailure is Error) throw closeFailure
-                return ExecuteResult.Failure(exception)
+                return ExecuteResult.Failure(failure)
             }
 
             var callbackResult: ExecuteResult<T>? = null
-            var callbackException: Exception? = null
-            var callbackError: Error? = null
+            var callbackFailure: Throwable? = null
             try {
                 callbackResult = block(activeScope)
-            } catch (error: Error) {
-                callbackError = error
-                activeScope.recordFatal(error)
-            } catch (exception: Exception) {
-                callbackException = exception
-            } finally {
-                coordinator.seal(activeScope)
+                activeScope.recordResult(callbackResult)
+            } catch (failure: Throwable) {
+                callbackFailure = failure
+                if (failure is Error) activeScope.recordFatal(failure) else activeScope.recordFailure(failure)
             }
 
-            val fatalError = activeScope.fatalError ?: callbackError
+            try {
+                coordinator.sealOwned(activeScope)
+            } catch (sealFailure: Throwable) {
+                activeScope.recordFailure(sealFailure)
+                if (sealFailure is Error) activeScope.recordFatal(sealFailure)
+                coordinator.abortScope(activeScope, sealFailure)
+            }
+
+            val fatalError = activeScope.fatalError ?: (callbackFailure as? Error)
             if (fatalError != null) {
-                closeConnection(connection, fatalError)
+                closeOnce(fatalError)
                 throw fatalError
             }
 
             val scopedFailure = activeScope.firstFailure
             if (scopedFailure != null) {
-                if (callbackException != null && callbackException !== scopedFailure) {
-                    addSuppressedSafely(scopedFailure, callbackException)
-                }
-                val closeOutcome = closeConnection(connection, scopedFailure)
+                val closeOutcome = closeOnce(scopedFailure)
                 if (closeOutcome is Error) throw closeOutcome
+                val returnedFailure = callbackResult as? ExecuteResult.Failure
+                if (returnedFailure?.exception === scopedFailure) return returnedFailure
                 return ExecuteResult.Failure(scopedFailure)
             }
 
-            if (callbackException != null) {
-                val closeOutcome = closeConnection(connection, callbackException)
+            if (callbackFailure != null) {
+                val closeOutcome = closeOnce(callbackFailure)
                 if (closeOutcome is Error) throw closeOutcome
-                return ExecuteResult.Failure(callbackException)
+                return ExecuteResult.Failure(callbackFailure)
             }
 
             val result = callbackResult ?: run {
                 val missingResult = IllegalStateException("Connection-scope callback returned no result")
-                val closeOutcome = closeConnection(connection, missingResult)
+                val closeOutcome = closeOnce(missingResult)
                 if (closeOutcome is Error) throw closeOutcome
                 return ExecuteResult.Failure(missingResult)
             }
 
             if (result is ExecuteResult.Failure) {
-                val closeOutcome = closeConnection(connection, result.exception)
+                val closeOutcome = closeOnce(result.exception)
                 if (closeOutcome is Error) throw closeOutcome
                 return result
             }
 
-            val closeFailure = closeConnection(connection, null)
+            val closeFailure = closeOnce(null)
             if (closeFailure is Error) throw closeFailure
             if (closeFailure is Exception) {
                 return ExecuteResult.Failure(
@@ -128,10 +135,20 @@ class OperationExecutionExecutor private constructor(
                     ),
                 )
             }
+            if (closeFailure != null) return ExecuteResult.Failure(closeFailure)
             return result
+        } catch (failure: Throwable) {
+            if (connection != null && !connectionClosed) {
+                val closeOutcome = closeOnce(failure)
+                if (failure is Error) throw failure
+                if (closeOutcome is Error) throw closeOutcome
+                return ExecuteResult.Failure(failure)
+            }
+            if (failure is Error) throw failure
+            return ExecuteResult.Failure(failure)
         } finally {
-            scope?.end()
-            coordinator.finishScope()
+            scope?.endForLifecycle()
+            coordinator.finishOwnedScope()
             OperationScopeGuard.exit()
         }
     }
@@ -151,10 +168,8 @@ class OperationExecutionExecutor private constructor(
         val closeFailure = try {
             connection.close()
             return primary
-        } catch (error: Error) {
-            error
-        } catch (exception: Exception) {
-            exception
+        } catch (failure: Throwable) {
+            failure
         }
 
         if (primary is Error) {
@@ -173,6 +188,8 @@ class OperationExecutionExecutor private constructor(
     }
 
     private fun addSuppressedSafely(primary: Throwable, secondary: Throwable) {
-        if (primary !== secondary) primary.addSuppressed(secondary)
+        if (primary !== secondary && primary.suppressed.none { it === secondary }) {
+            primary.addSuppressed(secondary)
+        }
     }
 }

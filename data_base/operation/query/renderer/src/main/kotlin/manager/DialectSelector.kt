@@ -1,6 +1,6 @@
 package gog.my_project.data_base_query.renderer.manager
 
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_query.dialect.interfaces.ISqlDialect
 import gog.my_project.data_base_query.renderer.dialects.MySqlDialect
 import gog.my_project.data_base_query.renderer.dialects.MariaDbDialect

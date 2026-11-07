@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.executor.manager
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.ast.schema.delete_schema.query_render_delete.QueryRenderDeleteAst

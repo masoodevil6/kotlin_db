@@ -1,7 +1,7 @@
 package gog.my_project.data_base_manager.execute.manager
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
@@ -26,17 +26,29 @@ class QueryExecuteMySqlIntegrationTest {
         val database = System.getProperty("execute.test.db.name")
         val username = System.getProperty("execute.test.db.username")
         val password = System.getProperty("execute.test.db.password")
-        assumeTrue(!host.isNullOrBlank() && !database.isNullOrBlank() && !username.isNullOrBlank()) {
-            "Set execute.test.db.host, execute.test.db.name, and execute.test.db.username Gradle project properties to enable MySQL binding integration"
+        val port = System.getProperty("execute.test.db.port")?.toIntOrNull()
+        assumeTrue(
+            !host.isNullOrBlank() && !database.isNullOrBlank() && !username.isNullOrBlank() &&
+                !password.isNullOrEmpty() && port != null && port in 1..65535,
+        ) {
+            "Set all execute.test.db connection properties to enable MySQL binding integration"
+        }
+        assumeTrue(host == "localhost" || host == "127.0.0.1") {
+            "Real database integration tests only accept a local MySQL host"
+        }
+        assumeTrue(Regex("^qb_tx_test_[A-Za-z0-9_]+$").matches(database!!)) {
+            "Real database integration tests require a pre-created qb_tx_test_<suffix> schema"
+        }
+        assumeTrue(!username.equals("root", ignoreCase = true)) {
+            "Real database integration tests require a dedicated non-root test user"
         }
 
-        val port = System.getProperty("execute.test.db.port")?.toIntOrNull() ?: 3306
         val config = DatabaseConfig(
             dbDomain = "jdbc:mysql://$host",
-            dbPort = port,
+            dbPort = requireNotNull(port),
             dbName = "$database?serverTimezone=UTC",
             dbUserName = username!!,
-            dbPassword = password.orEmpty(),
+            dbPassword = password!!,
         )
         val previousConfig = DefaultDatabaseConfig.config
         DefaultDatabaseConfig.config = config

@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.builder.ast.select_builder
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
@@ -26,19 +26,31 @@ class QueryRelationMySqlIntegrationTest {
         val host = System.getProperty("execute.test.db.host")
         val database = System.getProperty("execute.test.db.name")
         val username = System.getProperty("execute.test.db.username")
-        assumeTrue(!host.isNullOrBlank() && !database.isNullOrBlank() && !username.isNullOrBlank()) {
-            "Set execute.test.db.host, execute.test.db.name, and execute.test.db.username Gradle project properties to enable Cte MySQL integration"
+        val password = System.getProperty("execute.test.db.password")
+        val port = System.getProperty("execute.test.db.port")?.toIntOrNull()
+        assumeTrue(
+            !host.isNullOrBlank() && !database.isNullOrBlank() && !username.isNullOrBlank() &&
+                !password.isNullOrEmpty() && port != null && port in 1..65535,
+        ) {
+            "Set all execute.test.db connection properties to enable CTE MySQL integration"
+        }
+        assumeTrue(host == "localhost" || host == "127.0.0.1") {
+            "Real database integration tests only accept a local MySQL host"
+        }
+        assumeTrue(Regex("^qb_tx_test_[A-Za-z0-9_]+$").matches(database!!)) {
+            "Real database integration tests require a pre-created qb_tx_test_<suffix> schema"
+        }
+        assumeTrue(!username.equals("root", ignoreCase = true)) {
+            "Real database integration tests require a dedicated non-root test user"
         }
 
-        val port = System.getProperty("execute.test.db.port")?.toIntOrNull() ?: 3306
-        val password = System.getProperty("execute.test.db.password").orEmpty()
         val previousConfig = DefaultDatabaseConfig.config
         val config = DatabaseConfig(
             dbDomain = "jdbc:mysql://$host",
-            dbPort = port,
-            dbName = database!!,
+            dbPort = requireNotNull(port),
+            dbName = database,
             dbUserName = username!!,
-            dbPassword = password,
+            dbPassword = password!!,
         )
         val tableName = "plan3_query_relation_${UUID.randomUUID().toString().replace('-', '_')}"
         var connection: java.sql.Connection? = null
@@ -54,10 +66,10 @@ class QueryRelationMySqlIntegrationTest {
             println("PLAN3_CONNECTOR_VERSION=${metadata.driverName} ${metadata.driverVersion}")
             println("PLAN3_JAVA_VERSION=${System.getProperty("java.version")}")
 
-            cleanupRequired = true
             activeConnection.createStatement().use { statement ->
                 statement.execute("CREATE TABLE $tableName (id BIGINT NOT NULL PRIMARY KEY)")
             }
+            cleanupRequired = true
             activeConnection.prepareStatement("INSERT INTO $tableName (id) VALUES (?)").use { statement ->
                 statement.setLong(1, 10L)
                 assertEquals(1, statement.executeUpdate())

@@ -1,5 +1,7 @@
 # قابلیت‌های کتابخانه
 
+> وضعیت Migration در بخش‌های این سند تاریخی است: runtime قدیمی و ذخیره‌سازی history حذف شده‌اند. توضیحات Migration در ادامه، سابقهٔ معماری قبلی‌اند و وضعیت فعلی build یا API اجرایی را توصیف نمی‌کنند.
+
 این سند نمای کلی از قابلیت‌هایی است که در کد فعلی مخزن `my_project` پیاده‌سازی شده‌اند. هدف آن معرفی زیرسیستم‌های کتابخانه، APIهای موجود، مسیر اجرای عملیات و مرزهایی است که نباید با قابلیت‌های آینده اشتباه گرفته شوند.
 
 > این مستند بر اساس ساختار و کد موجود در مخزن نوشته شده است؛ به‌تنهایی تضمین‌کنندهٔ انتشار نسخهٔ پایدار، سازگاری با همهٔ نسخه‌های پایگاه‌داده یا پشتیبانی رسمی از همهٔ dialectها نیست.
@@ -37,7 +39,7 @@ Database configuration
 | `data_base:migration:api` | قراردادهای migration، هویت و registration. |
 | `data_base:migration:params` | انواع دادهٔ ستون‌ها و پارامترهای migration. |
 | `data_base:migration:ast` | AST عملیات migration و اجزای schema. |
-| `data_base:migration:builder` | DSL ساخت operation و تعریف migration. |
+| `data_base:migration:api` | DSL ساخت operation و تعریف migration. |
 | `data_base:migration:dialect` | قرارداد dialect و capabilityهای migration renderer. |
 | `data_base:migration:renderer` | تولید SQL مربوط به migration و انتخاب dialect. |
 | `data_base:migration:executor` | اجرای DDL، Migration State Store و `MigrationMigrator`. |

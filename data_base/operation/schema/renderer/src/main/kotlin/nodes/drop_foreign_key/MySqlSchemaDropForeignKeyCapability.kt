@@ -5,7 +5,11 @@ import gog.my_project.data_base_schema.dialect.data_class.SchemaDataClass
 import gog.my_project.data_base_schema.dialect.interfaces.IRenderContext
 import gog.my_project.data_base_schema.dialect.nodes.drop_foreign_key.ISchemaDropForeignKeyCapability
 
-class MySqlSchemaDropForeignKeyCapability : ISchemaDropForeignKeyCapability {
+class MySqlSchemaDropForeignKeyCapability internal constructor(
+    private val supportsIfExists: Boolean,
+) : ISchemaDropForeignKeyCapability {
+    constructor() : this(supportsIfExists = false)
+
     override fun render(
         ast: ISchemaDropForeignKeyAst,
         ctx: IRenderContext,
@@ -13,7 +17,16 @@ class MySqlSchemaDropForeignKeyCapability : ISchemaDropForeignKeyCapability {
     ): String {
         val table = requireIdentifier(ast.metadata.tableName, "table")
         val constraint = requireIdentifier(ast.metadata.constraintName, "constraint")
-        return "ALTER TABLE ${quoteIdentifier(table)} DROP FOREIGN KEY ${quoteIdentifier(constraint)}"
+        val ifExists = ast.ifExistAst?.let { child ->
+            val fragment = requireNotNull(ctx.registry.render(child, ctx.dialect)) {
+                "Renderer returned no SQL for DROP FOREIGN KEY IF EXISTS"
+            }
+            if (!supportsIfExists) {
+                throw UnsupportedOperationException("DROP FOREIGN KEY IF EXISTS is not supported by this SQL dialect")
+            }
+            " $fragment"
+        }.orEmpty()
+        return "ALTER TABLE ${quoteIdentifier(table)} DROP FOREIGN KEY$ifExists ${quoteIdentifier(constraint)}"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =

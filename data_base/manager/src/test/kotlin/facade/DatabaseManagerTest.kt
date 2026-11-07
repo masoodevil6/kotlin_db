@@ -1,10 +1,10 @@
 package gog.my_project.data_base_manager.facade
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
-import gog.my_project.data_base.core.data_base.DatabasePoolConfig
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

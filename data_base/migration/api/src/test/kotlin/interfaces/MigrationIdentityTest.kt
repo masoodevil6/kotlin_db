@@ -1,5 +1,6 @@
 package gog.my_project.data_base.migration.api.interfaces
 
+import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -7,7 +8,7 @@ import kotlin.test.assertFailsWith
 class MigrationIdentityTest {
     @Test
     fun preservesValidIdentityExactly() {
-        val identity = MigrationIdentity.fromAnnotationValue("create_users2_email")
+        val identity = MigrationIdentity.fromValue("create_users2_email")
 
         assertEquals("create_users2_email", identity.value)
     }
@@ -16,7 +17,7 @@ class MigrationIdentityTest {
     fun acceptsMaximumLength() {
         val value = "a" + "b".repeat(254)
 
-        assertEquals(value, MigrationIdentity.fromAnnotationValue(value).value)
+        assertEquals(value, MigrationIdentity.fromValue(value).value)
     }
 
     @Test
@@ -24,7 +25,7 @@ class MigrationIdentityTest {
         val value = "a" + "b".repeat(255)
 
         assertFailsWith<IllegalArgumentException> {
-            MigrationIdentity.fromAnnotationValue(value)
+            MigrationIdentity.fromValue(value)
         }
     }
 
@@ -42,7 +43,7 @@ class MigrationIdentityTest {
             "créate_users",
         ).forEach { value ->
             assertFailsWith<IllegalArgumentException>(value) {
-                MigrationIdentity.fromAnnotationValue(value)
+            MigrationIdentity.fromValue(value)
             }
         }
     }

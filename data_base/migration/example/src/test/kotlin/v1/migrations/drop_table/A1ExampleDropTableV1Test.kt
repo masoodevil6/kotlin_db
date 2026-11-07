@@ -1,6 +1,12 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_table
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.builder.ast.drop_table.SchemaDropTableBuilder
+import kotlin.test.assertNull
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,8 +19,9 @@ class A1ExampleDropTableV1Test {
 
     @Test
     fun rendersDropTableWithoutIfExists() {
-        val sql = MySqlDialect().render(
-            A1ExampleDropTableV1(useIfExists = false).migration().ast,
+        val sql = Schema.render(
+            A1ExampleDropTableV1(useIfExists = false).migration(),
+            SchemaDialect.MYSQL,
         )
 
         assertEquals("DROP TABLE `users`", sql)
@@ -22,8 +29,9 @@ class A1ExampleDropTableV1Test {
 
     @Test
     fun rendersDropTableWithIfExists() {
-        val sql = MySqlDialect().render(
-            A1ExampleDropTableV1(useIfExists = true).migration().ast,
+        val sql = Schema.render(
+            A1ExampleDropTableV1(useIfExists = true).migration(),
+            SchemaDialect.MYSQL,
         )
 
         assertEquals("DROP TABLE IF EXISTS `users`", sql)
@@ -43,9 +51,9 @@ class A1ExampleDropTableV1Test {
     }
 
     @Test
-    fun ifExistsDefaultsToFalseInAst() {
+    fun ifExistsDefaultsToAbsentInAst() {
         val migration = SchemaDropTableBuilder().apply { tableName("users") }
 
-        assertEquals(false, migration.ast.metadata.ifExists)
+        assertNull(migration.ast.ifExistAst)
     }
 }

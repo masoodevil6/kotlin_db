@@ -1,7 +1,7 @@
 package gog.my_project.data_base_manager.connection.manager
 
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import java.sql.Connection
 import java.sql.DriverManager

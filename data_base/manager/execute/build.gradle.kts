@@ -13,6 +13,7 @@ repositories {
 dependencies {
     api(project(":data_base:manager:connection"))
     api(project(":data_base:core"))
+    api(project(":data_base:operation:config"))
 
     testImplementation(kotlin("test"))
 }

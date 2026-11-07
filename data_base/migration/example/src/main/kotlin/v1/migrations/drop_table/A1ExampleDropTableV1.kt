@@ -1,9 +1,7 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_table
 
-import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
-import gog.my_project.data_base_schema.builder.ast.drop_table.SchemaDropTableBuilder
-import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
-import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+import gog.my_project.data_base_schema.*
+
 
 
 
@@ -12,15 +10,14 @@ class A1ExampleDropTableV1(
     private val useIfExists: Boolean = false,
 ) {
 
-    fun migration(): ISchemaDropTableApi =
-        SchemaDropTableBuilder().apply {
+    fun migration(): SchemaOperation =
+        Schema.dropTable {
             tableName("users")
             if (useIfExists) ifExists()
         }
 
-    fun render(dialect: ISqlDialect) {
-        val sql = dialect.render(migration().ast)
-            ?: error("Migration renderer returned no SQL")
+    fun render(dialect: SchemaDialect, version: SchemaVersion? = null) {
+        val sql = Schema.render(migration(), dialect, version)
 
         println("\n=============================================")
         println("DROP TABLE example (ifExists=$useIfExists)")
@@ -28,16 +25,4 @@ class A1ExampleDropTableV1(
         println(sql)
     }
 
-    fun execute(migrationExecutor: IMigrationExecutor) {
-        migrationExecutor.execute(
-            queryBuilder = migration(),
-            blockQueryInfo = { query, paramsMap ->
-                println("drop table query: $query")
-                println("params: $paramsMap")
-            },
-            blockExecute = { result ->
-                println("drop table execute: $result")
-            },
-        )
     }
-}

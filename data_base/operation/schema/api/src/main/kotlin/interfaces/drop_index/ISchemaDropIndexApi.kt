@@ -6,4 +6,5 @@ import gog.my_project.data_base_schema.ast.interfaces.drop_index.ISchemaDropInde
 interface ISchemaDropIndexApi : ISchemaApi<ISchemaDropIndexAst> {
     fun tableName(table: String): ISchemaDropIndexApi
     fun name(name: String): ISchemaDropIndexApi
+    fun ifExists(): ISchemaDropIndexApi
 }

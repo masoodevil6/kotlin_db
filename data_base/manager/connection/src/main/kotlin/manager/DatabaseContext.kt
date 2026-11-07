@@ -1,10 +1,10 @@
 package gog.my_project.data_base_manager.connection.manager
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
-import gog.my_project.data_base.core.data_base.DatabasePoolConfig
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import java.sql.Connection
 import java.util.concurrent.locks.ReentrantReadWriteLock

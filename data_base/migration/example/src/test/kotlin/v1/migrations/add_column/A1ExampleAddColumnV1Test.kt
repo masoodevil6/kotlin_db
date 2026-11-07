@@ -1,5 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.add_column
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.builder.ast.add_column.SchemaAddColumnBuilder
 import gog.my_project.data_base_schema.params.data_types.IntType
 import gog.my_project.data_base_schema.params.data_types.VarcharType
@@ -14,7 +19,7 @@ import kotlin.test.Test
 class A1ExampleAddColumnV1Test {
     @Test
     fun rendersAddColumn() {
-        val sql = MySqlDialect().render(A1ExampleAddColumnV1().migration().ast)
+        val sql = Schema.render(A1ExampleAddColumnV1().migration(), SchemaDialect.MYSQL)
 
         assertEquals(
             "ALTER TABLE `users` ADD COLUMN `email` VARCHAR(255) NOT NULL",

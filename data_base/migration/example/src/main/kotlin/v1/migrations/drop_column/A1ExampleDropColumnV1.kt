@@ -1,9 +1,7 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_column
 
-import gog.my_project.data_base_schema.api.interfaces.drop_column.ISchemaDropColumnApi
-import gog.my_project.data_base_schema.builder.ast.drop_column.SchemaDropColumnBuilder
-import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
-import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+import gog.my_project.data_base_schema.*
+
 
 
 
@@ -13,16 +11,15 @@ class A1ExampleDropColumnV1(
     private val column: String = "display_name",
     private val useIfExists: Boolean = false,
 ) {
-    fun migration(): ISchemaDropColumnApi =
-        SchemaDropColumnBuilder().apply {
+    fun migration(): SchemaOperation =
+        Schema.dropColumn {
             tableName(table)
             name(column)
             if (useIfExists) ifExists()
         }
 
-    fun render(dialect: ISqlDialect) {
-        val sql = dialect.render(migration().ast)
-            ?: error("Migration renderer returned no SQL")
+    fun render(dialect: SchemaDialect, version: SchemaVersion? = null) {
+        val sql = Schema.render(migration(), dialect, version)
 
         println("\n=============================================")
         println("DROP COLUMN example (ifExists=$useIfExists)")
@@ -39,16 +36,4 @@ class A1ExampleDropColumnV1(
         println(sql)
     }
 
-    fun execute(migrationExecutor: IMigrationExecutor) {
-        migrationExecutor.execute(
-            queryBuilder = migration(),
-            blockQueryInfo = { query, paramsMap ->
-                println("drop column query: $query")
-                println("params: $paramsMap")
-            },
-            blockExecute = { result ->
-                println("drop column execute: $result")
-            },
-        )
     }
-}

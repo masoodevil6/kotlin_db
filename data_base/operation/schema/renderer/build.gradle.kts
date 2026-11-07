@@ -12,6 +12,7 @@ repositories {
 
 dependencies {
     api(project(":data_base:core"))
+    api(project(":data_base:operation:config"))
     api(project(":data_base:operation:schema:ast"))
     api(project(":data_base:operation:schema:dialect"))
     implementation(project(":data_base:operation:schema:params"))

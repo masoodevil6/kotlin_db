@@ -5,7 +5,11 @@ import gog.my_project.data_base_schema.dialect.data_class.SchemaDataClass
 import gog.my_project.data_base_schema.dialect.interfaces.IRenderContext
 import gog.my_project.data_base_schema.dialect.nodes.drop_index.ISchemaDropIndexCapability
 
-class MySqlSchemaDropIndexCapability : ISchemaDropIndexCapability {
+class MySqlSchemaDropIndexCapability internal constructor(
+    private val supportsIfExists: Boolean,
+) : ISchemaDropIndexCapability {
+    constructor() : this(supportsIfExists = false)
+
     override fun render(
         ast: ISchemaDropIndexAst,
         ctx: IRenderContext,
@@ -13,7 +17,16 @@ class MySqlSchemaDropIndexCapability : ISchemaDropIndexCapability {
     ): String {
         val index = requireIdentifier(ast.metadata.indexName, "index")
         val table = requireIdentifier(ast.metadata.tableName, "table")
-        return "DROP INDEX ${quoteIdentifier(index)} ON ${quoteIdentifier(table)}"
+        val ifExists = ast.ifExistAst?.let { child ->
+            val fragment = requireNotNull(ctx.registry.render(child, ctx.dialect)) {
+                "Renderer returned no SQL for DROP INDEX IF EXISTS"
+            }
+            if (!supportsIfExists) {
+                throw UnsupportedOperationException("DROP INDEX IF EXISTS is not supported by this SQL dialect")
+            }
+            " $fragment"
+        }.orEmpty()
+        return "DROP INDEX$ifExists ${quoteIdentifier(index)} ON ${quoteIdentifier(table)}"
     }
 
     private fun requireIdentifier(value: String?, label: String): String =

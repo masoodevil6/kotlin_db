@@ -1,22 +1,20 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_foreign_key
 
-import gog.my_project.data_base_schema.api.interfaces.drop_foreign_key.ISchemaDropForeignKeyApi
-import gog.my_project.data_base_schema.builder.ast.drop_foreign_key.SchemaDropForeignKeyBuilder
-import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
-import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+import gog.my_project.data_base_schema.*
+
 
 
 
 
 class A1ExampleDropForeignKeyV1 {
-    fun migration(): ISchemaDropForeignKeyApi =
-        SchemaDropForeignKeyBuilder().apply {
+    fun migration(): SchemaOperation =
+        Schema.dropForeignKey {
             tableName("orders")
             name("fk_orders_tenant_user")
         }
 
-    fun render(dialect: ISqlDialect) {
-        val sql = dialect.render(migration().ast) ?: error("Migration renderer returned no SQL")
+    fun render(dialect: SchemaDialect, version: SchemaVersion? = null) {
+        val sql = Schema.render(migration(), dialect, version)
         println("\n=============================================")
         println("DROP FOREIGN KEY example")
         println("---------------------------")
@@ -24,14 +22,4 @@ class A1ExampleDropForeignKeyV1 {
     }
 
     /** Execution is opt-in: call this method explicitly after reviewing the rendered DDL. */
-    fun execute(migrationExecutor: IMigrationExecutor) {
-        migrationExecutor.execute(
-            queryBuilder = migration(),
-            blockQueryInfo = { query, params ->
-                println("drop foreign key query: $query")
-                println("params: $params")
-            },
-            blockExecute = { result -> println("drop foreign key execute: $result") },
-        )
     }
-}

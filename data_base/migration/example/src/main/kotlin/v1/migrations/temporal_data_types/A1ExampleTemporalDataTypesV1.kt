@@ -1,38 +1,34 @@
 package gog.my_project.data_base.migration.example.v1.migrations.temporal_data_types
 
-import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
-import gog.my_project.data_base_schema.builder.ast.create_table.render_schema_create_table.SchemaRenderCreateTableBuilder
+import gog.my_project.data_base_schema.*
+
 import gog.my_project.data_base.migration.example.v1.migrations.IExampleV1
-import gog.my_project.data_base_schema.params.data_types.DateTimeType
-import gog.my_project.data_base_schema.params.data_types.DateType
-import gog.my_project.data_base_schema.params.data_types.TimestampType
-import gog.my_project.data_base_schema.params.data_types.TimeType
 
 
 
 
 /** Render-only example of the temporal column types introduced in migration v1.16. */
 class A1ExampleTemporalDataTypesV1 : IExampleV1 {
-    override fun migration(): ISchemaRenderCreateTableApi =
-        SchemaRenderCreateTableBuilder().apply {
+    override fun migration(): SchemaOperation =
+        Schema.createTable {
             table { tableName("temporal_events") }
             addColumn {
                 name("event_date")
-                dataType(DateType())
+                dataType(SchemaDataType.DateType)
                 notNull()
             }
             addColumn {
                 name("elapsed_time")
-                dataType(TimeType(precision = 3))
+                dataType(SchemaDataType.TimeType(precision = 3))
             }
             addColumn {
                 name("local_event_time")
-                dataType(DateTimeType())
+                dataType(SchemaDataType.DateTimeType())
                 notNull()
             }
             addColumn {
                 name("recorded_at")
-                dataType(TimestampType(precision = 6))
+                dataType(SchemaDataType.TimestampType(precision = 6))
                 notNull()
             }
         }

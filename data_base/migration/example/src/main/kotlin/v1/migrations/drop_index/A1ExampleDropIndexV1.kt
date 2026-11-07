@@ -1,9 +1,7 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_index
 
-import gog.my_project.data_base_schema.api.interfaces.drop_index.ISchemaDropIndexApi
-import gog.my_project.data_base_schema.builder.ast.drop_index.SchemaDropIndexBuilder
-import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
-import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+import gog.my_project.data_base_schema.*
+
 
 
 
@@ -12,28 +10,18 @@ class A1ExampleDropIndexV1(
     private val table: String = "users",
     private val index: String = "idx_users_email",
 ) {
-    fun migration(): ISchemaDropIndexApi =
-        SchemaDropIndexBuilder().apply {
+    fun migration(): SchemaOperation =
+        Schema.dropIndex {
             tableName(table)
             name(index)
         }
 
-    fun render(dialect: ISqlDialect) {
-        val sql = dialect.render(migration().ast) ?: error("Migration renderer returned no SQL")
+    fun render(dialect: SchemaDialect, version: SchemaVersion? = null) {
+        val sql = Schema.render(migration(), dialect, version)
         println("\n=============================================")
         println("DROP INDEX example")
         println("---------------------------")
         println(sql)
     }
 
-    fun execute(migrationExecutor: IMigrationExecutor) {
-        migrationExecutor.execute(
-            queryBuilder = migration(),
-            blockQueryInfo = { query, params ->
-                println("drop index query: $query")
-                println("params: $params")
-            },
-            blockExecute = { result -> println("drop index execute: $result") },
-        )
     }
-}

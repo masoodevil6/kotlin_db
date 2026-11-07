@@ -1,9 +1,9 @@
 package gog.my_project.data_base_manager.example.configuration
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 
 /** Creates one independent configuration from environment values; no connection is opened here. */
 fun databaseConfig(prefix: String, defaultDatabaseName: String): DatabaseConfig = DatabaseConfig(

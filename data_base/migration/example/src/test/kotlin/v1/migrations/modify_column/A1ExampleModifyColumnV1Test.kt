@@ -1,5 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.modify_column
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.ast.interfaces.modify_column.DefaultDefinition
 import gog.my_project.data_base_schema.builder.ast.modify_column.SchemaModifyColumnBuilder
 import gog.my_project.data_base_schema.params.data_types.BooleanType
@@ -25,7 +30,7 @@ class A1ExampleModifyColumnV1Test {
     fun rendersFullDesiredDefinition() {
         assertEquals(
             "ALTER TABLE `users` MODIFY COLUMN `name` VARCHAR(255) NOT NULL DEFAULT 'Unknown'",
-            dialect.render(A1ExampleModifyColumnV1().migration().ast),
+            Schema.render(A1ExampleModifyColumnV1().migration(), SchemaDialect.MYSQL),
         )
     }
 

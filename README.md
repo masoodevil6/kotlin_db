@@ -7,6 +7,7 @@
 ```text
 my_project/
 ├── app/                              # برنامه نمونه و نقطه ورود اصلی
+├── example/                          # مصرف‌کننده مستقل API عمومی Database Manager
 ├── utils/                            # ابزارهای عمومی قابل استفاده مجدد
 ├── tools/                            # ابزارهای داخلی و اسکریپت‌های کمکی
 ├── data_base/                        # بدنه اصلی کتابخانه دیتابیس
@@ -54,6 +55,8 @@ my_project/
 - [درخت کلی پروژه](#نمای-کلی-درخت-پروژه)
 
 ### راهنماهای ماژول‌ها
+
+- [مثال مستقل Database Manager](example/README.md)
 
 - [Connection و تنظیم اتصال](documents/guides/connection.md)
 - [Collection](documents/guides/collection.md)

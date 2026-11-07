@@ -1,15 +1,15 @@
 package gog.my_project.data_base_schema
 
-import gog.my_project.data_base.core.data_base.DatabaseProduct
-import gog.my_project.data_base.core.data_base.MARIA_DB
-import gog.my_project.data_base.core.data_base.MYSQL
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.data_base.DatabaseProduct
+import gog.my_project.data_base_operation.config.data_base.MARIA_DB
+import gog.my_project.data_base_operation.config.data_base.MYSQL
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
+import gog.my_project.data_base_schema.executor.integration.SchemaExecutionIntegration
 import gog.my_project.data_base_schema.builder.ast.add_column.SchemaAddColumnBuilder
 import gog.my_project.data_base_schema.builder.ast.create_foreign_key.SchemaCreateForeignKeyBuilder
 import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
@@ -160,7 +160,7 @@ object Schema {
         scope: OperationExecutionContext,
         onQueryInfo: ((sql: String, parameters: Map<String, Any?>) -> Unit)? = null,
     ): ExecuteResult<Boolean> {
-        try {
+        val schemaApi = try {
             operation.requireSchemaApi()
         } catch (error: Error) {
             scope.failed<Boolean>(error)
@@ -169,32 +169,9 @@ object Schema {
             return scope.failed(exception)
         }
 
-        val sql = try {
-            render(operation, scope.databasePlatformConfig)
-        } catch (error: Error) {
-            scope.failed<Boolean>(error)
-            throw error
-        } catch (exception: Exception) {
-            return scope.failed(exception)
-        }
-
-        try {
-            onQueryInfo?.invoke(sql, emptyMap())
-        } catch (error: Error) {
-            scope.failed<Boolean>(error)
-            throw error
-        } catch (exception: Exception) {
-            return scope.failed(exception)
-        }
-
-        return scope.executeDdl(sql)
+        return SchemaExecutionIntegration.executeScoped(schemaApi, scope, onQueryInfo)
     }
 
-    private fun render(operation: SchemaOperation, platform: DatabasePlatformConfig): String {
-        val dialect = platform.dialect.toSchemaDialect()
-        val version = platform.targetDatabaseVersion?.toSchemaVersion(dialect)
-        return render(operation, dialect, version)
-    }
 }
 
 private fun SchemaDialect.toCoreDialect(): DialectQuery = when (this) {
@@ -215,7 +192,7 @@ private fun SchemaVersion.toCoreVersion() = when (dialect) {
     SchemaDialect.MARIA_DB -> MARIA_DB.Version(major, minor, patch)
 }
 
-private fun gog.my_project.data_base.core.data_base.ProductDatabaseVersion.toSchemaVersion(
+private fun gog.my_project.data_base_operation.config.data_base.ProductDatabaseVersion.toSchemaVersion(
     dialect: SchemaDialect,
 ): SchemaVersion {
     val expectedProduct = when (dialect) {

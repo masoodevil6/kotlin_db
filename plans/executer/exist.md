@@ -745,8 +745,8 @@ class CreateCustomersMigrationV1 : Migration {
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.api.interfaces.MigrationId
-import gog.my_project.data_base.migration.builder.migration
-import gog.my_project.data_base.migration.builder.migrationConfig
+import gog.my_project.data_base_migration.api.builder.migration
+import gog.my_project.data_base_migration.api.builder.migrationConfig
 
 object migrationTags {
     const val create_customers = "create_customers"
@@ -809,8 +809,8 @@ registeredMigrations.forEach { registered ->
 import gog.my_project.data_base.migration.api.interfaces.Migration
 import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
 import gog.my_project.data_base.migration.api.interfaces.MigrationId
-import gog.my_project.data_base.migration.builder.migration
-import gog.my_project.data_base.migration.builder.migrationConfig
+import gog.my_project.data_base_migration.api.builder.migration
+import gog.my_project.data_base_migration.api.builder.migrationConfig
 import gog.my_project.data_base.migration.executor.manager.MigrationMigrator
 import gog.my_project.data_base.migration.params.data_types.IntType
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult

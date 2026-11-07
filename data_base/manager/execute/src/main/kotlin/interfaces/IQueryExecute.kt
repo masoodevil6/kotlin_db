@@ -1,6 +1,6 @@
 package gog.my_project.data_base_manager.execute.interfaces
 
-import gog.my_project.data_base.core.data_base.DatabaseServerInfo
+import gog.my_project.data_base_operation.config.data_base.DatabaseServerInfo
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
 import gog.my_project.data_base_manager.execute.connection.withOwnedConnection

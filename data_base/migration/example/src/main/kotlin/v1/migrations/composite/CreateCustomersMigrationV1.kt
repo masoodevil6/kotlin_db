@@ -1,33 +1,33 @@
 package gog.my_project.data_base.migration.example.v1.migrations.composite
 
-import gog.my_project.data_base.migration.api.interfaces.Migration
-import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
-import gog.my_project.data_base.migration.builder.migration
-import gog.my_project.data_base_schema.params.data_types.IntType
-import gog.my_project.data_base_schema.params.data_types.VarcharType
+import gog.my_project.data_base_schema.*
+
+import gog.my_project.data_base_migration.core.migrate.Migration
+import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
+import gog.my_project.data_base_migration.api.builder.migration
 
 class CreateCustomersMigrationV1 : Migration {
     override fun up(): MigrationDefinition = migration {
-        createTable {
+        operation(Schema.createTable {
             table { tableName("customers") }
             addColumn {
                 name("id")
-                dataType(IntType())
+                dataType(SchemaDataType.IntType)
                 notNull()
                 autoIncrement()
                 primaryKey()
             }
             addColumn {
                 name("email")
-                dataType(VarcharType(255))
+                dataType(SchemaDataType.VarcharType(255))
                 notNull()
             }
-        }
+        })
     }
 
     override fun down(): MigrationDefinition = migration {
-        dropTable {
+        operation(Schema.dropTable {
             tableName("customers")
-        }
+        })
     }
 }

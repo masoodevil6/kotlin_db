@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.executor.interfaces
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base_manager.execute.manager.QueryExecute

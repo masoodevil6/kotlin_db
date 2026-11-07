@@ -1,12 +1,12 @@
 package gog.my_project.data_base.migration.example.v1.migrations.registration
 
-import gog.my_project.data_base.migration.api.interfaces.Migration
-import gog.my_project.data_base.migration.api.interfaces.MigrationDefinition
-import gog.my_project.data_base.migration.api.interfaces.MigrationId
-import gog.my_project.data_base.migration.builder.migration
-import gog.my_project.data_base.migration.builder.migrationConfig
-import gog.my_project.data_base_schema.params.data_types.IntType
-import gog.my_project.data_base_schema.params.data_types.VarcharType
+import gog.my_project.data_base_schema.*
+
+import gog.my_project.data_base_migration.core.migrate.Migration
+import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
+import gog.my_project.data_base.core.annotations.migrations.MigrationId
+import gog.my_project.data_base_migration.api.builder.migration
+import gog.my_project.data_base_migration.api.builder.migrationConfig
 
 object migrationTags {
     const val create_customers = "create_customers"
@@ -16,46 +16,48 @@ object migrationTags {
 @MigrationId(migrationTags.create_customers)
 class CreateCustomersRegistrationExample : Migration {
     override fun up(): MigrationDefinition = migration {
-        createTable {
+        operation(Schema.createTable {
             table { tableName("customers") }
             addColumn {
                 name("id")
-                dataType(IntType())
+                dataType(SchemaDataType.IntType)
                 notNull()
                 autoIncrement()
                 primaryKey()
             }
-        }
+        })
     }
 
     override fun down(): MigrationDefinition = migration {
-        dropTable { tableName("customers") }
+        operation(Schema.dropTable { tableName("customers") })
     }
 }
 
 @MigrationId(migrationTags.add_customer_email)
 class AddCustomerEmailRegistrationExample : Migration {
     override fun up(): MigrationDefinition = migration {
-        addColumn {
+        operation(Schema.addColumn {
             tableName("customers")
             name("email")
-            dataType(VarcharType(255))
+            dataType(SchemaDataType.VarcharType(255))
             notNull()
-        }
+        })
     }
 
     override fun down(): MigrationDefinition = migration {
-        dropColumn {
+        operation(Schema.dropColumn {
             tableName("customers")
             name("email")
-        }
+        })
     }
 }
 
 fun customerMigrationConfiguration() = migrationConfig {
-    migration<CreateCustomersRegistrationExample>()
+    migrationVersion("customers_v1") {
+        migration<CreateCustomersRegistrationExample>()
 
-    migrationGroup("customers") {
-        migration<AddCustomerEmailRegistrationExample>()
+        migrationGroup("customers") {
+            migration<AddCustomerEmailRegistrationExample>()
+        }
     }
 }

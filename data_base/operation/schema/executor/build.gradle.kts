@@ -17,6 +17,7 @@ dependencies {
     api(project(":data_base:manager:execute"))
     api(project(":data_base:manager:connection"))
     api(project(":data_base:core"))
+    implementation(project(":data_base:operation:config"))
     implementation(project(":tools"))
 
     testImplementation(kotlin("test"))
@@ -25,6 +26,18 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    listOf(
+        "execute.test.db.transaction.enabled",
+        "execute.test.db.host",
+        "execute.test.db.port",
+        "execute.test.db.name",
+        "execute.test.db.username",
+        "execute.test.db.password",
+    ).forEach { propertyName ->
+        providers.gradleProperty(propertyName).orNull?.let { propertyValue ->
+            systemProperty(propertyName, propertyValue)
+        }
+    }
 }
 
 kotlin {

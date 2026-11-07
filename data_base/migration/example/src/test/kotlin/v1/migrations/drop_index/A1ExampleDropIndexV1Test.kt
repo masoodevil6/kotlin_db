@@ -1,5 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_index
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.ast.schema.drop_index.SchemaDropIndexAst
 import gog.my_project.data_base_schema.builder.ast.drop_index.SchemaDropIndexBuilder
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
@@ -17,7 +22,7 @@ class A1ExampleDropIndexV1Test {
     fun rendersDropIndexWithMySqlSyntax() {
         assertEquals(
             "DROP INDEX `idx_users_email` ON `users`",
-            dialect.render(A1ExampleDropIndexV1().migration().ast),
+            Schema.render(A1ExampleDropIndexV1().migration(), SchemaDialect.MYSQL),
         )
     }
 

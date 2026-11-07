@@ -1,12 +1,10 @@
 package gog.my_project.data_base_manager.facade
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.migration.api.interfaces.MigrationConfiguration
-import gog.my_project.data_base_schema.Schema
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -16,14 +14,21 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertNotSame
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class DatabaseCatalogTest {
     private object Primary : DatabaseKey
     private object Analytics : DatabaseKey
     private object Unregistered : DatabaseKey
+    private data object DataSingleton : DatabaseKey
+    private data class ValueKey(val name: String) : DatabaseKey
+
+    private class OrdinaryKey(val name: String) : DatabaseKey
 
     @Test
     fun typedRegistrationIsLazyAndResolvesTheSameHandleIdentity() {
@@ -46,7 +51,7 @@ class DatabaseCatalogTest {
         assertNotSame(first, second)
         assertEquals(0, contextCreations.get())
 
-        val result = first.query { ExecuteResult.Success("done") }
+        val result = first.connection { ExecuteResult.Success("done") }
 
         assertEquals(ExecuteResult.Success("done"), result)
         assertEquals(1, contextCreations.get())
@@ -65,30 +70,137 @@ class DatabaseCatalogTest {
     }
 
     @Test
+    fun singletonObjectsAndDataObjectsAreUsableAsStableKeys() {
+        val manager = DatabaseManager {
+            database(Primary) { config = config("primary") }
+            database(DataSingleton) { config = config("data-singleton") }
+        }
+
+        assertEquals(listOf(Primary, DataSingleton), manager.registeredKeys().toList())
+        assertEquals(Primary, manager[Primary].key)
+        assertEquals(DataSingleton, manager[DataSingleton].key)
+        manager.close()
+    }
+
+    @Test
     fun duplicateAndUnknownKeysAreRejectedWithoutCreatingContexts() {
-        assertFailsWith<IllegalArgumentException> {
+        val duplicate = assertFailsWith<IllegalArgumentException> {
             DatabaseManager {
                 database(Primary) { config = config("primary") }
                 database(Primary) { config = config("other") }
             }
         }
+        assertTrue(duplicate.message.orEmpty().contains("Primary"))
 
         val manager = DatabaseManager()
-        assertFailsWith<NoSuchElementException> { manager.get(Unregistered) }
+        val unknown = assertFailsWith<NoSuchElementException> { manager.get(Unregistered) }
+        assertTrue(unknown.message.orEmpty().contains("Unregistered"))
         manager.close()
     }
 
     @Test
-    fun eachRegistrationKeepsItsOwnConfigurationAndMigrationAvailability() {
+    fun equalValueKeysIdentifyOneRegistrationForDuplicatesLookupAndContextCaching() {
+        val registeredKey = ValueKey("billing")
+        val equalLookupKey = ValueKey("billing")
+        assertNotSame(registeredKey, equalLookupKey)
+        assertEquals(registeredKey, equalLookupKey)
+
+        val contextCreations = AtomicInteger()
+        val provider = TrackingProvider()
+        val manager = DatabaseManager(
+            { database(registeredKey) { config = config("billing") } },
+            { name, databaseConfig ->
+                contextCreations.incrementAndGet()
+                DatabaseContext(name, databaseConfig, provider)
+            },
+        )
+
+        assertSame(registeredKey, manager[equalLookupKey].key)
+        assertSame(registeredKey, manager.registeredKeys().single())
+        assertEquals(ExecuteResult.Success("registered"), manager[registeredKey].connection {
+            ExecuteResult.Success("registered")
+        })
+        assertEquals(ExecuteResult.Success("equal lookup"), manager[equalLookupKey].connection {
+            ExecuteResult.Success("equal lookup")
+        })
+        assertEquals(1, contextCreations.get())
+        assertEquals(2, provider.openCount.get())
+
+        manager.close()
+    }
+
+    @Test
+    fun distinctKeysMayShareEqualConfigurationsAndKeepIndependentContexts() {
+        val sameConfig = config("shared")
+
+        val providers = listOf(TrackingProvider(), TrackingProvider())
+        val contextCreations = AtomicInteger()
+        val manager = DatabaseManager(
+            {
+                database(Primary) { config = sameConfig }
+                database(Analytics) { config = sameConfig }
+            },
+            { name, databaseConfig ->
+                val index = contextCreations.getAndIncrement()
+                DatabaseContext(name, databaseConfig, providers[index])
+            },
+        )
+
+        assertEquals(listOf(Primary, Analytics), manager.registeredKeys().toList())
+        assertEquals(ExecuteResult.Success("primary"), manager[Primary].connection {
+            ExecuteResult.Success("primary")
+        })
+        assertEquals(ExecuteResult.Success("analytics"), manager[Analytics].connection {
+            ExecuteResult.Success("analytics")
+        })
+        assertEquals(2, contextCreations.get())
+        assertEquals(listOf(1, 1), providers.map { it.openCount.get() })
+
+        manager.shutdown()
+        assertEquals(listOf(1, 1), providers.map { it.closeCount.get() })
+    }
+
+    @Test
+    fun dataClassKeysWithEqualValuesAreDuplicates() {
+        val first = ValueKey("orders")
+        val equalButDistinct = ValueKey("orders")
+        assertNotSame(first, equalButDistinct)
+        assertEquals(first, equalButDistinct)
+
+        val duplicate = assertFailsWith<IllegalArgumentException> {
+            DatabaseManager {
+                database(first) { config = config("first") }
+                database(equalButDistinct) { config = config("second") }
+            }
+        }
+        assertTrue(duplicate.message.orEmpty().contains("ValueKey(name=orders)"))
+    }
+
+    @Test
+    fun ordinaryClassesUseTheirEqualsAndHashCodeImplementation() {
+        val first = OrdinaryKey("main")
+        val second = OrdinaryKey("main")
+        assertNotEquals(first, second) // Any's default equality is reference identity.
+
+        val manager = DatabaseManager {
+            database(first) { config = config("first") }
+            database(second) { config = config("second") }
+        }
+
+        assertEquals(listOf(first, second), manager.registeredKeys().toList())
+        assertEquals(first, manager[first].key)
+        assertEquals(second, manager[second].key)
+        manager.close()
+    }
+
+    @Test
+    fun eachRegistrationKeepsItsOwnConfigurationAndIndependentContext() {
         val primaryProvider = TrackingProvider()
         val analyticsProvider = TrackingProvider()
         val manager = DatabaseManager(
             {
                 database(Primary) { config = config("primary") }
-                database(Analytics) {
-                    config = config("analytics")
-                    migrations = MigrationConfiguration(emptyList())
-                }
+                database(Analytics) { config = config("analytics") }
             },
             { name, databaseConfig ->
                 val provider = when (databaseConfig.connection.dbName) {
@@ -100,21 +212,17 @@ class DatabaseCatalogTest {
             },
         )
 
-        assertEquals(ExecuteResult.Success("primary"), manager[Primary].query {
+        assertEquals(ExecuteResult.Success("primary"), manager[Primary].connection {
             ExecuteResult.Success("primary")
         })
-        assertEquals(ExecuteResult.Success("analytics"), manager[Analytics].query {
+        assertEquals(ExecuteResult.Success("analytics"), manager[Analytics].connection {
             ExecuteResult.Success("analytics")
         })
         assertEquals(1, primaryProvider.openCount.get())
         assertEquals(1, analyticsProvider.openCount.get())
 
-        var primaryMigrationResult: ExecuteResult<Unit>? = null
-        manager[Primary].migrate { primaryMigrationResult = it }
-        assertIs<ExecuteResult.Failure>(primaryMigrationResult)
-        assertEquals(ExecuteResult.Success(Unit), runMigration(manager[Analytics]))
-        assertEquals(1, primaryProvider.openCount.get()) // missing migration configuration opens no additional connection.
-        assertEquals(1, analyticsProvider.openCount.get()) // empty migration list completes without opening another connection.
+        assertEquals(1, primaryProvider.openCount.get())
+        assertEquals(1, analyticsProvider.openCount.get())
 
         manager.shutdown()
         manager.shutdown()
@@ -134,7 +242,7 @@ class DatabaseCatalogTest {
         manager.shutdown()
         manager.shutdown()
 
-        val afterShutdown = handle.query { ExecuteResult.Success(Unit) }
+        val afterShutdown = handle.connection { ExecuteResult.Success(Unit) }
         assertIs<ExecuteResult.Failure>(afterShutdown)
         assertEquals(1, provider.openCount.get())
         assertEquals(1, provider.connectionCloseCount.get())
@@ -165,7 +273,7 @@ class DatabaseCatalogTest {
                 workers.submit<ExecuteResult<Int>> {
                     callersReady.countDown()
                     check(callersReady.await(5, TimeUnit.SECONDS))
-                    handle.query { ExecuteResult.Success(1) }
+                    handle.connection { ExecuteResult.Success(1) }
                 }
             }
             assertEquals(true, factoryEntered.await(5, TimeUnit.SECONDS))
@@ -208,12 +316,12 @@ class DatabaseCatalogTest {
             val first = workers.submit<ExecuteResult<String>> {
                 callersReady.countDown()
                 check(callersReady.await(5, TimeUnit.SECONDS))
-                primary.query { ExecuteResult.Success("primary") }
+                primary.connection { ExecuteResult.Success("primary") }
             }
             val second = workers.submit<ExecuteResult<String>> {
                 callersReady.countDown()
                 check(callersReady.await(5, TimeUnit.SECONDS))
-                analytics.query { ExecuteResult.Success("analytics") }
+                analytics.connection { ExecuteResult.Success("analytics") }
             }
 
             assertEquals(true, factoriesEntered.await(5, TimeUnit.SECONDS))
@@ -240,49 +348,16 @@ class DatabaseCatalogTest {
         )
         val handle = manager[Primary]
 
-        val failed = handle.query { ExecuteResult.Success("unreachable") }
+        val failed = handle.connection { ExecuteResult.Success("unreachable") }
         assertIs<ExecuteResult.Failure>(failed)
         assertEquals(0, provider.openCount.get())
 
-        assertEquals(ExecuteResult.Success("retried"), handle.query {
+        assertEquals(ExecuteResult.Success("retried"), handle.connection {
             ExecuteResult.Success("retried")
         })
         assertEquals(2, attempts.get())
         assertEquals(1, provider.openCount.get())
         manager.close()
-    }
-
-    @Test
-    fun schemaHandleUsesThePublicSchemaFacadeAndSelectedDatabase() {
-        val provider = TrackingProvider()
-        val manager = DatabaseManager(
-            { database(Primary) { config = config("primary") } },
-            { name, databaseConfig -> DatabaseContext(name, databaseConfig, provider) },
-        )
-        val operation = Schema.dropTable {
-            tableName("isolated_example_table")
-            ifExists()
-        }
-        val queryInfo = mutableListOf<Pair<String, Map<String, Any?>>>()
-
-        val result = manager[Primary].schema(operation) { sql, parameters ->
-            queryInfo += sql to parameters
-        }
-
-        assertEquals(ExecuteResult.Success(true), result)
-        assertEquals(1, provider.openCount.get())
-        assertEquals(1, provider.connectionCloseCount.get())
-        assertEquals(1, provider.preparedStatementCloseCount.get())
-        assertEquals(1, provider.executedSql.size)
-        assertEquals(provider.executedSql.single(), queryInfo.single().first)
-        assertEquals(emptyMap(), queryInfo.single().second)
-        manager.close()
-    }
-
-    private fun runMigration(handle: DatabaseHandle): ExecuteResult<Unit> {
-        var result: ExecuteResult<Unit>? = null
-        handle.migrate { result = it }
-        return requireNotNull(result)
     }
 
     private fun config(name: String) = DatabaseConfig(

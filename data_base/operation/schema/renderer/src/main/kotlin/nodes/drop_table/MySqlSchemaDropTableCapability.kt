@@ -16,7 +16,11 @@ class MySqlSchemaDropTableCapability : ISchemaDropTableCapability {
             "DROP TABLE requires a table name"
         }
         val quotedTableName = "`${tableName.replace("`", "``")}`"
-        val ifExists = if (ast.metadata.ifExists) " IF EXISTS" else ""
+        val ifExists = ast.ifExistAst?.let { child ->
+            " " + requireNotNull(ctx.registry.render(child, ctx.dialect)) {
+                "Renderer returned no SQL for DROP TABLE IF EXISTS"
+            }
+        }.orEmpty()
         return "DROP TABLE$ifExists $quotedTableName"
     }
 }

@@ -1,7 +1,13 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_column
 
+import gog.my_project.data_base_schema.SchemaDialect
+
+import gog.my_project.data_base_schema.Schema
+
+
 import gog.my_project.data_base_schema.ast.schema.drop_column.SchemaDropColumnAst
 import gog.my_project.data_base_schema.builder.ast.drop_column.SchemaDropColumnBuilder
+import gog.my_project.data_base_schema.renderer.dialects.MariaDbDialect
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,7 +19,7 @@ import kotlin.test.Test
 class A1ExampleDropColumnV1Test {
     @Test
     fun rendersDropColumnForMySql() {
-        val sql = MySqlDialect().render(A1ExampleDropColumnV1().migration().ast)
+        val sql = Schema.render(A1ExampleDropColumnV1().migration(), SchemaDialect.MYSQL)
 
         assertEquals("ALTER TABLE `users` DROP COLUMN `display_name`", sql)
     }
@@ -23,12 +29,14 @@ class A1ExampleDropColumnV1Test {
         val ordinary = A1ExampleDropColumnV1().migration()
         val optional = A1ExampleDropColumnV1(useIfExists = true).migration()
 
-        assertEquals(false, ordinary.ast.metadata.ifExists)
-        assertEquals(true, optional.ast.metadata.ifExists)
-        // MySQL does not accept DROP COLUMN IF EXISTS in ALTER TABLE syntax.
         assertEquals(
             "ALTER TABLE `users` DROP COLUMN `display_name`",
-            MySqlDialect().render(optional.ast),
+            Schema.render(ordinary, SchemaDialect.MYSQL),
+        )
+        assertFailsWith<UnsupportedOperationException> { Schema.render(optional, SchemaDialect.MYSQL) }
+        assertEquals(
+            "ALTER TABLE `users` DROP COLUMN IF EXISTS `display_name`",
+            Schema.render(optional, SchemaDialect.MARIA_DB),
         )
     }
 

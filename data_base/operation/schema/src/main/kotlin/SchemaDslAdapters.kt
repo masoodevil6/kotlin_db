@@ -194,6 +194,7 @@ internal class CreateIndexDefinitionAdapter(private val delegate: ISchemaCreateI
 internal class DropIndexDefinitionAdapter(private val delegate: ISchemaDropIndexApi) : SchemaDropIndexDefinition {
     override fun tableName(table: String) { delegate.tableName(table) }
     override fun name(name: String) { delegate.name(name) }
+    override fun ifExists() { delegate.ifExists() }
 }
 
 internal class CreateUniqueIndexDefinitionAdapter(
@@ -245,4 +246,5 @@ internal class DropForeignKeyDefinitionAdapter(
 ) : SchemaDropForeignKeyDefinition {
     override fun tableName(table: String) { delegate.tableName(table) }
     override fun name(name: String) { delegate.name(name) }
+    override fun ifExists() { delegate.ifExists() }
 }

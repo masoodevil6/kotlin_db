@@ -11,7 +11,8 @@ repositories {
 }
 
 dependencies {
-    api(project(":data_base:operation:schema:api"))
+    api(project(":data_base:migration:core"))
+    api(project(":data_base:operation:schema"))
 
     testImplementation(kotlin("test"))
 }

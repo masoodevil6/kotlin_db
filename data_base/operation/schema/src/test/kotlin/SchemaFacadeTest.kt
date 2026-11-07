@@ -5,12 +5,16 @@ import gog.my_project.data_base_operation.executor.transaction.OperationExecutio
 import gog.my_project.data_base_operation.executor.transaction.OperationParameter
 import gog.my_project.data_base_schema.ast.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableAst
 import gog.my_project.data_base_schema.ast.interfaces.modify_column.DefaultDefinition
+import gog.my_project.data_base_schema.ast.schema.if_exist.SchemaIfExistAst
+import gog.my_project.data_base_schema.renderer.dialects.MariaDbDialect
+import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SchemaFacadeTest {
@@ -38,7 +42,7 @@ class SchemaFacadeTest {
             Schema.dropTable { tableName("customers"); ifExists() } to "DROP TABLE",
             Schema.renameTable { fromTableName("customers"); toTableName("clients") } to "RENAME TABLE",
             Schema.addColumn { tableName("customers"); name("phone"); dataType(SchemaDataType.VarcharType(32)); nullable() } to "ADD COLUMN",
-            Schema.dropColumn { tableName("customers"); name("phone"); ifExists() } to "DROP COLUMN",
+            Schema.dropColumn { tableName("customers"); name("phone") } to "DROP COLUMN",
             Schema.renameColumn { tableName("customers"); name("phone"); to("mobile") } to "RENAME COLUMN",
             Schema.modifyColumn { tableName("customers"); name("mobile"); dataType(SchemaDataType.VarcharType(48)); notNull() } to "MODIFY COLUMN",
             Schema.createIndex { tableName("customers"); name("idx_phone"); column("phone"); using(SchemaIndexMethod.HASH) } to "CREATE INDEX",
@@ -73,6 +77,134 @@ class SchemaFacadeTest {
         assertEquals(2, createAst.columns.size)
         assertEquals(5, createAst.definitions.size)
         assertTrue(Schema.render(operations.first().first, SchemaDialect.MARIA_DB).startsWith("CREATE TABLE IF NOT EXISTS"))
+    }
+
+    @Test
+    fun `ifExists node renders independently and is attached to drop table`() {
+        val ifExistAst = SchemaIfExistAst()
+        assertEquals("IF EXISTS", MySqlDialect().render(ifExistAst))
+        assertEquals("IF EXISTS", MariaDbDialect().render(ifExistAst))
+
+        val ordinary = Schema.dropTable { tableName("customers") }
+        val conditional = Schema.dropTable { tableName("customers"); ifExists() }
+        val ordinaryAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_table.ISchemaDropTableAst>(
+            assertIs<ExistingSchemaOperationAdapter>(ordinary).schemaApi.ast,
+        )
+        val conditionalAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_table.ISchemaDropTableAst>(
+            assertIs<ExistingSchemaOperationAdapter>(conditional).schemaApi.ast,
+        )
+
+        assertNull(ordinaryAst.ifExistAst)
+        assertNotNull(conditionalAst.ifExistAst)
+        SchemaDialect.values().forEach { dialect ->
+            assertEquals("DROP TABLE `customers`", Schema.render(ordinary, dialect))
+            assertEquals("DROP TABLE IF EXISTS `customers`", Schema.render(conditional, dialect))
+        }
+    }
+
+    @Test
+    fun `drop column ifExists is stored and rendered only for supporting dialects`() {
+        val ordinary = Schema.dropColumn { tableName("customers"); name("phone") }
+        val conditional = Schema.dropColumn { tableName("customers"); name("phone"); ifExists() }
+        val ordinaryAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_column.ISchemaDropColumnAst>(
+            assertIs<ExistingSchemaOperationAdapter>(ordinary).schemaApi.ast,
+        )
+        val conditionalAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_column.ISchemaDropColumnAst>(
+            assertIs<ExistingSchemaOperationAdapter>(conditional).schemaApi.ast,
+        )
+
+        assertNull(ordinaryAst.ifExistAst)
+        assertNotNull(conditionalAst.ifExistAst)
+        SchemaDialect.values().forEach { dialect ->
+            assertEquals(
+                "ALTER TABLE `customers` DROP COLUMN `phone`",
+                Schema.render(ordinary, dialect),
+            )
+        }
+        assertEquals(
+            "ALTER TABLE `customers` DROP COLUMN IF EXISTS `phone`",
+            Schema.render(conditional, SchemaDialect.MARIA_DB),
+        )
+        assertFailsWith<UnsupportedOperationException> {
+            Schema.render(conditional, SchemaDialect.MYSQL)
+        }
+        assertFailsWith<UnsupportedOperationException> {
+            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 1))
+        }
+        assertEquals(
+            "ALTER TABLE `customers` DROP COLUMN IF EXISTS `phone`",
+            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 2)),
+        )
+    }
+
+    @Test
+    fun `drop index ifExists is stored and rendered only for MariaDB versions supporting the statement`() {
+        val ordinary = Schema.dropIndex { tableName("customers"); name("idx_phone") }
+        val conditional = Schema.dropIndex { tableName("customers"); name("idx_phone"); ifExists() }
+        val ordinaryAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_index.ISchemaDropIndexAst>(
+            assertIs<ExistingSchemaOperationAdapter>(ordinary).schemaApi.ast,
+        )
+        val conditionalAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_index.ISchemaDropIndexAst>(
+            assertIs<ExistingSchemaOperationAdapter>(conditional).schemaApi.ast,
+        )
+
+        assertNull(ordinaryAst.ifExistAst)
+        assertNotNull(conditionalAst.ifExistAst)
+        SchemaDialect.values().forEach { dialect ->
+            assertEquals(
+                "DROP INDEX `idx_phone` ON `customers`",
+                Schema.render(ordinary, dialect),
+            )
+        }
+        assertEquals(
+            "DROP INDEX IF EXISTS `idx_phone` ON `customers`",
+            Schema.render(conditional, SchemaDialect.MARIA_DB),
+        )
+        assertFailsWith<UnsupportedOperationException> {
+            Schema.render(conditional, SchemaDialect.MYSQL)
+        }
+        assertFailsWith<UnsupportedOperationException> {
+            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 1, 3))
+        }
+        assertEquals(
+            "DROP INDEX IF EXISTS `idx_phone` ON `customers`",
+            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 1, 4)),
+        )
+    }
+
+    @Test
+    fun `drop foreign key ifExists is stored and rendered only for MariaDB versions supporting the clause`() {
+        val ordinary = Schema.dropForeignKey { tableName("orders"); name("fk_customer") }
+        val conditional = Schema.dropForeignKey { tableName("orders"); name("fk_customer"); ifExists() }
+        val ordinaryAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_foreign_key.ISchemaDropForeignKeyAst>(
+            assertIs<ExistingSchemaOperationAdapter>(ordinary).schemaApi.ast,
+        )
+        val conditionalAst = assertIs<gog.my_project.data_base_schema.ast.interfaces.drop_foreign_key.ISchemaDropForeignKeyAst>(
+            assertIs<ExistingSchemaOperationAdapter>(conditional).schemaApi.ast,
+        )
+
+        assertNull(ordinaryAst.ifExistAst)
+        assertNotNull(conditionalAst.ifExistAst)
+        SchemaDialect.values().forEach { dialect ->
+            assertEquals(
+                "ALTER TABLE `orders` DROP FOREIGN KEY `fk_customer`",
+                Schema.render(ordinary, dialect),
+            )
+        }
+        assertEquals(
+            "ALTER TABLE `orders` DROP FOREIGN KEY IF EXISTS `fk_customer`",
+            Schema.render(conditional, SchemaDialect.MARIA_DB),
+        )
+        assertFailsWith<UnsupportedOperationException> {
+            Schema.render(conditional, SchemaDialect.MYSQL)
+        }
+        assertFailsWith<UnsupportedOperationException> {
+            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 1))
+        }
+        assertEquals(
+            "ALTER TABLE `orders` DROP FOREIGN KEY IF EXISTS `fk_customer`",
+            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 2)),
+        )
     }
 
     @Test

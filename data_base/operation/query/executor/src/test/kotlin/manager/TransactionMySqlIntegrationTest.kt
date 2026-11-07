@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.executor.manager
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
@@ -40,8 +40,7 @@ import org.junit.jupiter.api.parallel.ResourceLock
 
 /**
  * Destructive integration tests are opt-in and are restricted to a pre-created test schema whose name
- * starts with qb_tx_test_ or is the explicitly allowlisted kotlin_db_test_connection schema. Every test
- * owns one generated InnoDB table and drops only that table.
+ * starts with qb_tx_test_. Every test owns one generated InnoDB table and drops only that table.
  */
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock("DefaultDatabaseConfig.config")
@@ -82,28 +81,29 @@ class TransactionMySqlIntegrationTest {
                 port = "3306",
                 schema = "qb_tx_test_valid_1",
                 username = "qb_tx_test_user",
-                password = "",
+                password = "test-only-placeholder",
             ),
         )
         assertEquals("qb_tx_test_valid_1", prefixedTestSchema?.schema)
 
-        val explicitlyAllowedSchema = readSettings(
-            completeProperties(
-                host = "localhost",
-                port = "3306",
-                schema = "kotlin_db_test_connection",
-                username = "qb_tx_test_user",
-                password = "",
-            ),
+        val applicationSchema = completeProperties(
+            host = "localhost",
+            port = "3306",
+            schema = "kotlin_db_test_connection",
+            username = "qb_tx_test_user",
+            password = "test-only-placeholder",
         )
-        assertEquals("kotlin_db_test_connection", explicitlyAllowedSchema?.schema)
+        val applicationSchemaFailure = assertFailsWith<IllegalArgumentException> {
+            readSettings(applicationSchema)
+        }
+        assertTrue(applicationSchemaFailure.message.orEmpty().contains("qb_tx_test_"))
 
         val invalidSchema = completeProperties(
             host = "localhost",
             port = "3306",
             schema = "application_database",
             username = "qb_tx_test_user",
-            password = "",
+            password = "test-only-placeholder",
         )
         val schemaFailure = assertFailsWith<IllegalArgumentException> {
             readSettings(invalidSchema)
@@ -489,6 +489,9 @@ class TransactionMySqlIntegrationTest {
         require(host.isNotBlank() && host == host.trim() && host.none { it.isWhitespace() || it in "/?#@" }) {
             "Property " + HOST_PROPERTY + " must be a host name or address without URL path/query characters"
         }
+        require(host == "localhost" || host == "127.0.0.1") {
+            "Property " + HOST_PROPERTY + " must use localhost or 127.0.0.1 for destructive integration tests"
+        }
 
         val portText = requireNotNull(properties.getProperty(PORT_PROPERTY))
         val port = portText.toIntOrNull()
@@ -497,17 +500,19 @@ class TransactionMySqlIntegrationTest {
         }
 
         val schema = requireNotNull(properties.getProperty(NAME_PROPERTY))
-        require(
-            schema == "kotlin_db_test_connection" ||
-                Regex("^qb_tx_test_[A-Za-z0-9_]+$").matches(schema),
-        ) {
-            "Property " + NAME_PROPERTY +
-                " must name a pre-created test schema beginning with qb_tx_test_ or exactly kotlin_db_test_connection"
+        require(Regex("^qb_tx_test_[A-Za-z0-9_]+$").matches(schema)) {
+            "Property " + NAME_PROPERTY + " must name a pre-created test schema beginning with qb_tx_test_"
         }
 
         val username = requireNotNull(properties.getProperty(USERNAME_PROPERTY))
         require(username.isNotBlank()) {
             "Property " + USERNAME_PROPERTY + " must not be blank"
+        }
+        require(!username.equals("root", ignoreCase = true)) {
+            "Property " + USERNAME_PROPERTY + " must use a dedicated non-root test account"
+        }
+        require(!properties.getProperty(PASSWORD_PROPERTY).isNullOrEmpty()) {
+            "Property " + PASSWORD_PROPERTY + " must be supplied for real database integration tests"
         }
 
         return MySqlSettings(

@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":tools"))
 
     api(project(":data_base:core"))
+    api(project(":data_base:operation:config"))
 
     api(project(":data_base:operation:query:ast"))
     implementation(project(":data_base:operation:query:builder"))

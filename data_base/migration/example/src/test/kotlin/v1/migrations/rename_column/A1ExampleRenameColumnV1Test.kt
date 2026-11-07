@@ -1,7 +1,11 @@
 package gog.my_project.data_base.migration.example.v1.migrations.rename_column
 
-import gog.my_project.data_base.core.data_base.MARIA_DB
-import gog.my_project.data_base.core.data_base.MYSQL
+
+import gog.my_project.data_base_operation.config.data_base.MARIA_DB
+import gog.my_project.data_base_operation.config.data_base.MYSQL
+import gog.my_project.data_base_schema.Schema
+import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base_schema.SchemaVersion
 import gog.my_project.data_base_schema.ast.schema.rename_column.SchemaRenameColumnAst
 import gog.my_project.data_base_schema.builder.ast.rename_column.SchemaRenameColumnBuilder
 import gog.my_project.data_base_schema.dialect.nodes.rename_column.RenameColumnSqlStrategy
@@ -18,23 +22,26 @@ class A1ExampleRenameColumnV1Test {
     @Test
     fun targetVersionControlsWhetherNativeRenameGrammarCanBeGenerated() {
         val migration = A1ExampleRenameColumnV1().migration()
-        val legacyMaria = MariaDbDialect(MARIA_DB.Version(10, 4, 28))
-        assertEquals(RenameColumnSqlStrategy.CHANGE_COLUMN, legacyMaria.renameColumnSqlStrategy)
+        val legacyMariaVersion = SchemaVersion(SchemaDialect.MARIA_DB, 10, 4, 28)
+        assertEquals(
+            RenameColumnSqlStrategy.CHANGE_COLUMN,
+            MariaDbDialect(MARIA_DB.Version(10, 4, 28)).renameColumnSqlStrategy,
+        )
         assertFailsWith<IllegalStateException> {
-            legacyMaria.render(migration.ast)
+            Schema.render(migration, SchemaDialect.MARIA_DB, legacyMariaVersion)
         }
         val legacyMysql = MySqlDialect(MYSQL.Version(5, 7, 44))
         assertEquals(RenameColumnSqlStrategy.CHANGE_COLUMN, legacyMysql.renameColumnSqlStrategy)
         assertFailsWith<IllegalStateException> {
-            legacyMysql.render(migration.ast)
+            Schema.render(migration, SchemaDialect.MYSQL, SchemaVersion(SchemaDialect.MYSQL, 5, 7, 44))
         }
         assertEquals(
             "ALTER TABLE `users` RENAME COLUMN `display_name` TO `full_name`",
-            MariaDbDialect(MARIA_DB.Version(10, 5, 3)).render(migration.ast),
+            Schema.render(migration, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 5, 3)),
         )
         assertEquals(
             "ALTER TABLE `users` RENAME COLUMN `display_name` TO `full_name`",
-            MySqlDialect(MYSQL.Version(8, 0, 36)).render(migration.ast),
+            Schema.render(migration, SchemaDialect.MYSQL, SchemaVersion(SchemaDialect.MYSQL, 8, 0, 36)),
         )
     }
 
@@ -53,7 +60,7 @@ class A1ExampleRenameColumnV1Test {
             MySqlDialect().render(migration.ast),
         )
         assertEquals("ALTER TABLE `users` RENAME COLUMN `display_name` TO `full_name`",
-            MySqlDialect().render(A1ExampleRenameColumnV1().migration().ast))
+            Schema.render(A1ExampleRenameColumnV1().migration(), SchemaDialect.MYSQL))
     }
 
     @Test

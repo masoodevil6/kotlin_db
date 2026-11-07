@@ -1,8 +1,7 @@
 package gog.my_project.data_base_operation.executor.transaction
 
-import gog.my_project.data_base_manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 
@@ -24,6 +23,7 @@ class OperationTransactionExecutor(
         connectionFactory,
         DatabaseContext.legacyDefault().platformConfig,
     )
+
     fun <T> transaction(
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
     ): ExecuteResult<T> = transaction(OperationExecutionCoordinator(), block)
@@ -44,160 +44,196 @@ class OperationTransactionExecutor(
             return ExecuteResult.Failure(startFailure)
         }
 
-        var operationScope: OperationExecutionScope? = null
-        try {
-        val connection = try {
-            connectionFactory()
-        } catch (error: Error) {
-            throw error
-        } catch (exception: Exception) {
-            return ExecuteResult.Failure(exception)
+        var connection: Connection? = null
+        var connectionClosed = false
+        var scope: OperationExecutionScope? = null
+        var transactionStarted = false
+
+        fun closeOnce(primary: Throwable?): Throwable? {
+            if (connectionClosed) return primary
+            connectionClosed = true
+            return closeConnection(requireNotNull(connection), primary)
         }
+
+        fun rollbackAndClose(primary: Throwable): Error? = rollbackAndClose(
+            requireNotNull(connection),
+            primary,
+            ::closeOnce,
+        )
 
         try {
-            connection.autoCommit = false
-        } catch (error: Error) {
-            val fatal = closeAfterFailure(connection, error)
-            throw fatal ?: error
-        } catch (exception: Exception) {
-            val fatal = closeAfterFailure(connection, exception)
-            if (fatal != null) throw fatal
-            return ExecuteResult.Failure(exception)
-        }
+            connection = try {
+                connectionFactory()
+            } catch (failure: Throwable) {
+                if (failure is Error) throw failure
+                return ExecuteResult.Failure(failure)
+            }
 
-        val scope = OperationExecutionScope(connection, databasePlatformConfig)
-        operationScope = scope
-        OperationScopeGuard.activate(scope)
-        coordinator.activate(scope)
-        var callbackResult: ExecuteResult<T>? = null
-        try {
-            callbackResult = block(scope)
-        } catch (error: Error) {
-            scope.recordFatal(error)
-        } catch (exception: Exception) {
-            scope.recordFailure(exception)
-        } finally {
-            coordinator.seal(scope)
-        }
+            try {
+                connection.autoCommit = false
+            } catch (failure: Throwable) {
+                val closeFailure = closeOnce(failure)
+                if (failure is Error) throw failure
+                if (closeFailure is Error) throw closeFailure
+                return ExecuteResult.Failure(failure)
+            }
+            transactionStarted = true
 
-        val returnedFailure = callbackResult as? ExecuteResult.Failure
-        val primary = scope.firstFailure ?: returnedFailure?.exception
-        val fatal = scope.fatalError ?: (primary as? Error)
-        if (fatal != null) {
-            val cleanupError = rollbackAndClose(connection, fatal)
-            throw cleanupError ?: fatal
-        }
+            val activeScope = OperationExecutionScope(connection, databasePlatformConfig)
+            scope = activeScope
+            coordinator.prepareScope(activeScope)
+            OperationScopeGuard.activate(activeScope)
+            coordinator.activateOwned(activeScope)
 
-        if (scope.firstFailure != null) {
-            val scopeFailure = requireNotNull(scope.firstFailure)
-            val cleanupError = rollbackAndClose(connection, scopeFailure)
-            if (cleanupError != null) throw cleanupError
-            return ExecuteResult.Failure(scopeFailure)
-        }
+            var callbackResult: ExecuteResult<T>? = null
+            try {
+                callbackResult = block(activeScope)
+                activeScope.recordResult(callbackResult)
+            } catch (failure: Throwable) {
+                if (failure is Error) activeScope.recordFatal(failure) else activeScope.recordFailure(failure)
+            }
 
-        if (returnedFailure != null) {
-            val cleanupError = rollbackAndClose(connection, returnedFailure.exception)
-            if (cleanupError != null) throw cleanupError
-            return returnedFailure
-        }
+            try {
+                coordinator.sealOwned(activeScope)
+            } catch (sealFailure: Throwable) {
+                activeScope.recordFailure(sealFailure)
+                if (sealFailure is Error) activeScope.recordFatal(sealFailure)
+                coordinator.abortScope(activeScope, sealFailure)
+            }
 
-        val result = callbackResult
-            ?: run {
+            val returnedFailure = callbackResult as? ExecuteResult.Failure
+            val primary = activeScope.firstFailure ?: returnedFailure?.exception
+            val fatal = activeScope.fatalError ?: (primary as? Error)
+            if (fatal != null) {
+                val cleanupError = rollbackAndClose(fatal)
+                throw cleanupError ?: fatal
+            }
+
+            if (primary != null) {
+                val cleanupError = rollbackAndClose(primary)
+                if (cleanupError != null) throw cleanupError
+                if (returnedFailure?.exception === primary) return returnedFailure
+                return ExecuteResult.Failure(primary)
+            }
+
+            val result = callbackResult ?: run {
                 val missingResult = IllegalStateException("Transaction callback returned no result")
-                val cleanupError = rollbackAndClose(connection, missingResult)
+                val cleanupError = rollbackAndClose(missingResult)
                 if (cleanupError != null) throw cleanupError
                 return ExecuteResult.Failure(missingResult)
             }
 
-        if (result is ExecuteResult.Failure) {
-            val cleanupError = rollbackAndClose(connection, result.exception)
-            if (cleanupError != null) throw cleanupError
+            try {
+                connection.commit()
+            } catch (commitFailure: Throwable) {
+                val reportedFailure = if (commitFailure is Exception) {
+                    OperationTransactionCommitException(commitFailure)
+                } else {
+                    commitFailure
+                }
+                val cleanupError = rollbackAndClose(reportedFailure)
+                if (cleanupError != null) throw cleanupError
+                if (commitFailure is Error) throw commitFailure
+                return ExecuteResult.Failure(reportedFailure)
+            }
+
+            val closeFailure = closeOnce(null)
+            when (closeFailure) {
+                null -> Unit
+                is Error -> throw OperationTransactionCompletionError(committed = true, cause = closeFailure)
+                is Exception -> return ExecuteResult.Failure(
+                    OperationTransactionCompletionException(committed = true, cause = closeFailure),
+                )
+                else -> return ExecuteResult.Failure(closeFailure)
+            }
             return result
-        }
-
-        try {
-            connection.commit()
-        } catch (error: Error) {
-            val cleanupError = rollbackAndClose(connection, error)
-            throw cleanupError ?: error
-        } catch (exception: Exception) {
-            val commitFailure = OperationTransactionCommitException(exception)
-            val cleanupError = rollbackAndClose(connection, commitFailure)
-            if (cleanupError != null) throw cleanupError
-            return ExecuteResult.Failure(commitFailure)
-        }
-
-        try {
-            connection.close()
-        } catch (error: Error) {
-            throw OperationTransactionCompletionError(committed = true, cause = error)
-        } catch (exception: Exception) {
-            return ExecuteResult.Failure(
-                OperationTransactionCompletionException(committed = true, cause = exception),
-            )
-        }
-
-        return result
+        } catch (failure: Throwable) {
+            if (connection != null && !connectionClosed) {
+                val cleanupError = if (transactionStarted) {
+                    rollbackAndClose(failure)
+                } else {
+                    closeOnce(failure) as? Error
+                }
+                if (failure is Error) throw failure
+                if (cleanupError != null) throw cleanupError
+                return ExecuteResult.Failure(failure)
+            }
+            if (failure is Error) throw failure
+            return ExecuteResult.Failure(failure)
         } finally {
-            operationScope?.end()
-            coordinator.finishScope()
+            scope?.endForLifecycle()
+            coordinator.finishOwnedScope()
             OperationScopeGuard.exit()
         }
     }
 
-    private fun closeAfterFailure(connection: Connection, primary: Throwable): Error? {
-        try {
+    private fun closeConnection(connection: Connection, primary: Throwable?): Throwable? {
+        val closeFailure = try {
             connection.close()
-        } catch (failure: Error) {
-            if (primary is Error) {
-                addSuppressedSafely(primary, failure)
-                return primary
-            }
-            addSuppressedSafely(failure, primary)
-            return failure
-        } catch (failure: Exception) {
-            addSuppressedSafely(primary, failure)
+            return primary
+        } catch (failure: Throwable) {
+            failure
         }
-        return primary as? Error
+
+        if (primary is Error) {
+            addSuppressedSafely(primary, closeFailure)
+            return primary
+        }
+        if (closeFailure is Error) {
+            if (primary != null) addSuppressedSafely(closeFailure, primary)
+            return closeFailure
+        }
+        if (primary != null) {
+            addSuppressedSafely(primary, closeFailure)
+            return primary
+        }
+        return closeFailure
     }
 
     /** Returns a fatal cleanup Error while retaining the original failure as primary where possible. */
-    private fun rollbackAndClose(connection: Connection, primary: Throwable): Error? {
+    private fun rollbackAndClose(
+        connection: Connection,
+        primary: Throwable,
+        closeOnce: (Throwable?) -> Throwable?,
+    ): Error? {
         var fatal: Error? = primary as? Error
         try {
             connection.rollback()
-        } catch (failure: Error) {
-            if (fatal == null) {
-                fatal = failure
-                addSuppressedSafely(failure, primary)
+        } catch (failure: Throwable) {
+            if (failure is Error) {
+                if (fatal == null) {
+                    fatal = failure
+                    addSuppressedSafely(failure, primary)
+                } else {
+                    addSuppressedSafely(fatal, failure)
+                }
             } else {
-                addSuppressedSafely(fatal, failure)
+                addSuppressedSafely(fatal ?: primary, failure)
             }
-        } catch (failure: Exception) {
-            addSuppressedSafely(primary, failure)
         }
 
-        try {
-            connection.close()
-        } catch (failure: Error) {
+        val closeFailure = closeOnce(fatal ?: primary)
+        if (closeFailure is Error) {
             if (fatal == null) {
-                fatal = failure
-                addSuppressedSafely(failure, primary)
-            } else {
-                addSuppressedSafely(fatal, failure)
+                fatal = closeFailure
+                addSuppressedSafely(closeFailure, primary)
+            } else if (closeFailure !== fatal) {
+                addSuppressedSafely(fatal, closeFailure)
             }
-        } catch (failure: Exception) {
-            addSuppressedSafely(fatal ?: primary, failure)
+        } else if (closeFailure != null && closeFailure !== primary) {
+            addSuppressedSafely(fatal ?: primary, closeFailure)
         }
         return fatal
     }
 
     private fun addSuppressedSafely(primary: Throwable, secondary: Throwable) {
-        if (primary !== secondary) primary.addSuppressed(secondary)
+        if (primary !== secondary && primary.suppressed.none { it === secondary }) {
+            primary.addSuppressed(secondary)
+        }
     }
 }
 
-class OperationTransactionCommitException(cause: Throwable) :
+class OperationTransactionCommitException(cause: Exception) :
     IllegalStateException(
         "JDBC commit failed; rollback was attempted and the commit outcome may be unknown",
         cause,

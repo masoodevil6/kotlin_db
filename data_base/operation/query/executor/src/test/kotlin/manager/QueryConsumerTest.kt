@@ -1,7 +1,7 @@
 package gog.my_project.data_base_query.executor.manager
 
 import gog.my_project.data_base.core.annotations.models.QBQuery
-import gog.my_project.data_base.core.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base.core.query.reader.SqlParameter
 import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
 import gog.my_project.data_base.core.query.reader.QueryParameterBinding

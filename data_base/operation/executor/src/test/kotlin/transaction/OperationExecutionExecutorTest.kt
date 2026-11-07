@@ -1,16 +1,18 @@
 package gog.my_project.data_base_operation.executor.transaction
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
-import gog.my_project.data_base.core.data_base.DatabasePlatformConfig
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.SQLException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -173,6 +175,118 @@ class OperationExecutionExecutorTest {
         assertSame(callbackError, thrown)
         assertEquals(listOf(closeFailure), thrown.suppressed.toList())
         assertEquals(listOf("close"), events)
+    }
+
+    @Test
+    fun `earlier operation failure is suppressed on a later fatal callback error`() {
+        val events = mutableListOf<String>()
+        val connection = connection(events)
+        val earlier = SQLException("first operation failure")
+        val fatal = AssertionError("later callback error")
+
+        val thrown = assertFailsWith<AssertionError> {
+            OperationExecutionExecutor { connection }.connection<String> { scope ->
+                scope.recordFailure(earlier)
+                throw fatal
+            }
+        }
+
+        assertSame(fatal, thrown)
+        assertEquals(listOf(earlier), thrown.suppressed.toList())
+        assertEquals(listOf("close"), events)
+    }
+
+    @Test
+    fun `direct Throwable callback failure is returned and connection closes once`() {
+        val events = mutableListOf<String>()
+        val connection = connection(events)
+        val failure = object : Throwable("direct throwable") {}
+
+        val result = OperationExecutionExecutor { connection }.connection<String> {
+            throw failure
+        }
+
+        assertSame(failure, assertIs<ExecuteResult.Failure>(result).exception)
+        assertEquals(listOf("close"), events)
+    }
+
+    @Test
+    fun `coordinator lifecycle misuse cannot skip cleanup and coordinator can be reused`() {
+        val events = mutableListOf<String>()
+        val coordinator = OperationExecutionCoordinator()
+        val firstConnection = connection(events)
+
+        val first = OperationExecutionExecutor { firstConnection }.connection(coordinator) { scope ->
+            assertFailsWith<IllegalStateException> { coordinator.seal(scope) }
+            assertFailsWith<IllegalStateException> { coordinator.finishScope() }
+            ExecuteResult.Success("ignored")
+        }
+        assertIs<ExecuteResult.Failure>(first)
+        assertEquals(listOf("close"), events)
+
+        val secondConnection = connection(events)
+        val second = OperationExecutionExecutor { secondConnection }.connection(coordinator) {
+            ExecuteResult.Success("reused")
+        }
+        assertEquals("reused", assertIs<ExecuteResult.Success<String>>(second).result)
+        assertEquals(listOf("close", "close"), events)
+    }
+
+    @Test
+    fun `invalid coordinator transitions are rejected`() {
+        val coordinator = OperationExecutionCoordinator()
+        val scope = OperationExecutionScope(connection(mutableListOf()))
+
+        assertFailsWith<IllegalStateException> { coordinator.activate(scope) }
+        assertFailsWith<IllegalStateException> { coordinator.seal(scope) }
+        coordinator.finishScope()
+    }
+
+    @Test
+    fun `active root permit deterministically rejects a transaction until released`() {
+        val coordinator = OperationExecutionCoordinator()
+        val acquired = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var permit: OperationExecutionCoordinator.RootOperationPermit? = null
+        val rootWorker = thread(start = true) {
+            val admission = coordinator.acquireRootOperation(IllegalStateException("nested root"))
+            permit = (admission as OperationExecutionCoordinator.OperationAdmission.Allowed).permit
+            acquired.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            requireNotNull(permit).release()
+        }
+        assertTrue(acquired.await(5, TimeUnit.SECONDS))
+
+        var acquisitions = 0
+        val executor = OperationTransactionExecutor {
+            acquisitions++
+            val transactionEvents = mutableListOf<String>()
+            Proxy.newProxyInstance(
+                Connection::class.java.classLoader,
+                arrayOf(Connection::class.java),
+            ) { proxy, method, args ->
+                when (method.name) {
+                    "setAutoCommit" -> { transactionEvents += "autoCommit:${args!![0]}"; null }
+                    "commit", "rollback", "close" -> { transactionEvents += method.name; null }
+                    "getAutoCommit" -> true
+                    "isClosed" -> transactionEvents.contains("close")
+                    "toString" -> "TransactionProxy"
+                    "hashCode" -> System.identityHashCode(proxy)
+                    "equals" -> proxy === args?.get(0)
+                    else -> null
+                }
+            } as Connection
+        }
+        val rejected = executor.transaction(coordinator) { ExecuteResult.Success("unreachable") }
+        assertIs<ExecuteResult.Failure>(rejected)
+        assertEquals(0, acquisitions)
+
+        release.countDown()
+        rootWorker.join()
+
+        val accepted = executor.transaction(coordinator) { ExecuteResult.Success("accepted") }
+        assertEquals("accepted", assertIs<ExecuteResult.Success<String>>(accepted).result)
+        assertEquals(1, acquisitions)
     }
 
     private fun connection(

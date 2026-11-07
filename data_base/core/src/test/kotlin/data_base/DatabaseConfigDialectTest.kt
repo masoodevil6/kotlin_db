@@ -1,9 +1,10 @@
-package gog.my_project.data_base.core.data_base
+package gog.my_project.data_base_operation.config.data_base
 
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class DatabaseConfigDialectTest {
     @Test
@@ -38,6 +39,34 @@ class DatabaseConfigDialectTest {
             DatabaseConnectionConfig("jdbc:mysql://localhost", 3307, "legacy", "user", "secret"),
             config.connection,
         )
+    }
+
+    @Test
+    fun configurationDiagnosticStringsNeverExposeDatabasePassword() {
+        val password = "unique-password-must-not-leak-9c21"
+        val connection = DatabaseConnectionConfig(
+            dbDomain = "jdbc:mysql://db.internal",
+            dbPort = 3306,
+            dbName = "customer_data",
+            dbUserName = "app_user",
+            dbPassword = password,
+        )
+        val config = DatabaseConfig(connection = connection)
+        val builderConfig = DatabaseConfigBuilder().connection(connection).build()
+
+        listOf(
+            connection.toString(),
+            config.toString(),
+            config.connection.toString(),
+            builderConfig.toString(),
+        ).forEach { diagnostic ->
+            assertTrue(password !in diagnostic, "Password leaked in diagnostic string: $diagnostic")
+        }
+
+        assertTrue("customer_data" in config.toString())
+        assertTrue("app_user" in config.toString())
+        assertTrue("<redacted>" in config.toString())
+        assertTrue("<redacted>" in connection.toString())
     }
 
     @Test

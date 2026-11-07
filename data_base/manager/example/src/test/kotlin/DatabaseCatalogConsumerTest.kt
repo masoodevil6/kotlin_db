@@ -1,11 +1,12 @@
 package gog.my_project.data_base_manager.example
 
-import gog.my_project.data_base.core.data_base.DatabaseConfig
-import gog.my_project.data_base.core.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_manager.example.database.AnalyticsDatabase
 import gog.my_project.data_base_manager.example.database.MainDatabase
-import gog.my_project.data_base_manager.example.migrations.mainDatabaseMigrations
+import gog.my_project.data_base_manager.facade.DatabaseHandleApi
 import gog.my_project.data_base_manager.facade.DatabaseManager
+import gog.my_project.data_base_manager.facade.DatabaseManagerApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -13,11 +14,10 @@ import kotlin.test.assertNotSame
 
 class DatabaseCatalogConsumerTest {
     @Test
-    fun publicManagerDslRegistersIndependentKeysAndMigrationConfiguration() {
-        val manager = DatabaseManager {
+    fun publicManagerDslRegistersIndependentKeys() {
+        val manager: DatabaseManagerApi = DatabaseManager {
             database(MainDatabase) {
                 config = config("main_example")
-                migrations = mainDatabaseMigrations()
             }
             database(AnalyticsDatabase) {
                 config = config("analytics_example")
@@ -26,9 +26,11 @@ class DatabaseCatalogConsumerTest {
 
         try {
             assertEquals(setOf(MainDatabase, AnalyticsDatabase), manager.registeredKeys())
-            assertEquals(MainDatabase, manager[MainDatabase].key)
-            assertEquals(AnalyticsDatabase, manager[AnalyticsDatabase].key)
-            assertNotSame(manager[MainDatabase], manager[AnalyticsDatabase])
+            val main: DatabaseHandleApi = manager[MainDatabase]
+            val analytics: DatabaseHandleApi = manager[AnalyticsDatabase]
+            assertEquals(MainDatabase, main.key)
+            assertEquals(AnalyticsDatabase, analytics.key)
+            assertNotSame(main, analytics)
         } finally {
             manager.shutdown()
         }

@@ -3,6 +3,7 @@ package gog.my_project.data_base_schema.builder.ast.drop_table
 import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
 import gog.my_project.data_base_schema.ast.interfaces.drop_table.ISchemaDropTableAst
 import gog.my_project.data_base_schema.ast.schema.drop_table.SchemaDropTableAst
+import gog.my_project.data_base_schema.builder.ast.if_exist.SchemaIfExistBuilder
 
 class SchemaDropTableBuilder(
     override var ast: ISchemaDropTableAst = SchemaDropTableAst(),
@@ -14,7 +15,7 @@ class SchemaDropTableBuilder(
     }
 
     override fun ifExists(): ISchemaDropTableApi {
-        ast.metadata.ifExists = true
+        ast.ifExistAst = SchemaIfExistBuilder().build().ast
         return this
     }
 }

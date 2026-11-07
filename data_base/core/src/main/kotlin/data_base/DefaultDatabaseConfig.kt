@@ -1,6 +1,6 @@
-package gog.my_project.data_base.core.data_base
+package gog.my_project.data_base_operation.config.data_base
 
-import gog.my_project.data_base.core.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 
 /** Compatibility bridge for applications that still configure a single global database. */
 object DefaultDatabaseConfig {

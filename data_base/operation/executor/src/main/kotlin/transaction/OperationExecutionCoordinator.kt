@@ -12,6 +12,8 @@ class OperationExecutionCoordinator(
     private var state = State.IDLE
     private var activeRootOperations = 0
     private var activeScope: OperationExecutionScope? = null
+    private var preparedScope: OperationExecutionScope? = null
+    private var lifecycleThread: Thread? = null
     private var pendingFailure: Throwable? = null
     private var pendingFatal: Error? = null
 
@@ -45,6 +47,8 @@ class OperationExecutionCoordinator(
                     )
                 } else {
                     state = State.STARTING
+                    lifecycleThread = Thread.currentThread()
+                    preparedScope = null
                     pendingFailure = null
                     pendingFatal = null
                     null
@@ -62,9 +66,35 @@ class OperationExecutionCoordinator(
         }
     }
 
+    /** Registers the scope internally before it is published to a callback. */
+    internal fun prepareScope(scope: OperationExecutionScope) = synchronized(monitor) {
+        check(state == State.STARTING && lifecycleThread === Thread.currentThread()) {
+            "Managed scope can only be prepared by its starting Operation thread"
+        }
+        check(preparedScope == null) { "Managed scope is already prepared" }
+        preparedScope = scope
+    }
+
+    /**
+     * Compatibility entry point retained for cross-module source compatibility. Scope transitions
+     * are owned by Operation; attempted external transitions become a scope failure.
+     */
+    @Deprecated("Scope activation is owned by Operation executors")
+    fun activate(scope: OperationExecutionScope): Unit = synchronized(monitor) {
+        val misuse = IllegalStateException("Managed scope activation is owned by Operation executors")
+        when (state) {
+            State.STARTING -> recordPendingFailureLocked(misuse)
+            State.ACTIVE -> activeScope?.recordFailure(misuse)
+            State.IDLE, State.FINALIZING -> Unit
+        }
+        throw misuse
+    }
+
     /** Publishes the acquired scope and transfers rejections observed during Starting. */
-    fun activate(scope: OperationExecutionScope) = synchronized(monitor) {
+    internal fun activateOwned(scope: OperationExecutionScope) = synchronized(monitor) {
         check(state == State.STARTING) { "Managed scope coordinator is not Starting" }
+        check(lifecycleThread === Thread.currentThread()) { "Managed scope activation must run on its Operation thread" }
+        check(preparedScope === scope) { "Only the prepared Operation scope can be activated" }
         activeScope = scope
         state = State.ACTIVE
         pendingFailure?.let(scope::recordFailure)
@@ -73,11 +103,33 @@ class OperationExecutionCoordinator(
         pendingFatal = null
     }
 
+    /** Compatibility method that prevents callers from sealing a live scope. */
+    @Deprecated("Scope sealing is owned by Operation executors")
+    fun seal(scope: OperationExecutionScope): Unit = synchronized(monitor) {
+        val misuse = IllegalStateException("Managed scope sealing is owned by Operation executors")
+        if (state == State.ACTIVE) activeScope?.recordFailure(misuse)
+        throw misuse
+    }
+
     /** Seals the callback result atomically before commit, rollback, or close begins. */
-    fun seal(scope: OperationExecutionScope) = synchronized(monitor) {
+    internal fun sealOwned(scope: OperationExecutionScope) = synchronized(monitor) {
         check(state == State.ACTIVE && activeScope === scope) { "Managed scope coordinator is not Active" }
-        scope.end()
+        check(lifecycleThread === Thread.currentThread()) { "Managed scope must be sealed by its Operation thread" }
+        scope.endForLifecycle()
         state = State.FINALIZING
+    }
+
+    /** Best-effort terminal transition used after a lifecycle failure so cleanup still runs. */
+    internal fun abortScope(scope: OperationExecutionScope, failure: Throwable) = synchronized(monitor) {
+        if (activeScope === scope && (state == State.ACTIVE || state == State.FINALIZING)) {
+            scope.recordFailure(failure)
+            if (failure is Error) scope.recordFatal(failure)
+            scope.endForLifecycle()
+            state = State.FINALIZING
+        } else if (state == State.STARTING && preparedScope === scope) {
+            scope.recordFailure(failure)
+            if (failure is Error) scope.recordFatal(failure)
+        }
     }
 
     /** Routes a throwable from a rejected root callback into a scope that is still accepting failures. */
@@ -96,10 +148,41 @@ class OperationExecutionCoordinator(
         }
     }
 
-    /** Returns to Idle only after scope cleanup has been attempted. */
+    /** Compatibility method; cleanup ownership remains with the Operation executor. */
+    @Deprecated("Scope cleanup is owned by Operation executors")
     fun finishScope() = synchronized(monitor) {
+        when (state) {
+            State.IDLE -> Unit
+            State.STARTING -> {
+                val misuse = IllegalStateException("A Starting scope cannot be finished by a consumer")
+                recordPendingFailureLocked(misuse)
+                throw misuse
+            }
+            State.ACTIVE -> {
+                val misuse = IllegalStateException("An Active scope cannot be finished by a consumer")
+                activeScope?.recordFailure(misuse)
+                throw misuse
+            }
+            State.FINALIZING -> throw IllegalStateException("Scope cleanup is still owned by Operation")
+        }
+    }
+
+    /** Returns to Idle only after Operation has attempted all owned cleanup. */
+    internal fun finishOwnedScope() = synchronized(monitor) {
+        check(lifecycleThread === Thread.currentThread()) { "Scope cleanup must run on its Operation thread" }
+        if (state == State.ACTIVE) {
+            val unfinished = activeScope
+            if (unfinished != null) {
+                val failure = IllegalStateException("Operation scope ended before callback sealing")
+                unfinished.recordFailure(failure)
+                unfinished.endForLifecycle()
+            }
+        }
+        activeScope?.endForLifecycle()
         state = State.IDLE
         activeScope = null
+        preparedScope = null
+        lifecycleThread = null
         pendingFailure = null
         pendingFatal = null
     }

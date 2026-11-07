@@ -1,30 +1,23 @@
 # Database Manager Consumer Example
 
-This module is an external-style consumer of `:data_base:manager`. Its only direct project dependency is the public Manager module; Query, Schema, and Migration APIs are available through Manager's published API dependencies.
+This module consumes the public `:data_base:manager` API. It demonstrates typed database keys, independent configurations, Query execution, Transaction execution, and Manager shutdown. The Manager does not currently expose migration registration or execution while the Migration runtime is being rewritten.
 
-`DatabaseManager` owns a catalog of registrations and lazily creates one `DatabaseContext` for a registration when its handle is first used. `DatabaseKey` identifies a registration; use stable singleton keys such as `MainDatabase` and `AnalyticsDatabase`. Each registration has its own `DatabaseConfig`, and may have its own `MigrationConfiguration`.
+`DatabaseManagerApi` and `DatabaseHandleApi` are the consumer-facing contracts. The manager owns the catalog and lazily creates a context for each registration. `DatabaseKey` identifies a registration. Each handle exposes `connection { ... }` and `transaction { ... }`; both use Operation-managed scopes. `shutdown()` closes Manager-owned contexts and rejects later work.
 
-`DatabaseHandle` exposes four entry points:
-
-- `query { executor -> ... }` runs Query work in one Connection Scope.
-- `transaction { tx -> ... }` runs Query work in an Operation-owned Transaction Scope.
-- `schema(operation)` executes one public `SchemaOperation` against that database.
-- `migrate { result -> ... }` runs only migrations assigned to that registration.
-
-The example registers `MainDatabase` with a customer-table migration and `AnalyticsDatabase` without migrations. It then shows a Query, a transactional Query, and a Schema operation through their separate handles. `shutdown()` closes Manager-owned contexts and prevents further use; operation Connections remain owned by their Query, Schema, or Migration scopes.
+The Query examples expect the referenced tables to exist already. This module has no Migration dependency.
 
 ## Run
 
-The default run is safe and only prints the registered keys; it does not open a Connection:
+The default run only prints registered keys and does not open a Connection:
 
 ```powershell
 .\gradlew.bat :data_base:manager:example:run
 ```
 
-Database calls are opt-in. Use isolated development schemas, never production schemas. Before opting in, provide `MAIN_DB_NAME`, `MAIN_DB_USER`, `MAIN_DB_PASSWORD`, `ANALYTICS_DB_NAME`, `ANALYTICS_DB_USER`, and `ANALYTICS_DB_PASSWORD`. Optional connection settings are `MAIN_DB_DOMAIN`, `MAIN_DB_PORT`, `ANALYTICS_DB_DOMAIN`, and `ANALYTICS_DB_PORT`; the default domain is `jdbc:mysql://127.0.0.1` and the default port is `3306`. Passwords are read from the environment and are not printed.
+Database calls are opt-in. Use isolated development databases and provide the documented `MAIN_DB_*` and `ANALYTICS_DB_*` environment variables before opting in:
 
 ```powershell
 .\gradlew.bat :data_base:manager:example:run -Pdatabase.example.run=true
 ```
 
-The opt-in run performs real DDL and Query work: the Main registration applies its Migration and reads the resulting table, while the Analytics registration creates its example events table. The default run and unit tests require no database.
+The opt-in run executes Query and Transaction examples against the pre-existing Main customer table. It does not create or alter tables.

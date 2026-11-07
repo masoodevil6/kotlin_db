@@ -1,9 +1,7 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_spatial_index
 
-import gog.my_project.data_base_schema.api.interfaces.create_spatial_index.ISchemaCreateSpatialIndexApi
-import gog.my_project.data_base_schema.builder.ast.create_spatial_index.SchemaCreateSpatialIndexBuilder
-import gog.my_project.data_base_schema.dialect.interfaces.ISqlDialect
-import gog.my_project.data_base.migration.executor.interfaces.IMigrationExecutor
+import gog.my_project.data_base_schema.*
+
 
 
 
@@ -13,15 +11,15 @@ class A1ExampleCreateSpatialIndexV1(
     private val index: String = "spx_places_geom",
     private val column: String = "geom",
 ) {
-    fun migration(): ISchemaCreateSpatialIndexApi =
-        SchemaCreateSpatialIndexBuilder().apply {
+    fun migration(): SchemaOperation =
+        Schema.createSpatialIndex {
             tableName(table)
             name(index)
             column(column)
         }
 
-    fun render(dialect: ISqlDialect) {
-        val sql = dialect.render(migration().ast) ?: error("Migration renderer returned no SQL")
+    fun render(dialect: SchemaDialect, version: SchemaVersion? = null) {
+        val sql = Schema.render(migration(), dialect, version)
         println("\n=============================================")
         println("CREATE SPATIAL INDEX example")
         println("---------------------------")
@@ -29,14 +27,4 @@ class A1ExampleCreateSpatialIndexV1(
         println("Prerequisite: places.geom must be a spatial column eligible for indexing.")
     }
 
-    fun execute(migrationExecutor: IMigrationExecutor) {
-        migrationExecutor.execute(
-            queryBuilder = migration(),
-            blockQueryInfo = { query, params ->
-                println("create spatial index query: $query")
-                println("params: $params")
-            },
-            blockExecute = { result -> println("create spatial index execute: $result") },
-        )
     }
-}

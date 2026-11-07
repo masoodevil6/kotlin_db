@@ -5,23 +5,19 @@ import gog.my_project.data_base_manager.example.configuration.requireDatabaseExa
 import gog.my_project.data_base_manager.example.database.AnalyticsDatabase
 import gog.my_project.data_base_manager.example.database.MainDatabase
 import gog.my_project.data_base_manager.example.examples.runMultiDatabaseExamples
-import gog.my_project.data_base_manager.example.migrations.mainDatabaseMigrations
 import gog.my_project.data_base_manager.facade.DatabaseManager
+import gog.my_project.data_base_manager.facade.DatabaseManagerApi
 
 fun main() {
-    val databases =
+    val databases: DatabaseManagerApi =
         DatabaseManager {
             database(MainDatabase) {
                 config = databaseConfig("MAIN", "main_example")
-                migrations = mainDatabaseMigrations()
             }
             database(AnalyticsDatabase) {
                 config = databaseConfig("ANALYTICS", "analytics_example")
-            // Analytics intentionally has no MigrationConfiguration.
             }
         }
-   // databases[MainDatabase].query { contextBuilder ->  }
-    //databases[MainDatabase].migrate { contextMigration ->  contextMigration.up }
 
     try {
         println("Registered databases: ${databases.registeredKeys().joinToString { it::class.simpleName.orEmpty() }}")

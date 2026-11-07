@@ -8,6 +8,7 @@
 
 ## راهنماها
 
+- [Database Manager و چند پایگاه داده](guides/database-manager/README.md)
 - [Connection و تنظیم اتصال](guides/connection.md)
 - [Collection](guides/collection.md)
 - [Migration](guides/migration/README.md)

@@ -1,12 +1,10 @@
 package gog.my_project.data_base.migration.example.v1.migrations.composite
 
-import gog.my_project.data_base_schema.api.interfaces.create_index.ISchemaCreateIndexApi
-import gog.my_project.data_base_schema.api.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableApi
-import gog.my_project.data_base_schema.api.interfaces.drop_index.ISchemaDropIndexApi
-import gog.my_project.data_base_schema.api.interfaces.drop_table.ISchemaDropTableApi
+import gog.my_project.data_base_schema.Schema
+import gog.my_project.data_base_schema.SchemaDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class CreateCustomersMigrationV1Test {
     @Test
@@ -18,20 +16,14 @@ class CreateCustomersMigrationV1Test {
         val indexUp = createIndexMigration.up()
         val indexDown = createIndexMigration.down()
 
-        assertEquals(1, tableUp.operations.size)
-        assertEquals(1, tableDown.operations.size)
-        assertEquals(1, indexUp.operations.size)
-        assertEquals(1, indexDown.operations.size)
+        val createTableSql = Schema.render(tableUp.operation, SchemaDialect.MYSQL)
+        val createIndexSql = Schema.render(indexUp.operation, SchemaDialect.MYSQL)
+        assertTrue(createTableSql.contains("CREATE TABLE `customers`"))
+        assertTrue(createIndexSql.contains("CREATE INDEX `idx_customers_email`"))
 
-        val createTable = assertIs<ISchemaRenderCreateTableApi>(tableUp.operations.single())
-        assertIs<ISchemaCreateIndexApi>(indexUp.operations.single())
-        assertEquals("customers", createTable.ast.schemaTableAst?.metadata?.tableName)
-
-        val forwardOperations = listOf(tableUp.operations.single(), indexUp.operations.single())
-        val rollbackOperations = listOf(indexDown.operations.single(), tableDown.operations.single())
-        assertIs<ISchemaRenderCreateTableApi>(forwardOperations[0])
-        assertIs<ISchemaCreateIndexApi>(forwardOperations[1])
-        assertIs<ISchemaDropIndexApi>(rollbackOperations[0])
-        assertIs<ISchemaDropTableApi>(rollbackOperations[1])
+        val rollbackIndexSql = Schema.render(indexDown.operation, SchemaDialect.MYSQL)
+        val rollbackTableSql = Schema.render(tableDown.operation, SchemaDialect.MYSQL)
+        assertTrue(rollbackIndexSql.contains("DROP INDEX `idx_customers_email`"))
+        assertTrue(rollbackTableSql.contains("DROP TABLE `customers`"))
     }
 }
