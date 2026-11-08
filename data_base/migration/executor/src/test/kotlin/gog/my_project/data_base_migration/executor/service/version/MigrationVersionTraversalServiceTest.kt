@@ -11,7 +11,8 @@ import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
 import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
-import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
+import gog.my_project.data_base_migration.executor.model.version_selection.MigrationVersionSelection
+import gog.my_project.data_base_migration.executor.model.version_selection.MigrationVersionSelectionDirection
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
@@ -19,6 +20,8 @@ import model.version_history.MigrationHistoryEntry
 import model.version_history.MigrationHistoryTag
 import model.version_history.MigrationHistoryVersion
 import model.version_history.MigrationVersionHistorySnapshot
+import model.prepared.PreparedMigrationVersion
+import service.version.MigrationVersionPreparationService
 import kotlin.reflect.KClass
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -29,11 +32,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class MigrationVersionTraversalServiceTest {
     private val configuration = createConfiguration()
-    private val service = MigrationVersionTraversalService(configuration)
+    private val traversalService = MigrationVersionTraversalService()
+    private val historyValidator = MigrationVersionHistoryValidator()
 
     @BeforeTest
     fun resetMigrationCounters() {
@@ -43,87 +48,64 @@ class MigrationVersionTraversalServiceTest {
     }
 
     @Test
-    fun migrateAllReturnsOnlyPendingVersionsInConfigurationAndDeclarationOrder() {
-        val plan = service.plan(snapshot(appliedVersionCount = 2), MigrationVersionTraversalRequest.MigrateAll)
+    fun upSelectionMapsToUpPlanWithoutChangingOrder() {
+        val versions = listOf(traversalVersion("v3"), traversalVersion("v4"))
+        val plan = traversalService.plan(
+            MigrationVersionSelection(MigrationVersionSelectionDirection.UP, versions),
+        )
 
         assertEquals(MigrationVersionTraversalDirection.UP, plan.direction)
         assertEquals(listOf("v3", "v4"), plan.versions.map { it.version.name })
-        assertEquals(listOf("m4", "m5"), plan.versions[0].migrations.map { it.id.value })
-        assertEquals(listOf("m6"), plan.versions[1].migrations.map { it.id.value })
-        assertEquals(0, MigrationProbe.constructorCalls)
-        assertEquals(0, MigrationProbe.upCalls)
-        assertEquals(0, MigrationProbe.downCalls)
+        assertSame(versions[0], plan.versions[0])
+        assertSame(versions[1], plan.versions[1])
     }
 
     @Test
-    fun migrateToIncludesTargetAndEveryPendingPredecessor() {
-        val plan = service.plan(snapshot(appliedVersionCount = 1), MigrationVersionTraversalRequest.MigrateTo(V3))
-
-        assertEquals(MigrationVersionTraversalDirection.UP, plan.direction)
-        assertEquals(listOf("v2", "v3"), plan.versions.map { it.version.name })
-        assertEquals(listOf("m3"), plan.versions[0].migrations.map { it.id.value })
-        assertEquals(listOf("m4", "m5"), plan.versions[1].migrations.map { it.id.value })
-    }
-
-    @Test
-    fun rollbackLatestReturnsExactlyTheNewestAppliedVersion() {
-        val plan = service.plan(snapshot(appliedVersionCount = 4), MigrationVersionTraversalRequest.RollbackLatest)
+    fun downSelectionMapsToDownPlanWithoutChangingDescendingOrder() {
+        val versions = listOf(traversalVersion("v4"), traversalVersion("v3"), traversalVersion("v2"))
+        val plan = traversalService.plan(
+            MigrationVersionSelection(MigrationVersionSelectionDirection.DOWN, versions),
+        )
 
         assertEquals(MigrationVersionTraversalDirection.DOWN, plan.direction)
-        assertEquals(listOf("v4"), plan.versions.map { it.version.name })
-        assertEquals(listOf("m6"), plan.versions.single().migrations.map { it.id.value })
+        assertEquals(listOf("v4", "v3", "v2"), plan.versions.map { it.version.name })
+        versions.zip(plan.versions).forEach { (expected, actual) -> assertSame(expected, actual) }
     }
 
     @Test
-    fun rollbackToReturnsVersionsAfterTargetInReverseVersionOrderAndPreservesInnerDeclarationOrder() {
-        val plan = service.plan(snapshot(appliedVersionCount = 4), MigrationVersionTraversalRequest.RollbackTo(V2))
+    fun emptySelectionsProduceEmptyPlansAndRetainTheirDirection() {
+        val up = traversalService.plan(MigrationVersionSelection(MigrationVersionSelectionDirection.UP, emptyList()))
+        val down = traversalService.plan(MigrationVersionSelection(MigrationVersionSelectionDirection.DOWN, emptyList()))
 
-        assertEquals(MigrationVersionTraversalDirection.DOWN, plan.direction)
-        assertEquals(listOf("v4", "v3"), plan.versions.map { it.version.name })
-        assertEquals(listOf("m6"), plan.versions[0].migrations.map { it.id.value })
-        assertEquals(listOf("m4", "m5"), plan.versions[1].migrations.map { it.id.value })
+        assertEquals(MigrationVersionTraversalDirection.UP, up.direction)
+        assertTrue(up.versions.isEmpty())
+        assertEquals(MigrationVersionTraversalDirection.DOWN, down.direction)
+        assertTrue(down.versions.isEmpty())
     }
 
     @Test
-    fun emptyHistoryProducesEmptyPlansForMigrateAndRollbackLatest() {
-        val empty = snapshot(appliedVersionCount = 0)
-
-        assertTrue(service.plan(empty, MigrationVersionTraversalRequest.RollbackLatest).versions.isEmpty())
-        assertEquals(listOf("v1", "v2", "v3", "v4"), service.plan(
-            empty,
-            MigrationVersionTraversalRequest.MigrateAll,
-        ).versions.map { it.version.name })
-    }
-
-    @Test
-    fun completedMigrationAndRollbackToLatestProduceValidEmptyPlans() {
-        val complete = snapshot(appliedVersionCount = 4)
-
-        assertTrue(service.plan(complete, MigrationVersionTraversalRequest.MigrateAll).versions.isEmpty())
-        assertTrue(service.plan(complete, MigrationVersionTraversalRequest.RollbackTo(V4)).versions.isEmpty())
-    }
-
-    @Test
-    fun plansAreImmutableAndPreparationDoesNotInstantiateMigrations() {
-        val plan = service.plan(snapshot(appliedVersionCount = 0), MigrationVersionTraversalRequest.MigrateAll)
+    fun traversalPlanIsImmutable() {
+        val plan = traversalService.plan(
+            MigrationVersionSelection(
+                MigrationVersionSelectionDirection.UP,
+                listOf(traversalVersion("v1")),
+            ),
+        )
 
         assertFailsWith<UnsupportedOperationException> { (plan.versions as MutableList).clear() }
-        assertEquals(0, MigrationProbe.constructorCalls)
-        assertEquals(0, MigrationProbe.upCalls)
-        assertEquals(0, MigrationProbe.downCalls)
     }
 
     @Test
-    fun rejectsUnknownAlreadyAppliedAndNotAppliedTargets() {
-        assertFailsWith<IllegalArgumentException> {
-            service.plan(snapshot(1), MigrationVersionTraversalRequest.MigrateTo(UnknownVersion))
-        }
-        assertFailsWith<IllegalStateException> {
-            service.plan(snapshot(2), MigrationVersionTraversalRequest.MigrateTo(V1))
-        }
-        assertFailsWith<IllegalStateException> {
-            service.plan(snapshot(1), MigrationVersionTraversalRequest.RollbackTo(V2))
-        }
+    fun traversalDoesNotInstantiateOrExecuteMigrations() {
+        val prepared = MigrationVersionPreparationService().prepare(configuration.registrations.first())
+        val plan = traversalService.plan(
+            MigrationVersionSelection(MigrationVersionSelectionDirection.UP, listOf(prepared)),
+        )
+
+        assertEquals(0, MigrationProbe.constructorCalls)
+        assertEquals(0, MigrationProbe.upCalls)
+        assertEquals(0, MigrationProbe.downCalls)
+        assertEquals(listOf("v1"), plan.versions.map { it.version.name })
     }
 
     @Test
@@ -217,10 +199,7 @@ class MigrationVersionTraversalServiceTest {
 
         assertTrue(history.versions.isEmpty())
         assertTrue(history.tags.any { it.type == MigrationTagType.VERSION.code })
-        assertEquals(
-            listOf("v1", "v2", "v3", "v4"),
-            service.plan(history, MigrationVersionTraversalRequest.MigrateAll).versions.map { it.version.name },
-        )
+        assertTrue(historyValidator.validateConfiguration(configuration, history).appliedVersions.isEmpty())
     }
 
     @Test
@@ -228,13 +207,12 @@ class MigrationVersionTraversalServiceTest {
         val base = snapshot(appliedVersionCount = 1)
         val orphan = MigrationHistoryTag(999, "orphan_item", MigrationTagType.ITEM.code)
 
-        val plan = service.plan(
+        val state = historyValidator.validateConfiguration(
+            configuration,
             MigrationVersionHistorySnapshot(base.tags + orphan, base.versions, base.migrations),
-            MigrationVersionTraversalRequest.MigrateAll,
         )
 
-        assertEquals(MigrationVersionTraversalDirection.UP, plan.direction)
-        assertEquals(listOf("v2", "v3", "v4"), plan.versions.map { it.version.name })
+        assertEquals(listOf("v1"), state.appliedVersions.map { it.version.name })
     }
 
     @Test
@@ -278,13 +256,14 @@ class MigrationVersionTraversalServiceTest {
             DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
         )
 
-        val result = service.plan(scope, MigrationVersionTraversalRequest.MigrateAll)
+        val result = MigrationVersionHistoryReader().read(scope)
 
-        val plan = when (result) {
+        val history = when (result) {
             is ExecuteResult.Success -> requireNotNull(result.result)
             is ExecuteResult.Failure -> error(result.exception.stackTraceToString())
         }
-        assertEquals(listOf("v2", "v3", "v4"), plan.versions.map { it.version.name })
+        val state = historyValidator.validateConfiguration(configuration, history)
+        assertEquals(listOf("v1"), state.appliedVersions.map { it.version.name })
         assertEquals(3, jdbc.queryCount)
         assertEquals(0, jdbc.transactionControlCalls)
         assertEquals(0, jdbc.connectionCloseCount)
@@ -356,7 +335,7 @@ class MigrationVersionTraversalServiceTest {
                 DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
             )
 
-            val result = service.plan(scope, MigrationVersionTraversalRequest.MigrateAll)
+            val result = MigrationVersionHistoryReader().read(scope)
 
             val failure = assertIs<ExecuteResult.Failure>(result, case.description)
             assertTrue(
@@ -381,10 +360,13 @@ class MigrationVersionTraversalServiceTest {
 
     private fun assertInvalid(snapshot: MigrationVersionHistorySnapshot, messagePart: String) {
         val failure = assertFailsWith<IllegalStateException> {
-            service.plan(snapshot, MigrationVersionTraversalRequest.MigrateAll)
+            historyValidator.validateConfiguration(configuration, snapshot)
         }
         assertTrue(failure.message.orEmpty().contains(messagePart, ignoreCase = true), failure.message)
     }
+
+    private fun traversalVersion(name: String) =
+        PreparedMigrationVersion(MigrationVersion(name, emptyList()), emptyList())
 
     private fun createConfiguration(): MigrationConfiguration = MigrationConfiguration(
         listOf(
@@ -556,12 +538,5 @@ class MigrationVersionTraversalServiceTest {
         const val VERSION_ID_4 = 400
         val VERSION_IDS = listOf(VERSION_ID_1, VERSION_ID_2, VERSION_ID_3, VERSION_ID_4)
         val ITEM_TAG_IDS = mapOf("m1" to 11, "m2" to 12, "m3" to 13, "m4" to 14, "m5" to 15, "m6" to 16)
-        val V1: MigrationVersionTag = TestVersionTag("v1")
-        val V2: MigrationVersionTag = TestVersionTag("v2")
-        val V3: MigrationVersionTag = TestVersionTag("v3")
-        val V4: MigrationVersionTag = TestVersionTag("v4")
-        val UnknownVersion: MigrationVersionTag = TestVersionTag("missing")
     }
-
-    private data class TestVersionTag(override val value: String) : MigrationVersionTag
 }

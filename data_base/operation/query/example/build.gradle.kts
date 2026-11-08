@@ -43,7 +43,7 @@ tasks.register<JavaExec>("run") {
     group = "application"
     description = "Runs the configured Query Builder examples."
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("gog.my_project.data_base_query.root.MainKt")
+    mainClass.set("gog.my_project.data_base_query.example.MainKt")
     queryExampleVersion.orNull?.let { args(it) }
     systemProperty("query.example.run.select", runSelect.get().toString())
     systemProperty("query.example.run.insert", runInsert.get().toString())

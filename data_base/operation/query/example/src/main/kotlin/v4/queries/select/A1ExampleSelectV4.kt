@@ -18,13 +18,19 @@ class A1ExampleSelectV4 : IExampleV4 {
 
     private fun buildQuery(params: UserDisplayQueryV4.RelationFilters): IQueryRenderSelectApi {
         val relation = UserDisplayQueryV4().createCte(params)
-        val withName = "v4_filtered_user_display"
+       // val withName = "v4_filtered_user_display"
 
         return QueryRenderSelectBuilder()
-            .withs { addWith { with(withName, relation) } }
+            /*.withs { addWith { with(withName, relation) } }
             .from {
-                cte(withName)
+                cte(relation.name)
                 alias("users")
+            }*/
+            .withs { addWith { with(relation.name, relation) } }
+            .from {
+                cte(relation.name)
+                alias("aaaa")
+                //alias(relation.alias)
             }
             .select {
                 addColumn {
@@ -65,6 +71,9 @@ class A1ExampleSelectV4 : IExampleV4 {
         queryManager.transaction { tx ->
             filterExamples.forEach { (label, params) ->
                 tx.queryBuilder(buildQuery(params))
+                    .sql { (queryText, params) ->
+                        println("\n=============================================\nV1-Ex1: Smart select with join\nquery: $queryText\nparams: $params")
+                    }
                     .executeAs { row -> CteQueryRowMapper.map(UserDisplayQueryV4::class, row) }
                     .success { rows ->
                         println("V4 SELECT CTE ($label): ${rows.size} row(s)")
