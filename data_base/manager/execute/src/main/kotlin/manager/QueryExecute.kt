@@ -104,6 +104,7 @@ class QueryExecute(
         blockExecute: (ExecuteResult<Long>) -> Unit,
     ) = withOwnedConnection(databaseContext) { connection -> executeInsert(connection, boundQuery, blockExecute) }
 
+    /** Executes with the supplied connection and invokes [blockExecute] before returning. */
     override fun executeInsert(
         connection: Connection,
         boundQuery: BoundQuery,
@@ -192,6 +193,7 @@ class QueryExecute(
         blockExecute: (ExecuteResult<Int>) -> Unit,
     ) = withOwnedConnection(databaseContext) { connection -> executeDelete(connection, boundQuery, blockExecute) }
 
+    /** Executes with the supplied connection and invokes [blockExecute] before returning. */
     override fun executeDelete(
         connection: Connection,
         boundQuery: BoundQuery,

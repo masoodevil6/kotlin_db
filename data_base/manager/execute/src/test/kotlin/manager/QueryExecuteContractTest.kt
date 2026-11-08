@@ -22,6 +22,7 @@ import java.util.logging.Logger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
@@ -515,6 +516,32 @@ class QueryExecuteContractTest {
             executeBound = { connection, query, callback -> QueryExecute().executeDelete(connection, query, callback) },
         ) { _, result -> assertEquals(ExecuteResult.Success(1), result) }
     }
+
+    @Test
+    fun suppliedConnectionBoundDmlCallbacksCompleteBeforeMethodsReturn() =
+        withSuppliedConnection(Script()) { _, connection ->
+            val executor = QueryExecute()
+            var insertReturned = false
+            var insertResult: ExecuteResult<Long>? = null
+
+            executor.executeInsert(connection, BoundQuery("INSERT INTO t DEFAULT VALUES", emptyList())) { result ->
+                assertFalse(insertReturned)
+                insertResult = result
+            }
+            insertReturned = true
+
+            assertEquals(ExecuteResult.Success(7L), insertResult)
+
+            var deleteReturned = false
+            var deleteResult: ExecuteResult<Int>? = null
+            executor.executeDelete(connection, BoundQuery("DELETE FROM t WHERE id = ?", emptyList())) { result ->
+                assertFalse(deleteReturned)
+                deleteResult = result
+            }
+            deleteReturned = true
+
+            assertEquals(ExecuteResult.Success(1), deleteResult)
+        }
 
     @Test
     fun multipleOperationsReuseTheSameSuppliedConnectionAndPreservePerQueryBindingOrder() =

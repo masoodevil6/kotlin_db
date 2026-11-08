@@ -96,6 +96,9 @@ class OperationExecutionScope(
     private var active = true
 
     @Volatile
+    private var activeChildScope: OperationExecutionScope? = null
+
+    @Volatile
     var firstFailure: Throwable? = null
         private set
 
@@ -113,25 +116,48 @@ class OperationExecutionScope(
         }
 
     /** Returns and records a lifetime/thread/failure rejection before a scoped operation is run. */
-    fun rejectOperation(): Throwable? = synchronized(this) {
-        if (!active) {
-            return@synchronized IllegalStateException("Execution scope has ended; its executor cannot run operations")
-        }
-        if (Thread.currentThread() !== ownerThread) {
-            return@synchronized recordFailureLocked(
-                IllegalStateException("Scoped operations must run on the scope callback thread"),
+    fun rejectOperation(): Throwable? {
+        activeChildScope?.let { child ->
+            return child.recordFailure(
+                IllegalStateException("Parent Connection Scope cannot execute operations while its child transaction is active"),
             )
         }
-        firstFailure
+
+        val localRejection = synchronized(this) {
+            if (!active) {
+                return@synchronized IllegalStateException(
+                    "Execution scope has ended; its executor cannot run operations",
+                )
+            }
+            if (Thread.currentThread() !== ownerThread) {
+                return@synchronized recordFailureLocked(
+                    IllegalStateException("Scoped operations must run on the scope callback thread"),
+                )
+            }
+            firstFailure
+        }
+        return localRejection ?: OperationScopeGuard.rejectIfNotCurrent(this)
     }
+
+    /**
+     * Starts a transaction using this managed Connection Scope's Connection. The returned child
+     * scope is the only valid execution context inside [block]; the Connection remains owned by
+     * this parent scope and is not closed when the child transaction completes.
+     */
+    fun <T> transaction(
+        block: (transactionScope: OperationExecutionScope) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = OperationTransactionExecutor.transactionOn(this, block)
 
     fun recordResult(result: ExecuteResult<*>) {
         if (result is ExecuteResult.Failure) recordFailure(result.exception)
     }
 
-    fun recordFailure(failure: Throwable): Throwable = synchronized(this) {
-        if (!active) return@synchronized failure
-        recordFailureLocked(failure)
+    fun recordFailure(failure: Throwable): Throwable {
+        activeChildScope?.let { child -> return child.recordFailure(failure) }
+        return synchronized(this) {
+            if (!active) return@synchronized failure
+            recordFailureLocked(failure)
+        }
     }
 
     private fun recordFailureLocked(failure: Throwable): Throwable {
@@ -155,6 +181,10 @@ class OperationExecutionScope(
     }
 
     fun recordFatal(error: Error) {
+        activeChildScope?.let { child ->
+            child.recordFatal(error)
+            return
+        }
         synchronized(this) {
             if (!active) return
             recordFatalLocked(error)
@@ -192,6 +222,21 @@ class OperationExecutionScope(
     }
 
     internal fun lifecycleConnection(): Connection = jdbcConnection
+
+    internal fun suspendForChild(child: OperationExecutionScope) {
+        synchronized(this) {
+            check(active) { "Execution scope has ended; it cannot create a child transaction" }
+            check(activeChildScope == null) { "A child transaction is already active for this Connection Scope" }
+            activeChildScope = child
+        }
+    }
+
+    internal fun restoreAfterChild(child: OperationExecutionScope) {
+        synchronized(this) {
+            check(activeChildScope === child) { "Only the active child can restore its parent Connection Scope" }
+            activeChildScope = null
+        }
+    }
 
     override fun executeDdl(
         sql: String,
@@ -451,8 +496,12 @@ private class JdbcOperationQueryRows(
 internal object OperationScopeGuard {
     private class State {
         var scope: OperationExecutionScope? = null
+        var scopeKind: ScopeKind? = null
+        var childParent: OperationExecutionScope? = null
         var pendingFailure: Throwable? = null
     }
+
+    private enum class ScopeKind { CONNECTION, TRANSACTION }
 
     private val current = ThreadLocal<State?>()
 
@@ -475,8 +524,72 @@ internal object OperationScopeGuard {
         val state = checkNotNull(current.get()) { "Operation scope was not entered" }
         check(state.scope == null) { "Operation scope is already active" }
         state.scope = scope
+        state.scopeKind = ScopeKind.CONNECTION
         state.pendingFailure?.let(scope::recordFailure)
         state.pendingFailure = null
+    }
+
+    /** Publishes a root transaction scope, which cannot parent another transaction. */
+    internal fun activateTransaction(scope: OperationExecutionScope) {
+        val state = checkNotNull(current.get()) { "Operation scope was not entered" }
+        check(state.scope == null) { "Operation scope is already active" }
+        state.scope = scope
+        state.scopeKind = ScopeKind.TRANSACTION
+        state.pendingFailure?.let(scope::recordFailure)
+        state.pendingFailure = null
+    }
+
+    /** Temporarily suspends a managed Connection Scope while its child transaction is active. */
+    internal fun enterChildTransaction(
+        parent: OperationExecutionScope,
+        child: OperationExecutionScope,
+    ): Throwable? {
+        val state = current.get()
+            ?: return IllegalStateException("A child transaction requires an active managed Connection Scope")
+        if (state.scope !== parent || state.scopeKind != ScopeKind.CONNECTION || state.childParent != null) {
+            val failure = IllegalStateException(
+                "A child transaction can only start from the currently active managed Connection Scope",
+            )
+            val activeScope = state.scope
+            if (activeScope != null) return activeScope.recordFailure(failure)
+            if (state.pendingFailure == null) state.pendingFailure = failure
+            return state.pendingFailure ?: failure
+        }
+
+        parent.suspendForChild(child)
+        state.childParent = parent
+        state.scope = child
+        state.scopeKind = ScopeKind.TRANSACTION
+        return null
+    }
+
+    /** Restores the parent only after child transaction cleanup has completed. */
+    internal fun exitChildTransaction(
+        parent: OperationExecutionScope,
+        child: OperationExecutionScope,
+    ) {
+        val state = checkNotNull(current.get()) { "Child transaction guard is unavailable" }
+        check(state.scope === child && state.childParent === parent) {
+            "Only the active child transaction can restore its parent Connection Scope"
+        }
+        state.scope = parent
+        state.scopeKind = ScopeKind.CONNECTION
+        state.childParent = null
+        parent.restoreAfterChild(child)
+    }
+
+    /** Prevents a suspended parent or stale scope from executing while a child is active. */
+    internal fun rejectIfNotCurrent(scope: OperationExecutionScope): Throwable? {
+        val state = current.get() ?: return null
+        val activeScope = state.scope ?: return null
+        if (activeScope === scope) return null
+
+        val message = if (state.childParent === scope) {
+            "Parent Connection Scope cannot execute operations while its child transaction is active"
+        } else {
+            "Only the current managed Operation scope can execute operations"
+        }
+        return activeScope.recordFailure(IllegalStateException(message))
     }
 
     internal fun exit() {
