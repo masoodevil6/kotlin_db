@@ -966,7 +966,10 @@ class MigrationRunServiceTest {
                         events += "read:$sql"
                         readParameters += values.values.toList()
                         if (readCount in failReadCalls) throw SQLException("Read $readCount failed")
-                        resultSet(if (readResponses.isEmpty()) emptyList() else readResponses.removeFirst())
+                        resultSet(
+                            if (readResponses.isEmpty()) emptyList() else readResponses.removeFirst(),
+                            sql,
+                        )
                     }
                     "executeUpdate" -> executeUpdate(sql, values.values.toList())
                     "execute" -> {
@@ -1018,11 +1021,13 @@ class MigrationRunServiceTest {
             return if (updateCounts.isEmpty()) 1 else updateCounts.removeFirst()
         }
 
-        private fun resultSet(rows: List<Map<String, Any?>>): ResultSet {
+        private fun resultSet(rows: List<Map<String, Any?>>, statementSql: String = ""): ResultSet {
             var index = -1
             var lastValue: Any? = null
             return proxy(ResultSet::class.java) { method, args ->
                 when (method.name) {
+                    "getMetaData" -> gog.my_project.data_base_migration.executor.support
+                        .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
                     "getInt", "getLong", "getString", "getObject" -> {
                         val row = rows.getOrNull(index) ?: error("ResultSet cursor is not on a row")

@@ -35,6 +35,7 @@
             <option value="$PROJECT_DIR$/data_base/migration/api" />
             <option value="$PROJECT_DIR$/data_base/migration/core" />
             <option value="$PROJECT_DIR$/data_base/migration/example" />
+            <option value="$PROJECT_DIR$/data_base/migration/executor" />
             <option value="$PROJECT_DIR$/data_base/models" />
             <option value="$PROJECT_DIR$/data_base/models/eloquent" />
             <option value="$PROJECT_DIR$/data_base/operation" />

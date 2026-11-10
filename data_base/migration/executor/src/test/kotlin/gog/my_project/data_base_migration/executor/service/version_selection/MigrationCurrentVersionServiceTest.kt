@@ -263,7 +263,7 @@ class MigrationCurrentVersionServiceTest {
                     "executeQuery" -> {
                         queryCount++
                         queryFailure?.let { throw it }
-                        resultSet(responses.removeFirst())
+                        resultSet(responses.removeFirst(), statementSql)
                     }
                     "executeUpdate" -> {
                         dmlCount++
@@ -276,11 +276,13 @@ class MigrationCurrentVersionServiceTest {
             }
         }
 
-        private fun resultSet(rows: List<Map<String, Any?>>): ResultSet {
+        private fun resultSet(rows: List<Map<String, Any?>>, statementSql: String): ResultSet {
             var index = -1
             var wasNull = false
             return proxy(ResultSet::class.java) { method, args ->
                 when (method.name) {
+                    "getMetaData" -> gog.my_project.data_base_migration.executor.support
+                        .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
                     "getInt", "getString" -> {
                         val value = rows[index][args.first().toString()]

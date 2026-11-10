@@ -33,6 +33,7 @@ import java.sql.Connection
 import java.sql.Types
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
@@ -40,6 +41,129 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class ScopeBoundQueryExecutionTest {
+    @Test
+    fun `scope-only factory retains the exact Scope without constructing a DatabaseContext`() {
+        val scope = RecordingOperationContext()
+        val executor = QueryBuilderExecutor.scopeBound(scope)
+
+        assertSame(scope.databasePlatformConfig, executor.databasePlatformConfig)
+        assertIs<UnsupportedOperationException>(runCatching { executor.databaseContext }.exceptionOrNull())
+
+        val contextField = QueryBuilderExecutor::class.java
+            .getDeclaredField("suppliedDatabaseContext")
+            .apply { isAccessible = true }
+        assertNull(contextField.get(executor))
+        val operationExecutorField = QueryBuilderExecutor::class.java
+            .getDeclaredField("operationExecutionExecutor")
+            .apply { isAccessible = true }
+        assertNull(operationExecutorField.get(executor))
+
+        val backendField = QueryBuilderExecutor::class.java
+            .getDeclaredField("executionBackend")
+            .apply { isAccessible = true }
+        val backend = backendField.get(executor)
+        val scopeField = backend.javaClass.getDeclaredField("scope").apply { isAccessible = true }
+        assertSame(scope, scopeField.get(backend))
+
+        assertIs<ExecuteResult.Failure>(executor.connection { ExecuteResult.Success(true) })
+        assertIs<ExecuteResult.Failure>(executor.transaction { ExecuteResult.Success(true) })
+        assertFailsWith<UnsupportedOperationException> {
+            executor.executeOut(selectQuery()) { _, _ -> error("executeOut must not execute") }
+        }
+        assertEquals(0, scope.selectCalls + scope.insertCalls + scope.updateCalls + scope.deleteCalls)
+    }
+
+    @Test
+    fun `scope-only factory runs SELECT mapping and CTE through typed scope execution`() {
+        val scope = RecordingOperationContext()
+        val executor = QueryBuilderExecutor.scopeBound(scope)
+        scope.rows = listOf(mapOf("value" to 31))
+
+        val mapped = executor.queryBuilder(selectWithConditions("repeat", "repeat", 17, 29))
+            .executeAs<Int> { row -> row["value"] as Int }
+
+        val mappedValue = assertIs<ExecuteResult.Success<ICollection<Int>>>(mapped).result!!
+        assertEquals(listOf(31), buildList { mappedValue.forEach { add(it) } })
+        val bound = assertIs<QueryExecutionStatement.Bound>(scope.statements.single()).query
+        assertEquals(listOf("repeat", "repeat"), bound.parameterOccurrences.map { it.name })
+        assertEquals(listOf(17, 29), bound.parameterOccurrences.map { it.value })
+        assertEquals(listOf(Types.INTEGER, Types.INTEGER), bound.parameterOccurrences.map { it.sqlType })
+        assertEquals(1, scope.selectCalls)
+
+        scope.statements.clear()
+        scope.rows = listOf(mapOf("value" to 42), mapOf("value" to 43))
+        val cteResult: ExecuteResult<ICollection<ScopeTestCte>> = ScopeTestCte().execute(executor, Unit)
+        val cteValues = assertIs<ExecuteResult.Success<ICollection<ScopeTestCte>>>(cteResult).result!!
+        assertEquals(listOf<Int?>(42, 43), buildList { cteValues.forEach { add(it.value) } })
+        assertIs<QueryExecutionStatement.Bound>(scope.statements.single())
+        assertEquals(2, scope.selectCalls)
+    }
+
+    @Test
+    fun `scope-only factory routes all DML through typed Operation execution and preserves binding types`() {
+        val scope = RecordingOperationContext()
+        val executor = QueryBuilderExecutor.scopeBound(scope)
+        var inserted: ExecuteResult<Long>? = null
+        var updated: ExecuteResult<Int>? = null
+        var deleted: ExecuteResult<Int>? = null
+
+        executor.execute(insertQuery(), { inserted = it })
+        executor.execute(updateQuery(), { updated = it })
+        executor.execute(deleteQuery(), { deleted = it })
+
+        assertEquals(901L, assertIs<ExecuteResult.Success<Long>>(inserted).result)
+        assertEquals(2, assertIs<ExecuteResult.Success<Int>>(updated).result)
+        assertEquals(3, assertIs<ExecuteResult.Success<Int>>(deleted).result)
+        assertEquals(listOf(1, 1, 1), listOf(scope.insertCalls, scope.updateCalls, scope.deleteCalls))
+        scope.statements.clear()
+        val nullableInsert = QueryRenderInsertBuilder().apply {
+            ast = QueryRenderInsertAst().apply {
+                table = QueryTableAst().apply { metadata.nameFromAst = "records" }
+                columns += QueryColumnInsertAst().apply {
+                    metadata.columnName = "nullable_value"
+                    metadata.columnTag = "nullable_value"
+                    parameterAst = QueryParameterAst<Any?>().apply {
+                        metadata.name = "nullable_value"
+                        metadata.value = null
+                        metadata.sqlType = Types.INTEGER
+                    }
+                }
+            }
+        }
+        executor.execute(nullableInsert, {})
+
+        val binding = assertIs<QueryExecutionStatement.Bound>(scope.statements.single())
+            .query.parameterOccurrences.single()
+        assertNull(binding.value)
+        assertEquals(Types.INTEGER, binding.sqlType)
+    }
+
+    @Test
+    fun `scope-only factory propagates SQL failures and fatal Errors to the supplied Scope`() {
+        val scope = RecordingOperationContext()
+        val executor = QueryBuilderExecutor.scopeBound(scope)
+        val sqlFailure = IllegalStateException("scope-only SQL failure")
+        scope.nextSelectFailure = sqlFailure
+
+        val failure = executor.queryBuilder(selectQuery()).execute()
+        assertSame(sqlFailure, assertIs<ExecuteResult.Failure>(failure).exception)
+        assertSame(sqlFailure, scope.failures.single())
+
+        scope.failures.clear()
+        val fatal = AssertionError("scope-only fatal query error")
+        scope.nextSelectError = fatal
+        assertSame(fatal, runCatching { executor.queryBuilder(selectQuery()).execute() }.exceptionOrNull())
+        assertSame(fatal, scope.failures.single())
+
+        scope.failures.clear()
+        val dmlFailure = IllegalStateException("scope-only DML failure")
+        scope.nextUpdateFailure = dmlFailure
+        var dmlResult: ExecuteResult<Int>? = null
+        executor.execute(updateQuery(), { dmlResult = it })
+        assertSame(dmlFailure, assertIs<ExecuteResult.Failure>(dmlResult).exception)
+        assertSame(dmlFailure, scope.failures.single())
+    }
+
     @Test
     fun `scope-bound executor uses Scope platform and renders a legacy BuiltQuery SELECT`() {
         val fixture = fixture()
@@ -268,7 +392,12 @@ class ScopeBoundQueryExecutionTest {
         }
     }
 
-    private fun selectWithConditions(firstName: String, secondName: String) = QueryRenderSelectBuilder().apply {
+    private fun selectWithConditions(
+        firstName: String,
+        secondName: String,
+        firstValue: Any? = 7,
+        secondValue: Any? = 7,
+    ) = QueryRenderSelectBuilder().apply {
         select {
             addColumn {
                 column { tableAttribute("1") }
@@ -282,13 +411,13 @@ class ScopeBoundQueryExecutionTest {
                 addCondition {
                     sideSelector { tableAttribute("1") }
                     operationEqual()
-                    sideValueParam { paramName(firstName); paramValue(7) }
+                    sideValueParam { paramName(firstName); paramValue(firstValue) }
                 }
                 addCondition {
                     logicalAnd()
                     sideSelector { tableAttribute("1") }
                     operationEqual()
-                    sideValueParam { paramName(secondName); paramValue(7) }
+                    sideValueParam { paramName(secondName); paramValue(secondValue) }
                 }
             }
         }
@@ -347,6 +476,8 @@ class ScopeBoundQueryExecutionTest {
         var insertCalls = 0
         var updateCalls = 0
         var deleteCalls = 0
+        var nextSelectError: Error? = null
+        var nextUpdateFailure: Throwable? = null
 
         override fun executeDdl(sql: String, parameters: List<OperationParameter>): ExecuteResult<Boolean> =
             error("Scope-bound Query executor must not execute DDL")
@@ -388,12 +519,20 @@ class ScopeBoundQueryExecutionTest {
         override fun executeUpdate(query: BuiltQuery): ExecuteResult<Int> {
             statements += QueryExecutionStatement.Built(query)
             updateCalls++
+            nextUpdateFailure?.let { failure ->
+                nextUpdateFailure = null
+                throw failure
+            }
             return ExecuteResult.Success(2)
         }
 
         override fun executeUpdate(query: BoundQuery): ExecuteResult<Int> {
             statements += QueryExecutionStatement.Bound(query)
             updateCalls++
+            nextUpdateFailure?.let { failure ->
+                nextUpdateFailure = null
+                throw failure
+            }
             return ExecuteResult.Success(2)
         }
 
@@ -416,6 +555,10 @@ class ScopeBoundQueryExecutionTest {
 
         private fun <T> runSelect(read: (OperationQueryRows) -> T): ExecuteResult<T> {
             selectCalls++
+            nextSelectError?.let { error ->
+                nextSelectError = null
+                throw error
+            }
             nextSelectFailure?.let { failure ->
                 nextSelectFailure = null
                 return failed(failure)

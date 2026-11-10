@@ -17,9 +17,8 @@ dependencies {
     api(project(":data_base:migration:core"))
 
     implementation(project(":data_base:operation:schema"))
+    implementation(project(":data_base:operation:query:executor"))
     implementation(project(":data_base:operation:query:builder"))
-    implementation(project(":data_base:operation:query:dialect"))
-    implementation(project(":data_base:operation:query:renderer"))
 
     testImplementation(kotlin("test"))
 }

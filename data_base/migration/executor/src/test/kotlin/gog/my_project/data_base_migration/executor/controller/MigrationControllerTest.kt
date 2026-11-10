@@ -249,13 +249,13 @@ class MigrationControllerTest {
             arrayOf(Connection::class.java),
         ) { _, method, args ->
             when (method.name) {
-                "prepareStatement" -> statement()
+                "prepareStatement" -> statement(args.firstOrNull()?.toString().orEmpty())
                 "isClosed" -> false
                 else -> defaultValue(method.returnType)
             }
         } as Connection
 
-        private fun statement(): PreparedStatement = Proxy.newProxyInstance(
+        private fun statement(statementSql: String): PreparedStatement = Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(PreparedStatement::class.java),
         ) { _, method, _ ->
@@ -263,7 +263,7 @@ class MigrationControllerTest {
                 "executeQuery" -> {
                     queryCount++
                     queryFailure?.let { throw it }
-                    resultSet(responses.removeFirst())
+                    resultSet(responses.removeFirst(), statementSql)
                 }
                 "close" -> null
                 "isClosed" -> false
@@ -271,7 +271,7 @@ class MigrationControllerTest {
             }
         } as PreparedStatement
 
-        private fun resultSet(rows: List<Map<String, Any?>>): ResultSet {
+        private fun resultSet(rows: List<Map<String, Any?>>, statementSql: String): ResultSet {
             var index = -1
             var wasNull = false
             return Proxy.newProxyInstance(
@@ -279,6 +279,8 @@ class MigrationControllerTest {
                 arrayOf(ResultSet::class.java),
             ) { _, method, args ->
                 when (method.name) {
+                    "getMetaData" -> gog.my_project.data_base_migration.executor.support
+                        .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
                     "getInt", "getString" -> {
                         val value = rows[index][args?.firstOrNull()?.toString().orEmpty()]
@@ -308,23 +310,26 @@ class MigrationControllerTest {
         val connection: Connection = Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(Connection::class.java),
-        ) { _, method, _ ->
+        ) { _, method, args ->
             when (method.name) {
-                "prepareStatement" -> Proxy.newProxyInstance(
-                    javaClass.classLoader,
-                    arrayOf(PreparedStatement::class.java),
-                ) { _, statementMethod, _ ->
-                    when (statementMethod.name) {
-                        "executeQuery" -> {
-                            queryCount++
-                            queryFailure?.let { throw it }
-                            resultSet(rows)
+                "prepareStatement" -> {
+                    val statementSql = args?.firstOrNull()?.toString().orEmpty()
+                    Proxy.newProxyInstance(
+                        javaClass.classLoader,
+                        arrayOf(PreparedStatement::class.java),
+                    ) { _, statementMethod, _ ->
+                        when (statementMethod.name) {
+                            "executeQuery" -> {
+                                queryCount++
+                                queryFailure?.let { throw it }
+                                resultSet(rows, statementSql)
+                            }
+                            "close" -> null
+                            "isClosed" -> false
+                            else -> defaultValue(statementMethod.returnType)
                         }
-                        "close" -> null
-                        "isClosed" -> false
-                        else -> defaultValue(statementMethod.returnType)
-                    }
-                } as PreparedStatement
+                    } as PreparedStatement
+                }
                 "commit", "rollback", "setAutoCommit" -> {
                     transactionControlCalls++
                     null
@@ -338,7 +343,7 @@ class MigrationControllerTest {
             }
         } as Connection
 
-        private fun resultSet(values: List<Map<String, Any?>>): ResultSet {
+        private fun resultSet(values: List<Map<String, Any?>>, statementSql: String): ResultSet {
             var index = -1
             var wasNull = false
             return Proxy.newProxyInstance(
@@ -346,6 +351,8 @@ class MigrationControllerTest {
                 arrayOf(ResultSet::class.java),
             ) { _, method, args ->
                 when (method.name) {
+                    "getMetaData" -> gog.my_project.data_base_migration.executor.support
+                        .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < values.size
                     "getInt", "getString" -> {
                         val value = values[index][args?.firstOrNull()?.toString().orEmpty()]

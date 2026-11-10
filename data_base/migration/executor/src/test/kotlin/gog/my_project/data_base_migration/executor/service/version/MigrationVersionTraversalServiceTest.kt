@@ -468,7 +468,7 @@ class MigrationVersionTraversalServiceTest {
 
         val connection: Connection = proxy(Connection::class.java) { method, args ->
             when (method.name) {
-                "prepareStatement" -> preparedStatement()
+                "prepareStatement" -> preparedStatement(args.firstOrNull()?.toString().orEmpty())
                 "commit", "rollback", "setAutoCommit" -> { transactionControlCalls++; null }
                 "close" -> { connectionCloseCount++; null }
                 "isClosed" -> false
@@ -476,11 +476,11 @@ class MigrationVersionTraversalServiceTest {
             }
         }
 
-        private fun preparedStatement(): PreparedStatement = proxy(PreparedStatement::class.java) { method, _ ->
+        private fun preparedStatement(statementSql: String): PreparedStatement = proxy(PreparedStatement::class.java) { method, _ ->
             when (method.name) {
                 "executeQuery" -> {
                     queryCount++
-                    resultSet(responses.removeFirst())
+                    resultSet(responses.removeFirst(), statementSql)
                 }
                 "close" -> null
                 "isClosed" -> false
@@ -488,11 +488,13 @@ class MigrationVersionTraversalServiceTest {
             }
         }
 
-        private fun resultSet(rows: List<Map<String, Any?>>): ResultSet {
+        private fun resultSet(rows: List<Map<String, Any?>>, statementSql: String): ResultSet {
             var index = -1
             var wasNull = false
             return proxy(ResultSet::class.java) { method, args ->
                 when (method.name) {
+                    "getMetaData" -> gog.my_project.data_base_migration.executor.support
+                        .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
                     "getInt", "getString" -> {
                         val value = rows[index][args[0].toString()]

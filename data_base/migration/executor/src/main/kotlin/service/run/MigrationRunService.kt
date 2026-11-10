@@ -1,8 +1,5 @@
 package gog.my_project.data_base_migration.executor.service.run
 
-import gog.my_project.data_base.core.query.reader.IQueryParameterBinding
-import gog.my_project.data_base_manager.execute.manager.QueryExecute
-import gog.my_project.data_base_manager.execute.query.BoundQuery
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
 import gog.my_project.data_base_migration.core.migrate.Migration
@@ -14,25 +11,17 @@ import gog.my_project.data_base_migration.core.system_migration.query.SystemMigr
 import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationTagInsertQuery
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
-import gog.my_project.data_base_operation.executor.transaction.OperationParameter
-import gog.my_project.data_base_operation.executor.transaction.OperationQueryRows
-import gog.my_project.data_base_query.ast.interfaces.IQueryAst
-import gog.my_project.data_base_query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
-import gog.my_project.data_base_query.renderer.manager.DialectSelector
-import gog.my_project.data_base_query.renderer.parameters.IdentityAwareQueryRenderResult
-import gog.my_project.data_base_query.renderer.parameters.LegacyQueryRenderResult
-import gog.my_project.data_base_query.renderer.parameters.QueryParameterRendering
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
+import gog.my_project.data_base_query.executor.result.QueryRow
 import gog.my_project.data_base_schema.Schema
 import java.lang.reflect.InvocationTargetException
-import java.sql.Connection
 import kotlin.jvm.java
 
 /** Executes one registered Migration within a caller-owned Operation transaction scope. */
 class MigrationRunService {
-    private val queryExecutor = QueryExecute()
-
     /** Runs exactly one Migration's up operation and records it under a persisted Version. */
     fun runUp(
         versionId: Int,
@@ -240,17 +229,11 @@ class MigrationRunService {
         filters: SystemMigrationTagQuery.RelationFilters,
     ): ExecuteResult<List<TagRow>> {
         val cte = SystemMigrationTagQuery().createCte(filters)
-        return read(scope, cte.definition.ast) { rows ->
-            buildList {
-                while (rows.next()) {
-                    add(
-                        TagRow(
-                            id = requireNotNull(rows.getInt("id")) { "Tag query returned a null id" },
-                            tagType = requireNotNull(rows.getInt("tagType")) { "Tag query returned a null tagType" },
-                        ),
-                    )
-                }
-            }
+        return read(scope, cte.definition.ast) { row ->
+            TagRow(
+                id = row.requiredInt("id", "Tag query returned a null id"),
+                tagType = row.requiredInt("tagType", "Tag query returned a null tagType"),
+            )
         }
     }
 
@@ -259,56 +242,40 @@ class MigrationRunService {
         tagId: Int,
     ): ExecuteResult<List<AppliedRow>> {
         val cte = SystemMigrationQuery().createCte(SystemMigrationQuery.RelationFilters(tagId = tagId))
-        return read(scope, cte.definition.ast) { rows ->
-            buildList {
-                while (rows.next()) {
-                    add(
-                        AppliedRow(
-                            id = requireNotNull(rows.getInt("id")) { "History query returned a null id" },
-                            versionId = requireNotNull(rows.getInt("versionId")) {
-                                "History query returned a null versionId"
-                            },
-                        ),
-                    )
-                }
-            }
+        return read(scope, cte.definition.ast) { row ->
+            AppliedRow(
+                id = row.requiredInt("id", "History query returned a null id"),
+                versionId = row.requiredInt("versionId", "History query returned a null versionId"),
+            )
         }
     }
 
     private fun <T> read(
         scope: OperationExecutionScope,
-        ast: IQueryRenderSelectAst,
-        mapper: (OperationQueryRows) -> T,
-    ): ExecuteResult<T> {
-        val dialect = DialectSelector().select(scope.databasePlatformConfig.dialect)
-        return when (val rendered = QueryParameterRendering.render(ast, dialect)) {
-            is IdentityAwareQueryRenderResult -> {
-                val bindings = linkedMapOf<String, IQueryParameterBinding>()
-                rendered.parameterOccurrences.forEach { binding ->
-                    val previous = bindings.putIfAbsent(binding.name, binding)
-                    require(previous == null ||
-                        (previous.value == binding.value && previous.sqlType == binding.sqlType)
-                    ) { "Conflicting values rendered for System Migration parameter '${binding.name}'" }
-                }
-                scope.executeRead(
-                    rendered.displaySql,
-                    bindings.values.map { binding ->
-                        OperationParameter(
-                            binding.name,
-                            binding.value,
-                            binding.sqlType,
-                        )
-                    },
-                    mapper,
+        ast: gog.my_project.data_base_query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst,
+        mapper: (QueryRow) -> T,
+    ): ExecuteResult<List<T>> {
+        val result = QueryBuilderExecutor.scopeBound(scope)
+            .queryBuilder(QueryRenderSelectBuilder(ast = ast))
+            .execute()
+
+        return when (result) {
+            is ExecuteResult.Failure -> result
+            is ExecuteResult.Success -> try {
+                ExecuteResult.Success(
+                    requireNotNull(result.result) { "System Migration query returned no rows" }.map(mapper),
                 )
+            } catch (error: Error) {
+                scope.recordFatal(error)
+                throw error
+            } catch (failure: Throwable) {
+                scope.failed(failure)
             }
-            is LegacyQueryRenderResult -> scope.failed(
-                IllegalStateException(
-                    "System Migration lookup rendered without identity-aware parameter bindings: ${rendered.sql}",
-                ),
-            )
         }
     }
+
+    private fun QueryRow.requiredInt(alias: String, failureMessage: String): Int =
+        requireNotNull(this[alias] as? Int) { failureMessage }
 
     private fun insertMigrationTag(
         scope: OperationExecutionScope,
@@ -355,47 +322,16 @@ class MigrationRunService {
     private fun executeInsert(
         scope: OperationExecutionScope,
         query: IQueryRenderInsertApi,
-    ): ExecuteResult<Long> = executeDml(scope, query.ast, execute = { connection, boundQuery, callback ->
-        queryExecutor.executeInsert(connection, boundQuery, callback)
-    })
+    ): ExecuteResult<Long> = QueryBuilderExecutor.scopeBound(scope)
+        .queryBuilder(query)
+        .execute()
 
     private fun executeDelete(
         scope: OperationExecutionScope,
         query: IQueryRenderDeleteApi,
-    ): ExecuteResult<Int> = executeDml(scope, query.ast, execute = { connection, boundQuery, callback ->
-        queryExecutor.executeDelete(connection, boundQuery, callback)
-    })
-
-    private fun <T> executeDml(
-        scope: OperationExecutionScope,
-        ast: IQueryAst<*>,
-        execute: (Connection, BoundQuery, (ExecuteResult<T>) -> Unit) -> Unit,
-    ): ExecuteResult<T> {
-        val dialect = DialectSelector().select(scope.databasePlatformConfig.dialect)
-        val rendered = QueryParameterRendering.renderDml(ast, dialect)
-        val boundQuery = when (rendered) {
-            is IdentityAwareQueryRenderResult -> BoundQuery(rendered.jdbcSql, rendered.parameterOccurrences)
-            is LegacyQueryRenderResult -> return scope.failed(
-                IllegalStateException("System Migration DML rendered without parameter bindings: ${rendered.sql}"),
-            )
-        }
-
-        val rejection = scope.rejectOperation()
-        if (rejection != null) return ExecuteResult.Failure(rejection)
-        var completed: ExecuteResult<T>? = null
-        @Suppress("DEPRECATION")
-        // This service owns a final QueryExecute instance. Its supplied-connection BoundQuery
-        // overloads invoke the callback inline, so the result is set before execute returns.
-        execute(scope.connection, boundQuery) { result -> completed = result }
-        val result = completed ?: ExecuteResult.Failure(
-            IllegalStateException("System Migration DML execution completed without a result"),
-        )
-        scope.recordResult(result)
-        return when (result) {
-            is ExecuteResult.Failure -> ExecuteResult.Failure(scope.firstFailure ?: result.exception)
-            is ExecuteResult.Success -> result
-        }
-    }
+    ): ExecuteResult<Int> = QueryBuilderExecutor.scopeBound(scope)
+        .queryBuilder(query)
+        .execute()
 
     private inline fun <T> safely(
         scope: OperationExecutionScope,

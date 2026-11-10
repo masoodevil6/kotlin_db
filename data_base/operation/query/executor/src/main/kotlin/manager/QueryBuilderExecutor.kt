@@ -28,9 +28,19 @@ class QueryBuilderExecutor private constructor(
     private val transactionScope: TransactionExecutionScope?,
     private val transactionGuard: TransactionGuard,
     private val rootExecutionCoordinator: RootExecutionCoordinator,
-    override val databaseContext: DatabaseContext,
+    private val suppliedDatabaseContext: DatabaseContext?,
     private val operationExecutionContext: OperationExecutionContext?,
 ) : IQueryBuilderExecutor {
+
+    /**
+     * Retained for compatibility with the existing executor contract. A Scope-only executor has
+     * no DatabaseContext by design, so reading this property on that executor fails explicitly
+     * instead of manufacturing a legacy/default context.
+     */
+    override val databaseContext: DatabaseContext
+        get() = suppliedDatabaseContext ?: throw UnsupportedOperationException(
+            "DatabaseContext is unavailable for a Scope-only QueryBuilderExecutor",
+        )
 
     private val executionBackend: QueryExecutionBackend = when {
         operationExecutionContext != null -> OperationScopeQueryExecutionBackend(operationExecutionContext)
@@ -40,7 +50,7 @@ class QueryBuilderExecutor private constructor(
         )
         else -> RootQueryExecutionBackend(
             requireNotNull(operationExecutionExecutor),
-            databaseContext,
+            requireNotNull(suppliedDatabaseContext),
         )
     }
 
@@ -503,6 +513,19 @@ class QueryBuilderExecutor private constructor(
     }
 
     companion object {
+        /** Creates a Query facade backed only by the caller-owned Operation scope. */
+        @JvmStatic
+        fun scopeBound(
+            operationExecutionContext: OperationExecutionContext,
+        ): QueryBuilderExecutor = QueryBuilderExecutor(
+            null,
+            null,
+            TransactionGuardRegistry.shared,
+            RootExecutionCoordinator(),
+            null,
+            operationExecutionContext,
+        )
+
         /** Creates an additive Query facade that executes only through an existing Operation scope. */
         @JvmStatic
         fun scopeBound(

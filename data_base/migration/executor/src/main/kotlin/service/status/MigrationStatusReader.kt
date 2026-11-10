@@ -3,12 +3,9 @@ package gog.my_project.data_base_migration.executor.service.status
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationStatusQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
-import gog.my_project.data_base_operation.executor.transaction.OperationQueryRows
-import gog.my_project.data_base_query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
-import gog.my_project.data_base_query.renderer.manager.DialectSelector
-import gog.my_project.data_base_query.renderer.parameters.IdentityAwareQueryRenderResult
-import gog.my_project.data_base_query.renderer.parameters.LegacyQueryRenderResult
-import gog.my_project.data_base_query.renderer.parameters.QueryParameterRendering
+import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
+import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
+import gog.my_project.data_base_query.executor.result.QueryRow
 import model.migration_status.MigrationStatusRow
 import model.migration_status.MigrationStatusSnapshot
 
@@ -18,24 +15,20 @@ internal class MigrationStatusReader {
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
         return try {
-            val query = SystemMigrationStatusQuery()
-            val ast = query.createCte(SystemMigrationStatusQuery.RelationFilters()).definition.ast
-            when (val rendered = QueryParameterRendering.render(
-                ast,
-                DialectSelector().select(scope.databasePlatformConfig.dialect),
-            )) {
-                is IdentityAwareQueryRenderResult -> {
-                    scope.executeRead(
-                        rendered.displaySql,
-                        emptyList(),
-                        ::readRows,
-                    ).mapSnapshot()
-                }
-                is LegacyQueryRenderResult -> scope.executeRead(
-                    requireNotNull(rendered.sql) { "System Migration status query rendered no SQL" },
-                    emptyList(),
-                    ::readRows,
-                ).mapSnapshot()
+            val declaration = SystemMigrationStatusQuery()
+            val ast = declaration.createCte(SystemMigrationStatusQuery.RelationFilters()).definition.ast
+            val result = QueryBuilderExecutor.scopeBound(scope)
+                .queryBuilder(QueryRenderSelectBuilder(ast = ast))
+                .execute()
+
+            when (result) {
+                is ExecuteResult.Failure -> result
+                is ExecuteResult.Success -> ExecuteResult.Success(
+                    MigrationStatusSnapshot(
+                        requireNotNull(result.result) { "System Migration status query returned no rows" }
+                            .map(::toStatusRow),
+                    ),
+                )
             }
         } catch (error: Error) {
             scope.recordFatal(error)
@@ -45,32 +38,33 @@ internal class MigrationStatusReader {
         }
     }
 
-    private fun readRows(rows: OperationQueryRows): MigrationStatusSnapshot = MigrationStatusSnapshot(
-        buildList {
-            while (rows.next()) {
-                add(
-                    MigrationStatusRow(
-                        tagId = requireNotNull(rows.getInt(TAG_ID)) { "Status query returned a null tagId" },
-                        tagName = requireNotNull(rows.getString(TAG_NAME)) { "Status query returned a null tagName" },
-                        tagType = requireNotNull(rows.getInt(TAG_TYPE)) { "Status query returned a null tagType" },
-                        tagVersionId = rows.getInt(TAG_VERSION_ID),
-                        migrationHistoryId = rows.getInt(MIGRATION_HISTORY_ID),
-                        appliedVersionReferenceId = rows.getInt(APPLIED_VERSION_REFERENCE_ID),
-                        appliedVersionId = rows.getInt(APPLIED_VERSION_ID),
-                        appliedVersionTagId = rows.getInt(APPLIED_VERSION_TAG_ID),
-                        appliedVersionTagName = rows.getString(APPLIED_VERSION_TAG_NAME),
-                        appliedVersionTagType = rows.getInt(APPLIED_VERSION_TAG_TYPE),
-                    ),
-                )
-            }
-        },
+    private fun toStatusRow(row: QueryRow): MigrationStatusRow = MigrationStatusRow(
+        tagId = row.requiredInt(TAG_ID, "Status query returned a null tagId"),
+        tagName = row.requiredString(TAG_NAME, "Status query returned a null tagName"),
+        tagType = row.requiredInt(TAG_TYPE, "Status query returned a null tagType"),
+        tagVersionId = row.nullableInt(TAG_VERSION_ID),
+        migrationHistoryId = row.nullableInt(MIGRATION_HISTORY_ID),
+        appliedVersionReferenceId = row.nullableInt(APPLIED_VERSION_REFERENCE_ID),
+        appliedVersionId = row.nullableInt(APPLIED_VERSION_ID),
+        appliedVersionTagId = row.nullableInt(APPLIED_VERSION_TAG_ID),
+        appliedVersionTagName = row.nullableString(APPLIED_VERSION_TAG_NAME),
+        appliedVersionTagType = row.nullableInt(APPLIED_VERSION_TAG_TYPE),
     )
 
-    private fun ExecuteResult<MigrationStatusSnapshot>.mapSnapshot(): ExecuteResult<MigrationStatusSnapshot> = when (this) {
-        is ExecuteResult.Success -> ExecuteResult.Success(
-            requireNotNull(result) { "System Migration status query returned no snapshot" },
-        )
-        is ExecuteResult.Failure -> ExecuteResult.Failure(exception)
+    private fun QueryRow.requiredInt(alias: String, failureMessage: String): Int =
+        requireNotNull(this[alias] as? Int) { failureMessage }
+
+    private fun QueryRow.requiredString(alias: String, failureMessage: String): String =
+        requireNotNull(this[alias] as? String) { failureMessage }
+
+    private fun QueryRow.nullableInt(alias: String): Int? {
+        val value = this[alias] ?: return null
+        return value as? Int ?: throw IllegalStateException("Status query returned a non-integer '$alias'")
+    }
+
+    private fun QueryRow.nullableString(alias: String): String? {
+        val value = this[alias] ?: return null
+        return value as? String ?: throw IllegalStateException("Status query returned a non-string '$alias'")
     }
 
     private companion object {
