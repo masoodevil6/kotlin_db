@@ -90,6 +90,8 @@ private fun <T> captureMutationResult(
         result ?: ExecuteResult.Failure(
             IllegalStateException("Mutation execution did not deliver a synchronous result"),
         )
+    } catch (error: Error) {
+        throw error
     } catch (failure: Throwable) {
         ExecuteResult.Failure(failure)
     }

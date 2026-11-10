@@ -559,8 +559,16 @@ class IdentityAwareSelectExecutionTest {
                 }
                 "getMetaData" -> resultSetMetaDataProxy(script)
                 "getInt", "getLong", "getString" -> {
-                    val index = (args?.get(0) as? Int)?.minus(1)
-                    index?.let { script.resultValues?.values?.elementAtOrNull(it) }
+                    val value = when (val column = args?.get(0)) {
+                        is Int -> script.resultValues?.values?.elementAtOrNull(column - 1)
+                        is String -> script.resultValues?.get(column)
+                        else -> null
+                    }
+                    when (method.name) {
+                        "getInt" -> (value as? Number)?.toInt() ?: 0
+                        "getLong" -> (value as? Number)?.toLong() ?: 0L
+                        else -> value as? String
+                    }
                 }
                 "wasNull" -> false
                 "close" -> { script.resultSetClosed = true; null }

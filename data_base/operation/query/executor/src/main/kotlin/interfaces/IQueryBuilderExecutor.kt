@@ -1,4 +1,4 @@
-package gog.my_project.data_base_query.executor.interfaces
+﻿package gog.my_project.data_base_query.executor.interfaces
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
@@ -17,10 +17,10 @@ import gog.my_project.data_base_query.ast.interfaces.insert_interface.query_rend
 import gog.my_project.data_base_query.ast.interfaces.select_interface.column.IQueryColumnsAst
 import gog.my_project.data_base_query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst
 import gog.my_project.data_base_query.ast.interfaces.update_interface.query_render_update.IQueryRenderUpdateAst
-import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.builder.ast.select_builder.requireResultOutputAliases
 import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base_query.executor.result.QueryRow
+import gog.my_project.data_base_query.executor.result.QueryRowMaterializer
 import gog.my_project.data_base_query.executor.result.QueryConsumer
 import gog.my_project.data_base_query.executor.result.QueryBuilderSelection
 import gog.my_project.data_base_query.executor.result.InsertQueryConsumer
@@ -147,7 +147,7 @@ interface IQueryBuilderExecutor  {
                             try {
                                 resultSet.use { rows ->
                                     if (rows.next()) {
-                                        ExecuteResult.Success(materializeQueryRow(rows, outputColumns))
+                                        ExecuteResult.Success(QueryRowMaterializer.materialize(rows, outputColumns))
                                     } else {
                                         ExecuteResult.Success(null)
                                     }
@@ -198,7 +198,7 @@ interface IQueryBuilderExecutor  {
                                 resultSet.use { rows ->
                                     val values = mutableListOf<QueryRow>()
                                     while (rows.next()) {
-                                        values += materializeQueryRow(rows, outputColumns)
+                                        values += QueryRowMaterializer.materialize(rows, outputColumns)
                                     }
                                     ExecuteResult.Success(values)
                                 }
@@ -300,35 +300,4 @@ private fun renderBuiltQuery(ast: IQueryAst<*>, dialect: gog.my_project.data_bas
             result.parameterOccurrences.toMutableList(),
         )
     }
-}
-
-private fun materializeQueryRow(
-    resultSet: ResultSet,
-    outputColumns: List<IQueryColumnsAst>,
-): QueryRow {
-    val metadata = resultSet.metaData
-    check(metadata.columnCount == outputColumns.size) {
-        "ResultSet column count does not match SELECT output count"
-    }
-
-    val values = (1..metadata.columnCount).map { index ->
-        val outputColumn = outputColumns[index - 1]
-        val expectedAlias = requireNotNull(outputColumn.metadata.ColumnAlias)
-        val label = metadata.getColumnLabel(index)
-        check(label.isNotBlank()) { "ResultSet column $index has no SQL output alias" }
-        check(label == expectedAlias) {
-            "ResultSet column label '$label' does not match SELECT output alias '$expectedAlias'"
-        }
-        val value = when (requireNotNull(outputColumn.metadata.ExecutionType)) {
-            DataType.LONG -> resultSet.getLong(index).let { if (resultSet.wasNull()) null else it }
-            DataType.INT -> resultSet.getInt(index).let { if (resultSet.wasNull()) null else it }
-            DataType.STRING -> resultSet.getString(index)
-        }
-        label to value
-    }
-    val propertyAliases = outputColumns.mapNotNull { outputColumn ->
-        val property = outputColumn.metadata.PropertyReference ?: return@mapNotNull null
-        property to requireNotNull(outputColumn.metadata.ColumnAlias)
-    }
-    return QueryRow(values, propertyAliases)
 }

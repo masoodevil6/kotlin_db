@@ -33,32 +33,41 @@ class QueryConsumer internal constructor(
 
     /** Executes this SELECT once and maps its materialized rows into a typed collection. */
     fun <T> executeAs(mapper: (QueryRow) -> T): ExecuteResult<ICollection<T>> {
-        return when (val execution = execute()) {
-            is ExecuteResult.Failure -> execution
-            is ExecuteResult.Success -> {
-                val rows = execution.result
-                    ?: return ExecuteResult.Failure(
-                        IllegalStateException("SELECT completed without a materialized row list"),
-                    ).also { reportScopedThrowable(it.exception) }
-                val mappedRows = Collection<T>()
-                for ((index, row) in rows.withIndex()) {
-                    val mapped = try {
-                        mapper(row)
-                    } catch (failure: Exception) {
-                        val mappingFailure = IllegalStateException(
-                            "Failed to map SELECT result row ${index + 1}",
-                            failure,
-                        )
-                        reportScopedThrowable(mappingFailure)
-                        return ExecuteResult.Failure(mappingFailure)
-                    } catch (error: Error) {
-                        reportScopedThrowable(error)
-                        throw error
+        var result: ExecuteResult<ICollection<T>>? = null
+        return try {
+            executor.get(query, blockExecute = { execution ->
+                result = when (execution) {
+                    is ExecuteResult.Failure -> execution
+                    is ExecuteResult.Success -> {
+                        val rows = execution.result
+                            ?: throw IllegalStateException("SELECT completed without a materialized row list")
+                        val mappedRows = Collection<T>()
+                        for ((index, row) in rows.withIndex()) {
+                            val mapped = try {
+                                mapper(row)
+                            } catch (failure: Exception) {
+                                throw IllegalStateException(
+                                    "Failed to map SELECT result row ${index + 1}",
+                                    failure,
+                                )
+                            }
+                            mappedRows.add(mapped)
+                        }
+                        ExecuteResult.Success(mappedRows)
                     }
-                    mappedRows.add(mapped)
                 }
-                ExecuteResult.Success(mappedRows)
+            })
+            result ?: ExecuteResult.Failure(
+                IllegalStateException("SELECT execution did not deliver a synchronous result"),
+            ).also { reportScopedThrowable(it.exception) }
+        } catch (error: Error) {
+            // QueryBuilderExecutor records this as fatal while the Operation scope is still active.
+            throw error
+        } catch (failure: Throwable) {
+            if (executor !is gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor) {
+                reportScopedThrowable(failure)
             }
+            ExecuteResult.Failure(failure)
         }
     }
 
@@ -103,6 +112,8 @@ private fun <T> captureSynchronousResult(
         result ?: ExecuteResult.Failure(
             IllegalStateException("SELECT execution did not deliver a synchronous result"),
         )
+    } catch (error: Error) {
+        throw error
     } catch (failure: Throwable) {
         ExecuteResult.Failure(failure)
     }

@@ -14,9 +14,19 @@ import java.sql.SQLException
 import java.sql.Statement
 import kotlin.use
 
-class QueryExecute(
-    private val databaseContext: DatabaseContext = DatabaseContext.legacyDefault(),
+class QueryExecute private constructor(
+    private val databaseContext: DatabaseContext?,
+    private val scopedConnection: Connection?,
 ) : IQueryExecute {
+    /** Preserves the existing no-argument execution path and its legacy configuration behavior. */
+    constructor() : this(DatabaseContext.legacyDefault(), null)
+
+    /** Preserves the existing context-owned execution path. */
+    constructor(databaseContext: DatabaseContext) : this(databaseContext, null)
+
+    /** Creates an executor that uses the supplied scope-owned Connection without closing it. */
+    constructor(connection: Connection) : this(null, connection)
+
     override fun execute(
         builtQuery: BuiltQuery,
         blockExecute: (
@@ -30,7 +40,7 @@ class QueryExecute(
         val query = builtQuery.getReadyQuery()
         val params = builtQuery.params
         val paramsNames = builtQuery.getListParamNames()
-        withOwnedConnection(databaseContext) { conn ->
+        withExecutionConnection { conn ->
             if (query == null) {
                 blockExecute(
                     conn,
@@ -67,7 +77,7 @@ class QueryExecute(
     override fun executeSelect(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<ResultSet>) -> Unit,
-    ) = withOwnedConnection(databaseContext) { connection -> executeSelect(connection, boundQuery, blockExecute) }
+    ) = withExecutionConnection { connection -> executeSelect(connection, boundQuery, blockExecute) }
 
     override fun executeSelect(
         connection: Connection,
@@ -102,7 +112,7 @@ class QueryExecute(
     override fun executeInsert(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<Long>) -> Unit,
-    ) = withOwnedConnection(databaseContext) { connection -> executeInsert(connection, boundQuery, blockExecute) }
+    ) = withExecutionConnection { connection -> executeInsert(connection, boundQuery, blockExecute) }
 
     /** Executes with the supplied connection and invokes [blockExecute] before returning. */
     override fun executeInsert(
@@ -156,7 +166,7 @@ class QueryExecute(
     override fun executeUpdate(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
-    ) = withOwnedConnection(databaseContext) { connection -> executeUpdate(connection, boundQuery, blockExecute) }
+    ) = withExecutionConnection { connection -> executeUpdate(connection, boundQuery, blockExecute) }
 
     override fun executeUpdate(
         connection: Connection,
@@ -191,7 +201,7 @@ class QueryExecute(
     override fun executeDelete(
         boundQuery: BoundQuery,
         blockExecute: (ExecuteResult<Int>) -> Unit,
-    ) = withOwnedConnection(databaseContext) { connection -> executeDelete(connection, boundQuery, blockExecute) }
+    ) = withExecutionConnection { connection -> executeDelete(connection, boundQuery, blockExecute) }
 
     /** Executes with the supplied connection and invokes [blockExecute] before returning. */
     override fun executeDelete(
@@ -317,6 +327,10 @@ class QueryExecute(
             executeOnConnection(connection, requireNotNull(query), params, paramNames, blockExecute)
         }
     }
+
+    private inline fun <T> withExecutionConnection(operation: (Connection) -> T): T =
+        scopedConnection?.let(operation)
+            ?: withOwnedConnection(requireNotNull(databaseContext), operation)
 
     private fun <T> executeBuiltQueryOnConnection(
         connection: Connection,

@@ -494,7 +494,7 @@ class TransactionExecutionTest {
             assertIs<IllegalStateException>(rejection)
             assertTrue(rejection.message.orEmpty().contains("root query is in progress"))
             assertEquals(0, callbackCount)
-            assertEquals(0, factoryCalls)
+            assertEquals(1, factoryCalls)
             assertEquals(1, jdbc.connectionCreations)
             assertEquals(1, jdbc.preparedStatements)
         } finally {
@@ -508,14 +508,14 @@ class TransactionExecutionTest {
 
         val afterRace = assertRootSuccess(executor.queryBuilder(updateQuery(32)).execute(), "query after race")
         assertEquals(1, afterRace.result)
-        assertEquals(0, factoryCalls)
+        assertEquals(2, factoryCalls)
         assertEquals(2, jdbc.connectionCreations)
         assertEquals(2, jdbc.preparedStatements)
         assertEquals(2, jdbc.events.count { it == "connection.close" })
 
         val scopeAfterQuery = executor.connection { ExecuteResult.Success("scope starts after query release") }
         assertEquals("scope starts after query release", assertIs<ExecuteResult.Success<String>>(scopeAfterQuery).result)
-        assertEquals(1, factoryCalls)
+        assertEquals(3, factoryCalls)
         assertEquals(3, jdbc.connectionCreations)
         assertEquals(3, jdbc.events.count { it == "connection.close" })
         }
@@ -590,7 +590,7 @@ class TransactionExecutionTest {
 
         val afterScope = assertRootSuccess(executor.queryBuilder(updateQuery(42)).execute(), "query after Starting")
         assertEquals(1, afterScope.result)
-        assertEquals(1, factoryCalls)
+        assertEquals(2, factoryCalls)
         assertEquals(2, jdbc.connectionCreations)
         assertEquals(1, jdbc.preparedStatements)
     }
@@ -777,7 +777,7 @@ class TransactionExecutionTest {
 
         val afterScope = assertRootSuccess(executor.queryBuilder(updateQuery(52)).execute(), "query after connection finalization")
         assertEquals(1, afterScope.result)
-        assertEquals(1, factoryCalls)
+        assertEquals(2, factoryCalls)
         assertEquals(2, jdbc.connectionCreations)
         assertEquals(1, jdbc.preparedStatements)
         }
@@ -856,7 +856,7 @@ class TransactionExecutionTest {
 
         val afterScope = assertRootSuccess(executor.queryBuilder(updateQuery(63)).execute(), "query after transaction finalization")
         assertEquals(1, afterScope.result)
-        assertEquals(1, factoryCalls)
+        assertEquals(2, factoryCalls)
         assertEquals(2, jdbc.connectionCreations)
         assertEquals(1, jdbc.preparedStatements)
         }
@@ -1491,6 +1491,60 @@ class TransactionExecutionTest {
     }
 
     @Test
+    fun `root fluent select and DML use Operation owned scopes`() = withConfig {
+        val jdbc = JdbcScript(selectRows = 2)
+        var connectionFactoryCalls = 0
+        val executor = QueryBuilderExecutor {
+            connectionFactoryCalls++
+            jdbc.openConnection()
+        }
+
+        val selected = executor.queryBuilder(selectQuery()).execute()
+        val inserted = executor.queryBuilder(insertQuery(11)).execute()
+        val updated = executor.queryBuilder(updateQuery(22)).execute()
+        val deleted = executor.queryBuilder(deleteQuery(33)).execute()
+
+        assertEquals(listOf(42, 42), assertIs<ExecuteResult.Success<List<QueryRow>>>(selected).result!!.map { it["value"] })
+        assertEquals(9001L, assertIs<ExecuteResult.Success<Long>>(inserted).result)
+        assertEquals(1, assertIs<ExecuteResult.Success<Int>>(updated).result)
+        assertEquals(1, assertIs<ExecuteResult.Success<Int>>(deleted).result)
+        assertEquals(4, connectionFactoryCalls)
+        assertEquals(4, jdbc.connectionCreations)
+        assertEquals(4, jdbc.preparedStatements)
+        assertEquals(listOf(emptyList(), listOf(11), listOf(22), listOf(33)), jdbc.bindings.map { statement ->
+            statement.map { it[1] }
+        })
+        assertEquals(1, jdbc.events.count { it == "resultSet.close" })
+        assertEquals(1, jdbc.events.count { it == "generatedKeys.close" })
+        assertEquals(4, jdbc.events.count { it == "statement.close" })
+        assertEquals(4, jdbc.events.count { it == "connection.close" })
+        assertEquals(0, jdbc.events.count { it == "commit" })
+        assertEquals(0, jdbc.events.count { it == "rollback" })
+    }
+
+    @Test
+    fun `root query failure is returned by Operation and its coordinator remains reusable`() = withConfig {
+        val failingJdbc = JdbcScript(failExecutionAt = 1)
+        val recoveredJdbc = JdbcScript()
+        var connectionFactoryCalls = 0
+        val executor = QueryBuilderExecutor {
+            connectionFactoryCalls++
+            if (connectionFactoryCalls == 1) failingJdbc.openConnection() else recoveredJdbc.openConnection()
+        }
+
+        val failed = assertIs<ExecuteResult.Failure>(executor.queryBuilder(updateQuery(41)).execute())
+
+        assertSame(failingJdbc.queryFailure, failed.exception)
+        assertEquals(1, failingJdbc.events.count { it == "connection.close" })
+        assertEquals(0, failingJdbc.events.count { it == "commit" })
+        assertEquals(0, failingJdbc.events.count { it == "rollback" })
+
+        assertEquals(1, assertIs<ExecuteResult.Success<Int>>(executor.queryBuilder(updateQuery(42)).execute()).result)
+        assertEquals(2, connectionFactoryCalls)
+        assertEquals(1, recoveredJdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
     fun `root operation Error releases its admission permit`() = withDriverManager(
         JdbcScript(
             failExecutionAt = 1,
@@ -1502,20 +1556,253 @@ class TransactionExecutionTest {
         var factoryCalls = 0
         val executor = QueryBuilderExecutor {
             factoryCalls++
-            recoveredJdbc.openConnection()
+            if (factoryCalls == 1) failingJdbc.openConnection() else recoveredJdbc.openConnection()
         }
 
-        val rootFailure = assertIs<ExecuteResult.Failure>(executor.queryBuilder(updateQuery(71)).execute())
-        assertSame(fatal, rootFailure.exception)
+        val rootFailure = assertFailsWith<AssertionError> {
+            executor.queryBuilder(updateQuery(71)).execute()
+        }
+        assertSame(fatal, rootFailure)
         assertEquals(1, failingJdbc.events.count { it == "connection.close" })
 
         val scopeResult = executor.connection { ExecuteResult.Success("permit released") }
         assertEquals("permit released", assertIs<ExecuteResult.Success<String>>(scopeResult).result)
-        assertEquals(1, factoryCalls)
+        assertEquals(2, factoryCalls)
         assertEquals(1, recoveredJdbc.connectionCreations)
         assertEquals(1, recoveredJdbc.events.count { it == "connection.close" })
         assertEquals(0, recoveredJdbc.events.count { it == "commit" })
         assertEquals(0, recoveredJdbc.events.count { it == "rollback" })
+    }
+
+    @Test
+    fun `root SELECT and DML callbacks run once before their Operation connection closes`() = withConfig {
+        val jdbc = JdbcScript(selectRows = 2)
+        val executor = QueryBuilderExecutor { jdbc.openConnection() }
+        val callbacks = mutableListOf<String>()
+
+        executor.first(selectQuery(), blockExecute = {
+            callbacks += "first"
+            assertIs<ExecuteResult.Success<QueryRow>>(it)
+            assertEquals(callbacks.size - 1, jdbc.events.count { event -> event == "connection.close" })
+        })
+        executor.get(selectQuery(), blockExecute = {
+            callbacks += "get"
+            assertIs<ExecuteResult.Success<List<QueryRow>>>(it)
+            assertEquals(callbacks.size - 1, jdbc.events.count { event -> event == "connection.close" })
+        })
+        executor.execute(insertQuery(1), blockExecute = {
+            callbacks += "insert"
+            assertIs<ExecuteResult.Success<Long>>(it)
+            assertEquals(callbacks.size - 1, jdbc.events.count { event -> event == "connection.close" })
+        })
+        executor.execute(updateQuery(2), blockExecute = {
+            callbacks += "update"
+            assertIs<ExecuteResult.Success<Int>>(it)
+            assertEquals(callbacks.size - 1, jdbc.events.count { event -> event == "connection.close" })
+        })
+        executor.execute(deleteQuery(3), blockExecute = {
+            callbacks += "delete"
+            assertIs<ExecuteResult.Success<Int>>(it)
+            assertEquals(callbacks.size - 1, jdbc.events.count { event -> event == "connection.close" })
+        })
+
+        assertEquals(listOf("first", "get", "insert", "update", "delete"), callbacks)
+        assertEquals(callbacks.size, jdbc.connectionCreations)
+        assertEquals(callbacks.size, jdbc.events.count { it == "connection.close" })
+        assertEquals(0, jdbc.events.count { it == "commit" })
+        assertEquals(0, jdbc.events.count { it == "rollback" })
+    }
+
+    @Test
+    fun `root cleanup failure after callback success is returned and executor remains reusable`() = withConfig {
+        val directCallbackJdbc = JdbcScript(failClose = true)
+        val fluentJdbc = JdbcScript(failClose = true)
+        val recoveredJdbc = JdbcScript()
+        val scripts = listOf(directCallbackJdbc, fluentJdbc, recoveredJdbc)
+        var connectionFactoryCalls = 0
+        val executor = QueryBuilderExecutor {
+            scripts[connectionFactoryCalls++].openConnection()
+        }
+        var callbackCount = 0
+
+        val directCleanupFailure = assertFailsWith<IllegalStateException> {
+            executor.get(selectQuery(), blockExecute = {
+                callbackCount++
+                assertIs<ExecuteResult.Success<List<QueryRow>>>(it)
+                assertEquals(0, directCallbackJdbc.events.count { event -> event == "connection.close" })
+            })
+        }
+        assertSame(directCallbackJdbc.closeFailure, directCleanupFailure.cause)
+        assertEquals(1, callbackCount)
+        assertEquals(1, directCallbackJdbc.events.count { it == "connection.close" })
+
+        val fluentCleanupFailure = assertIs<ExecuteResult.Failure>(
+            executor.queryBuilder(selectQuery()).execute(),
+        ).exception
+        assertTrue(fluentCleanupFailure.message.orEmpty().contains("closing its connection failed"))
+        assertSame(fluentJdbc.closeFailure, fluentCleanupFailure.cause)
+        assertEquals(1, fluentJdbc.events.count { it == "connection.close" })
+
+        val recovered = executor.queryBuilder(selectQuery()).execute()
+        assertIs<ExecuteResult.Success<List<QueryRow>>>(recovered)
+        assertEquals(3, connectionFactoryCalls)
+        assertEquals(1, recoveredJdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `root SQL failure remains primary when connection cleanup also fails`() = withConfig {
+        val jdbc = JdbcScript(failExecutionAt = 1, failClose = true)
+        val executor = QueryBuilderExecutor { jdbc.openConnection() }
+        var callbackCount = 0
+        var callbackFailure: Throwable? = null
+
+        executor.execute(updateQuery(23), blockExecute = { result ->
+            callbackCount++
+            callbackFailure = assertIs<ExecuteResult.Failure>(result).exception
+        })
+
+        assertSame(jdbc.queryFailure, callbackFailure)
+        assertTrue(jdbc.queryFailure.suppressed.any { it === jdbc.closeFailure })
+        assertEquals(1, callbackCount)
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `root typed mapper failure is recorded before connection cleanup and executor is reusable`() = withConfig {
+        val failingJdbc = JdbcScript(failClose = true)
+        val recoveredJdbc = JdbcScript()
+        var connectionFactoryCalls = 0
+        val executor = QueryBuilderExecutor {
+            connectionFactoryCalls++
+            if (connectionFactoryCalls == 1) failingJdbc.openConnection() else recoveredJdbc.openConnection()
+        }
+        val mapperFailure = IllegalArgumentException("mapper failed")
+
+        val failure = assertIs<ExecuteResult.Failure>(
+            executor.queryBuilder(selectQuery()).executeAs<Int> {
+                failingJdbc.events += "mapper"
+                throw mapperFailure
+            },
+        ).exception
+
+        assertTrue(failure.message.orEmpty().contains("row 1"))
+        assertSame(mapperFailure, failure.cause)
+        assertTrue(failingJdbc.events.indexOf("mapper") < failingJdbc.events.indexOf("connection.close"))
+        assertTrue(failure.suppressed.any { it === failingJdbc.closeFailure })
+        assertEquals(1, failingJdbc.events.count { it == "connection.close" })
+
+        val recovered = executor.queryBuilder(selectQuery()).executeAs { it.getValue("value") as Int }
+        assertEquals(42, assertIs<ExecuteResult.Success<ICollection<Int>>>(recovered).result?.toList()?.single())
+        assertEquals(2, connectionFactoryCalls)
+        assertEquals(1, recoveredJdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `root SELECT callback failure is recorded before close and callback is not repeated`() = withConfig {
+        val failingJdbc = JdbcScript(failClose = true)
+        val recoveredJdbc = JdbcScript()
+        var connectionFactoryCalls = 0
+        val executor = QueryBuilderExecutor {
+            connectionFactoryCalls++
+            if (connectionFactoryCalls == 1) failingJdbc.openConnection() else recoveredJdbc.openConnection()
+        }
+        val callbackFailure = IllegalStateException("result callback failed")
+        var callbackCount = 0
+
+        val thrown = assertFailsWith<IllegalStateException> {
+            executor.get(selectQuery(), blockExecute = {
+                callbackCount++
+                failingJdbc.events += "callback"
+                throw callbackFailure
+            })
+        }
+
+        assertSame(callbackFailure, thrown)
+        assertTrue(failingJdbc.events.indexOf("callback") < failingJdbc.events.indexOf("connection.close"))
+        assertTrue(thrown.suppressed.any { it === failingJdbc.closeFailure })
+        assertEquals(1, callbackCount)
+        assertEquals(1, failingJdbc.events.count { it == "connection.close" })
+
+        val recovered = executor.queryBuilder(selectQuery()).execute()
+        assertIs<ExecuteResult.Success<List<QueryRow>>>(recovered)
+        assertEquals(2, connectionFactoryCalls)
+        assertEquals(1, recoveredJdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `root DML callback failure is recorded before close and callback is not repeated`() = withConfig {
+        val jdbc = JdbcScript(failClose = true)
+        val executor = QueryBuilderExecutor { jdbc.openConnection() }
+        val callbackFailure = IllegalStateException("DML callback failed")
+        var callbackCount = 0
+
+        val thrown = assertFailsWith<IllegalStateException> {
+            executor.execute(insertQuery(12), blockExecute = {
+                callbackCount++
+                jdbc.events += "callback"
+                throw callbackFailure
+            })
+        }
+
+        assertSame(callbackFailure, thrown)
+        assertTrue(jdbc.events.indexOf("callback") < jdbc.events.indexOf("connection.close"))
+        assertTrue(thrown.suppressed.any { it === jdbc.closeFailure })
+        assertEquals(1, callbackCount)
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+        assertEquals(0, jdbc.events.count { it == "commit" })
+        assertEquals(0, jdbc.events.count { it == "rollback" })
+    }
+
+    @Test
+    fun `root DML callback Error remains fatal and is not converted to ExecuteResult Failure`() = withConfig {
+        val jdbc = JdbcScript(failClose = true)
+        val executor = QueryBuilderExecutor { jdbc.openConnection() }
+        val fatal = AssertionError("fatal DML callback error")
+
+        val thrown = assertFailsWith<AssertionError> {
+            executor.execute(insertQuery(13), blockExecute = { throw fatal })
+        }
+
+        assertSame(fatal, thrown)
+        assertTrue(thrown.suppressed.any { it === jdbc.closeFailure })
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `root typed mapper Error remains fatal and closes the connection`() = withConfig {
+        val jdbc = JdbcScript()
+        val executor = QueryBuilderExecutor { jdbc.openConnection() }
+        val fatal = AssertionError("fatal mapper error")
+
+        val thrown = assertFailsWith<AssertionError> {
+            executor.queryBuilder(selectQuery()).executeAs<Int> { throw fatal }
+        }
+
+        assertSame(fatal, thrown)
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+        assertEquals(0, jdbc.events.count { it == "commit" })
+        assertEquals(0, jdbc.events.count { it == "rollback" })
+    }
+
+    @Test
+    fun `root first and get report alias and execution type validation through callbacks`() = withConfig {
+        var connectionFactoryCalls = 0
+        val executor = QueryBuilderExecutor {
+            connectionFactoryCalls++
+            JdbcScript().openConnection()
+        }
+        var callbackCount = 0
+        val failures = mutableListOf<Throwable>()
+
+        executor.first(selectWithoutAlias(), blockExecute = { callbackCount++; failures += assertIs<ExecuteResult.Failure>(it).exception })
+        executor.get(selectWithoutAlias(), blockExecute = { callbackCount++; failures += assertIs<ExecuteResult.Failure>(it).exception })
+        executor.first(selectWithoutExecutionType(), blockExecute = { callbackCount++; failures += assertIs<ExecuteResult.Failure>(it).exception })
+        executor.get(selectWithoutExecutionType(), blockExecute = { callbackCount++; failures += assertIs<ExecuteResult.Failure>(it).exception })
+
+        assertEquals(4, callbackCount)
+        assertTrue(failures.take(2).all { it is IllegalArgumentException && it.message.orEmpty().contains("alias") })
+        assertTrue(failures.drop(2).all { it is IllegalArgumentException && it.message.orEmpty().contains("execution DataType") })
+        assertEquals(0, connectionFactoryCalls)
     }
 
     private fun updateQuery(value: Int) = QueryRenderUpdateBuilder()
@@ -1559,6 +1846,24 @@ class TransactionExecutionTest {
                 column { tableAttribute("1") }
                 alias("value")
                 execute(DataType.INT)
+            }
+        }
+        .from { table("records").alias("r") }
+
+    private fun selectWithoutAlias() = QueryRenderSelectBuilder()
+        .select {
+            addColumn {
+                column { tableAttribute("1") }
+                execute(DataType.INT)
+            }
+        }
+        .from { table("records").alias("r") }
+
+    private fun selectWithoutExecutionType() = QueryRenderSelectBuilder()
+        .select {
+            addColumn {
+                column { tableAttribute("1") }
+                alias("value")
             }
         }
         .from { table("records").alias("r") }

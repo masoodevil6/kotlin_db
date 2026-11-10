@@ -216,6 +216,52 @@ class SchemaExecutorTransactionTest {
     }
 
     @Test
+    fun `default rendered execution uses the existing scope DDL path and preserves bindings`() {
+        val events = mutableListOf<String>()
+        val preparedSql = mutableListOf<String>()
+        val bindings = mutableListOf<Triple<Int, Any?, Int>>()
+        val connection = connection(events, preparedSql = preparedSql, boundParameters = bindings)
+        val scope = OperationExecutionScope(
+            connection,
+            DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+        )
+        val query = BuiltQuery(
+            "CREATE TABLE `sample` (`value` INT DEFAULT :value)",
+            mutableListOf(QueryParameterBinding("value", 7, java.sql.Types.INTEGER)),
+        )
+        val executor = SchemaExecutor()
+        var result: ExecuteResult<Boolean>? = null
+
+        executor.executeRendered(query, scope, blockExecute = { result = it })
+
+        assertEquals(ExecuteResult.Success(true), result)
+        assertEquals(listOf("CREATE TABLE `sample` (`value` INT DEFAULT ?)"), preparedSql)
+        assertEquals(listOf(Triple<Int, Any?, Int>(1, 7, java.sql.Types.INTEGER)), bindings)
+        assertEquals(0, events.count { it == "close" })
+    }
+
+    @Test
+    fun `default schema execution uses the transaction scope connection`() {
+        val events = mutableListOf<String>()
+        val preparedSql = mutableListOf<String>()
+        val connection = connection(events, preparedSql = preparedSql)
+        val operationContext = DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val executor = SchemaExecutor(
+            transactionExecutor = OperationTransactionExecutor({ connection }, operationContext),
+        )
+
+        val result = executor.transaction { transaction ->
+            var ddlResult: ExecuteResult<Boolean>? = null
+            transaction.execute(createIndex(), blockExecute = { ddlResult = it })
+            if (ddlResult is ExecuteResult.Failure) ddlResult!! else ExecuteResult.Success("done")
+        }
+
+        assertEquals("done", assertIs<ExecuteResult.Success<String>>(result).result)
+        assertEquals(listOf("CREATE INDEX `idx_users_email` ON `users` (`email`)"), preparedSql)
+        assertEquals(listOf("autoCommit:false", "commit", "close"), events)
+    }
+
+    @Test
     fun `query info callback receives rendered SQL and no fabricated DDL parameters`() {
         val events = mutableListOf<String>()
         val connection = connection(events)
@@ -424,6 +470,8 @@ class SchemaExecutorTransactionTest {
         executedConnections: MutableList<Connection>? = null,
         ddlFailure: SQLException? = null,
         closeFailure: SQLException? = null,
+        preparedSql: MutableList<String>? = null,
+        boundParameters: MutableList<Triple<Int, Any?, Int>>? = null,
     ): Connection {
         var autoCommit = true
         return Proxy.newProxyInstance(
@@ -433,11 +481,28 @@ class SchemaExecutorTransactionTest {
                 when (method.name) {
                     "prepareStatement" -> {
                         executedConnections?.add(proxy as Connection)
+                        preparedSql?.add(args!![0] as String)
                         Proxy.newProxyInstance(
                             PreparedStatement::class.java.classLoader,
                             arrayOf(PreparedStatement::class.java),
-                        ) { _, statementMethod, _ ->
+                        ) { _, statementMethod, statementArgs ->
                             when (statementMethod.name) {
+                                "setObject" -> {
+                                    boundParameters?.add(
+                                        Triple(
+                                            statementArgs!![0] as Int,
+                                            statementArgs[1],
+                                            statementArgs[2] as Int,
+                                        ),
+                                    )
+                                    null
+                                }
+                                "setNull" -> {
+                                    boundParameters?.add(
+                                        Triple(statementArgs!![0] as Int, null, statementArgs[1] as Int),
+                                    )
+                                    null
+                                }
                                 "execute" -> {
                                     ddlFailure?.let { throw it }
                                     true

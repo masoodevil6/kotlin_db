@@ -2,7 +2,6 @@ package gog.my_project.data_base_schema.executor.manager
 
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base.core.query.reader.BuiltQuery
-import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
@@ -15,8 +14,8 @@ import gog.my_project.data_base_schema.renderer.manager.DialectSelector
 
 /**
  * Executes Schema statements while Operation owns Scope, Connection, and Transaction lifecycle.
- * A custom [IQueryExecute] must support execution on a supplied Connection; SchemaExecutor never
- * delegates Connection ownership to the low-level executor.
+ * A custom [IQueryExecute] must support execution on a supplied Connection. The active Operation
+ * scope invokes it without transferring Connection lifecycle ownership to the executor.
  */
 class SchemaExecutor(
     queryExecutor: IQueryExecute? = null,
@@ -24,7 +23,8 @@ class SchemaExecutor(
     transactionExecutor: OperationTransactionExecutor? = null,
     val databaseContext: DatabaseContext = DatabaseContext.legacyDefault(),
 ) {
-    private val queryExecutor: IQueryExecute = queryExecutor ?: QueryExecute(databaseContext)
+    /** Null selects OperationExecutionContext execution; explicit injection keeps legacy behavior. */
+    private val queryExecutor: IQueryExecute? = queryExecutor
     private val transactionExecutor: OperationTransactionExecutor =
         transactionExecutor ?: OperationTransactionExecutor(databaseContext)
 
@@ -48,13 +48,7 @@ class SchemaExecutor(
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
     ) = executeRoot(blockExecute) { scope ->
-        SchemaExecutionIntegration.executeScoped(
-            operation,
-            scope,
-            dialectSelector,
-            queryExecutor,
-            blockQueryInfo.asQueryInfoCallback(),
-        )
+        executeOnScope(operation, scope, blockQueryInfo.asQueryInfoCallback())
     }
 
     /** Executes already-rendered SQL on a newly owned Operation connection scope. */
@@ -62,7 +56,7 @@ class SchemaExecutor(
         query: BuiltQuery,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
     ) = executeRoot(blockExecute) { scope ->
-        SchemaExecutionIntegration.executeRenderedScoped(query, scope, queryExecutor)
+        executeRenderedOnScope(query, scope)
     }
 
     /** Executes already-rendered SQL on an existing Operation scope without owning its lifecycle. */
@@ -71,7 +65,7 @@ class SchemaExecutor(
         scope: OperationExecutionScope,
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
     ) = executeOnScope(scope, blockExecute) {
-        SchemaExecutionIntegration.executeRenderedScoped(query, scope, queryExecutor)
+        executeRenderedOnScope(query, scope)
     }
 
     /** Executes an operation on an existing Operation scope without taking lifecycle ownership. */
@@ -81,14 +75,34 @@ class SchemaExecutor(
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
         blockQueryInfo: ((query: String?, paramsMap: MutableMap<String, Any?>) -> Unit)? = null,
     ) = executeOnScope(scope, blockExecute) {
+        executeOnScope(operation, scope, blockQueryInfo.asQueryInfoCallback())
+    }
+
+    private fun executeOnScope(
+        operation: ISchemaApi<*>,
+        scope: OperationExecutionScope,
+        onQueryInfo: ((sql: String, parameters: Map<String, Any?>) -> Unit)?,
+    ): ExecuteResult<Boolean> = queryExecutor?.let { injectedExecutor ->
         SchemaExecutionIntegration.executeScoped(
             operation,
             scope,
             dialectSelector,
-            queryExecutor,
-            blockQueryInfo.asQueryInfoCallback(),
+            injectedExecutor,
+            onQueryInfo,
         )
-    }
+    } ?: SchemaExecutionIntegration.executeScoped(
+        operation,
+        scope,
+        dialectSelector,
+        onQueryInfo,
+    )
+
+    private fun executeRenderedOnScope(
+        query: BuiltQuery,
+        scope: OperationExecutionScope,
+    ): ExecuteResult<Boolean> = queryExecutor?.let { injectedExecutor ->
+        SchemaExecutionIntegration.executeRenderedScoped(query, scope, injectedExecutor)
+    } ?: SchemaExecutionIntegration.executeRenderedScoped(query, scope)
 
     private fun executeRoot(
         blockExecute: (ExecuteResult<Boolean>) -> Unit,
