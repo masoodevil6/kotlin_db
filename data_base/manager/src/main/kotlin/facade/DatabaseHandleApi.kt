@@ -1,6 +1,7 @@
 package gog.my_project.data_base_manager.facade
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 
 /**
@@ -35,4 +36,24 @@ interface DatabaseHandleApi {
      */
     fun <T> transaction(block: (IQueryBuilderExecutor) -> ExecuteResult<T>): ExecuteResult<T>
 
+}
+
+/**
+ * Runs [block] in the managed root Operation scope for the current handle operation.
+ *
+ * This is an extension rather than a new [DatabaseHandleApi] member so existing custom
+ * implementations remain source- and JVM-compatible. The built-in [DatabaseHandle] supports
+ * this capability; legacy implementations receive a Failure without their existing APIs being
+ * affected.
+ */
+fun <T> DatabaseHandleApi.withOperationScope(
+    block: (OperationExecutionScope) -> ExecuteResult<T>,
+): ExecuteResult<T> {
+    val managedHandle = this as? DatabaseHandle
+        ?: return ExecuteResult.Failure(
+            UnsupportedOperationException(
+                "This DatabaseHandleApi implementation does not expose a managed OperationExecutionScope",
+            ),
+        )
+    return managedHandle.runWithOperationScope(block)
 }

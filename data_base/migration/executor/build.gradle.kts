@@ -21,6 +21,7 @@ dependencies {
     implementation(project(":data_base:operation:query:builder"))
 
     testImplementation(kotlin("test"))
+    testImplementation(project(":data_base:manager"))
 }
 
 tasks.test {

@@ -9,9 +9,14 @@ internal class MigrationVersionHistorySnapshot(
     versions: List<MigrationHistoryVersion>,
     migrations: List<MigrationHistoryEntry>,
 ) {
-    val tags: List<MigrationHistoryTag> = immutableCopy(tags)
-    val versions: List<MigrationHistoryVersion> = immutableCopy(versions)
-    val migrations: List<MigrationHistoryEntry> = immutableCopy(migrations)
+    /** Tags are ordered by their persisted primary key, independently of query row order. */
+    val tags: List<MigrationHistoryTag> = immutableCopy(tags.sortedBy(MigrationHistoryTag::id))
+
+    /** Versions are ordered by their persisted primary key, independently of query row order. */
+    val versions: List<MigrationHistoryVersion> = immutableCopy(versions.sortedBy(MigrationHistoryVersion::id))
+
+    /** Migration history is ordered by id; timestamps remain optional data, not ordering keys. */
+    val migrations: List<MigrationHistoryEntry> = immutableCopy(migrations.sortedBy(MigrationHistoryEntry::id))
 
     private fun <T> immutableCopy(values: List<T>): List<T> =
         Collections.unmodifiableList(ArrayList(values))
@@ -32,4 +37,5 @@ internal data class MigrationHistoryEntry(
     val id: Int,
     val tagId: Int,
     val versionId: Int,
+    val createdAt: String? = null,
 )

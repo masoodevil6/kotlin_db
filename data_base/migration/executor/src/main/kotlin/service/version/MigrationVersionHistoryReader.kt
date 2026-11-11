@@ -1,10 +1,10 @@
 package gog.my_project.data_base_migration.executor.service.version
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
-import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationQuery
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationTagQuery
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationVersionQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.QueryRow
@@ -60,12 +60,37 @@ internal class MigrationVersionHistoryReader {
     }
 
     private fun readMigrations(scope: OperationExecutionScope): ExecuteResult<List<MigrationHistoryEntry>> {
-        val cte = SystemMigrationQuery().createCte(SystemMigrationQuery.RelationFilters())
-        return read(scope, cte.definition.ast) { row ->
+        val query = QueryRenderSelectBuilder()
+            .from { table("system_migration").alias("sm") }
+            .select {
+                addColumn {
+                    column { tableSelector("sm"); columnSelector("id") }
+                    alias("id")
+                    execute(DataType.INT)
+                }
+                addColumn {
+                    column { tableSelector("sm"); columnSelector("tag_id") }
+                    alias("tagId")
+                    execute(DataType.INT)
+                }
+                addColumn {
+                    column { tableSelector("sm"); columnSelector("version_id") }
+                    alias("versionId")
+                    execute(DataType.INT)
+                }
+                addColumn {
+                    column { tableSelector("sm"); columnSelector("created_at") }
+                    alias("createdAt")
+                    execute(DataType.STRING)
+                }
+            }
+
+        return read(scope, query.ast) { row ->
             MigrationHistoryEntry(
                 id = row.requiredInt("id", "Applied Migration query returned a null id"),
                 tagId = row.requiredInt("tagId", "Applied Migration query returned a null tagId"),
                 versionId = row.requiredInt("versionId", "Applied Migration query returned a null versionId"),
+                createdAt = row["createdAt"] as? String,
             )
         }
     }

@@ -2,9 +2,11 @@ package gog.my_project.data_base_manager.facade
 
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -67,6 +69,47 @@ class DatabaseCatalogTest {
         assertEquals(2, provider.connectionCloseCount.get())
         manager.close()
         assertEquals(1, provider.closeCount.get())
+    }
+
+    @Test
+    fun registrationIdentityIsPassedThroughContextIntoOperationScope() {
+        val targetConfig = config("identity-target")
+        val provider = TrackingProvider()
+        var registeredIdentity: DatabaseIdentity? = null
+        var createdContext: DatabaseContext? = null
+        val manager = DatabaseManager(
+            {
+                database(Primary) { config = targetConfig }
+            },
+            { name, databaseConfig, identity ->
+                registeredIdentity = identity
+                DatabaseContext(name, databaseConfig, provider, identity).also { createdContext = it }
+            },
+        )
+
+        assertEquals(ExecuteResult.Success(Unit), manager[Primary].connection { ExecuteResult.Success(Unit) })
+
+        val identity = requireNotNull(registeredIdentity)
+        val context = requireNotNull(createdContext)
+        assertSame(identity, context.databaseIdentity)
+        assertEquals(DatabaseIdentity.from(targetConfig), identity)
+
+        val scopeResult = OperationExecutionExecutor(context).connection { scope ->
+            assertSame(identity, scope.databaseIdentity)
+            scope.transaction { transactionScope ->
+                assertSame(identity, transactionScope.databaseIdentity)
+                ExecuteResult.Success(Unit)
+            }
+        }
+
+        assertEquals(ExecuteResult.Success(Unit), scopeResult)
+
+        val transactionResult = OperationExecutionExecutor(context).transaction { scope ->
+            assertSame(identity, scope.databaseIdentity)
+            ExecuteResult.Success(Unit)
+        }
+        assertEquals(ExecuteResult.Success(Unit), transactionResult)
+        manager.close()
     }
 
     @Test

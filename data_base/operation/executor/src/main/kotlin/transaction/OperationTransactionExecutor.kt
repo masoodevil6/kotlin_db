@@ -1,20 +1,38 @@
 package gog.my_project.data_base_operation.executor.transaction
 
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 
 /** Runs one callback on a single owned JDBC connection and finalizes it as a transaction. */
-class OperationTransactionExecutor(
+class OperationTransactionExecutor private constructor(
     private val connectionFactory: () -> Connection,
     private val databasePlatformConfig: DatabasePlatformConfig,
+    private val databaseIdentity: DatabaseIdentity?,
+    @Suppress("UNUSED_PARAMETER") constructorMarker: Unit,
 ) {
+
+    /** Preserves the established public connection-factory and platform constructor. */
+    constructor(
+        connectionFactory: () -> Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+    ) : this(connectionFactory, databasePlatformConfig, null, Unit)
+
+    /** Operation-owned path for carrying the identity associated with a DatabaseContext. */
+    internal constructor(
+        connectionFactory: () -> Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+        databaseIdentity: DatabaseIdentity?,
+    ) : this(connectionFactory, databasePlatformConfig, databaseIdentity, Unit)
+
     constructor() : this(DatabaseContext.legacyDefault())
 
     constructor(databaseContext: DatabaseContext) : this(
         databaseContext::openConnection,
         databaseContext.platformConfig,
+        databaseContext.databaseIdentity,
     )
 
     /** Compatibility constructor for callers that supply their own Connection factory. */
@@ -22,6 +40,7 @@ class OperationTransactionExecutor(
     constructor(connectionFactory: () -> Connection) : this(
         connectionFactory,
         DatabaseContext.legacyDefault().platformConfig,
+        null,
     )
 
     fun <T> transaction(
@@ -79,7 +98,7 @@ class OperationTransactionExecutor(
             }
             transactionStarted = true
 
-            val activeScope = OperationExecutionScope(connection, databasePlatformConfig)
+            val activeScope = OperationExecutionScope(connection, databasePlatformConfig, databaseIdentity)
             scope = activeScope
             coordinator.prepareScope(activeScope)
             OperationScopeGuard.activateTransaction(activeScope)
@@ -158,7 +177,11 @@ class OperationTransactionExecutor(
             if (parentRejection != null) return ExecuteResult.Failure(parentRejection)
 
             val connection = parentScope.lifecycleConnection()
-            val transactionScope = OperationExecutionScope(connection, parentScope.databasePlatformConfig)
+            val transactionScope = OperationExecutionScope(
+                connection,
+                parentScope.databasePlatformConfig,
+                parentScope.databaseIdentity,
+            )
             val admissionFailure = OperationScopeGuard.enterChildTransaction(parentScope, transactionScope)
             if (admissionFailure != null) {
                 return ExecuteResult.Failure(parentScope.recordFailure(admissionFailure))

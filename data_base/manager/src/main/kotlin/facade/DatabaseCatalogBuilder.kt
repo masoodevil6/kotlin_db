@@ -1,6 +1,7 @@
 package gog.my_project.data_base_manager.facade
 
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationTags
 import gog.my_project.data_base_manager.internal.DatabaseManagerConfiguration
 import gog.my_project.data_base_manager.internal.DatabaseRegistration
@@ -66,6 +67,10 @@ class DatabaseRegistrationBuilder {
         val databaseConfig = requireNotNull(config) {
             "Database '${key::class.qualifiedName}' must declare a DatabaseConfig"
         }
-        return DatabaseRegistration(key, databaseConfig)
+        return DatabaseRegistration(
+            key = key,
+            config = databaseConfig,
+            lockIdentity = DatabaseIdentity.from(databaseConfig),
+        )
     }
 }

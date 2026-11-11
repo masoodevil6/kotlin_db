@@ -1,6 +1,7 @@
 package gog.my_project.data_base_manager.connection.manager
 
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
@@ -16,11 +17,36 @@ import kotlin.concurrent.write
  * The current provider opens independent JDBC connections; configured pool size is retained for
  * future pool implementations but does not create or manage a pool by itself.
  */
-class DatabaseContext(
+class DatabaseContext private constructor(
     val name: String,
     val config: DatabaseConfig,
     private val connectionProvider: IDatabaseConnection = DatabaseConnection(config.connection),
+    /** Configured-destination identity captured by registration; absent for legacy/manual contexts. */
+    val databaseIdentity: DatabaseIdentity?,
+    @Suppress("UNUSED_PARAMETER") constructorMarker: Unit,
 ) : AutoCloseable {
+
+    /** Retains the established constructor; unregistered contexts have no registration identity. */
+    constructor(
+        name: String,
+        config: DatabaseConfig,
+        connectionProvider: IDatabaseConnection = DatabaseConnection(config.connection),
+    ) : this(
+        name,
+        config,
+        connectionProvider,
+        null,
+        Unit,
+    )
+
+    /** Creates a Context with the immutable identity already captured by its Database registration. */
+    constructor(
+        name: String,
+        config: DatabaseConfig,
+        connectionProvider: IDatabaseConnection,
+        databaseIdentity: DatabaseIdentity?,
+    ) : this(name, config, connectionProvider, databaseIdentity, Unit)
+
     private val lifecycleLock = ReentrantReadWriteLock()
     private var closed = false
 

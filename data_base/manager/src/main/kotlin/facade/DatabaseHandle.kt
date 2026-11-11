@@ -2,6 +2,8 @@ package gog.my_project.data_base_manager.facade
 
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 
@@ -34,6 +36,13 @@ class DatabaseHandle private constructor(
      */
     override fun <T> transaction(block: (IQueryBuilderExecutor) -> ExecuteResult<T>): ExecuteResult<T> =
         withContext { context -> QueryBuilderExecutor(context).transaction(block) }
+
+    /** Runs a callback in Operation's managed root Connection Scope under the same Manager lease. */
+    internal fun <T> runWithOperationScope(
+        block: (OperationExecutionScope) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = withContext { context ->
+        OperationExecutionExecutor(context).connection(block)
+    }
 
     private fun <T> withContext(block: (DatabaseContext) -> ExecuteResult<T>): ExecuteResult<T> =
         try {

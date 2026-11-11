@@ -82,21 +82,21 @@ class DatabaseMigrationTagsDslTest {
         assertFailsWith<IllegalArgumentException> {
             DatabaseCatalogBuilder().apply {
                 migrationTags = MutableTagDefinition(
-                    versions = mutableListOf(VersionValue("v1"), VersionValue("v1")),
+                    versionValues = mutableListOf(VersionValue("v1"), VersionValue("v1")),
                 )
             }.snapshot()
         }
         assertFailsWith<IllegalArgumentException> {
             DatabaseCatalogBuilder().apply {
                 migrationTags = MutableTagDefinition(
-                    groups = mutableListOf(GroupValue("users"), GroupValue("users")),
+                    groupValues = mutableListOf(GroupValue("users"), GroupValue("users")),
                 )
             }.snapshot()
         }
         assertFailsWith<IllegalArgumentException> {
             DatabaseCatalogBuilder().apply {
                 migrationTags = MutableTagDefinition(
-                    items = mutableListOf(ItemValue("create_users"), ItemValue("create_users")),
+                    itemValues = mutableListOf(ItemValue("create_users"), ItemValue("create_users")),
                 )
             }.snapshot()
         }
@@ -106,17 +106,17 @@ class DatabaseMigrationTagsDslTest {
     fun invalidNamesAreValidatedByCoreTagContracts() {
         assertFailsWith<IllegalArgumentException> {
             DatabaseCatalogBuilder().apply {
-                migrationTags = MutableTagDefinition(versions = mutableListOf(VersionValue("  ")))
+                migrationTags = MutableTagDefinition(versionValues = mutableListOf(VersionValue("  ")))
             }.snapshot()
         }
         assertFailsWith<IllegalArgumentException> {
             DatabaseCatalogBuilder().apply {
-                migrationTags = MutableTagDefinition(groups = mutableListOf(GroupValue("")))
+                migrationTags = MutableTagDefinition(groupValues = mutableListOf(GroupValue("")))
             }.snapshot()
         }
         assertFailsWith<IllegalArgumentException> {
             DatabaseCatalogBuilder().apply {
-                migrationTags = MutableTagDefinition(items = mutableListOf(ItemValue("Not_A_Migration")))
+                migrationTags = MutableTagDefinition(itemValues = mutableListOf(ItemValue("Not_A_Migration")))
             }.snapshot()
         }
     }
@@ -125,9 +125,9 @@ class DatabaseMigrationTagsDslTest {
     fun sameNameAcrossCategoriesIsAllowed() {
         val configuration = DatabaseCatalogBuilder().apply {
             migrationTags = MutableTagDefinition(
-                versions = mutableListOf(VersionValue("shared")),
-                groups = mutableListOf(GroupValue("shared")),
-                items = mutableListOf(ItemValue("shared")),
+                versionValues = mutableListOf(VersionValue("shared")),
+                groupValues = mutableListOf(GroupValue("shared")),
+                itemValues = mutableListOf(ItemValue("shared")),
             )
         }.snapshot()
 

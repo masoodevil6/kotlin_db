@@ -1,6 +1,7 @@
 package gog.my_project.data_base_manager.internal
 
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.facade.DatabaseKey
 
@@ -8,6 +9,7 @@ import gog.my_project.data_base_manager.facade.DatabaseKey
 internal class DatabaseRegistration(
     val key: DatabaseKey,
     val config: DatabaseConfig,
+    val lockIdentity: DatabaseIdentity?,
 ) {
     @Volatile
     var context: DatabaseContext? = null

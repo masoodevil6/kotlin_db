@@ -1,6 +1,8 @@
 package gog.my_project.data_base_manager.facade
 
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
+import gog.my_project.data_base_manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.internal.DatabaseManagerConfiguration
 import gog.my_project.data_base_manager.internal.DatabaseRegistration
@@ -14,7 +16,7 @@ import kotlin.concurrent.withLock
  */
 class DatabaseManager private constructor(
     private val configuration: DatabaseManagerConfiguration,
-    private val contextFactory: (String, DatabaseConfig) -> DatabaseContext,
+    private val contextFactory: (String, DatabaseConfig, DatabaseIdentity?) -> DatabaseContext,
 ) : DatabaseManagerApi {
     private enum class State { OPEN, CLOSING, CLOSED }
 
@@ -39,18 +41,34 @@ class DatabaseManager private constructor(
     }
 
     /** Creates an empty manager for the deprecated String-based API. */
-    constructor() : this(DatabaseManagerConfiguration(emptyList()), { name, config -> DatabaseContext(name, config) })
+    constructor() : this(
+        DatabaseManagerConfiguration(emptyList()),
+        { name, config, identity ->
+            DatabaseContext(name, config, DatabaseConnection(config.connection), identity)
+        },
+    )
 
     /** Builds an immutable typed database catalog. */
     constructor(block: DatabaseCatalogBuilder.() -> Unit) : this(
         DatabaseCatalogBuilder().apply(block).snapshot(),
-        { name, config -> DatabaseContext(name, config) },
+        { name, config, identity ->
+            DatabaseContext(name, config, DatabaseConnection(config.connection), identity)
+        },
     )
 
-    /** Internal seam for lifecycle tests; production registrations use DatabaseContext directly. */
+    /** Existing internal lifecycle-test seam retained with its original signature. */
     internal constructor(
         block: DatabaseCatalogBuilder.() -> Unit,
         contextFactory: (String, DatabaseConfig) -> DatabaseContext,
+    ) : this(
+        DatabaseCatalogBuilder().apply(block).snapshot(),
+        { name, config, _ -> contextFactory(name, config) },
+    )
+
+    /** Identity-aware seam used to verify Registration-to-Context propagation. */
+    internal constructor(
+        block: DatabaseCatalogBuilder.() -> Unit,
+        contextFactory: (String, DatabaseConfig, DatabaseIdentity?) -> DatabaseContext,
     ) : this(DatabaseCatalogBuilder().apply(block).snapshot(), contextFactory)
 
     /** Returns a handle for the registration equal by [DatabaseKey.equals] to [key]. */
@@ -158,6 +176,7 @@ class DatabaseManager private constructor(
         registration.context ?: contextFactory(
             registration.key::class.qualifiedName ?: "database",
             registration.config,
+            registration.lockIdentity,
         ).also { registration.context = it }
     }
 

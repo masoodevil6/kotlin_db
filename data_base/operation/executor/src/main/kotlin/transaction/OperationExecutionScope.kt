@@ -8,9 +8,17 @@ import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_manager.execute.query.BoundQuery
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
+import gog.my_project.data_base_operation.config.data_base.SystemLock
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.math.BigDecimal
+import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.ResultSet
+import java.sql.Types
+import java.util.concurrent.TimeoutException
 
 /**
  * Opaque, lifecycle-neutral view of an active Operation scope for operation-family facades.
@@ -132,12 +140,28 @@ data class OperationParameter(
 )
 
 /** Shared state for one synchronous operation scope. The scope owns no JDBC lifecycle by itself. */
-class OperationExecutionScope(
+class OperationExecutionScope private constructor(
     connection: Connection,
     override val databasePlatformConfig: DatabasePlatformConfig,
+    val databaseIdentity: DatabaseIdentity?,
+    @Suppress("UNUSED_PARAMETER") constructorMarker: Unit,
 ) : OperationExecutionContext {
+
+    /** Preserves the established public constructor for manually-created, identity-less scopes. */
+    constructor(
+        connection: Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+    ) : this(connection, databasePlatformConfig, null, Unit)
+
+    /** Internal Operation construction path that carries the registration's destination identity. */
+    internal constructor(
+        connection: Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+        databaseIdentity: DatabaseIdentity?,
+    ) : this(connection, databasePlatformConfig, databaseIdentity, Unit)
+
     @Suppress("DEPRECATION")
-    constructor(connection: Connection) : this(connection, DefaultDatabaseConfig.config.platform)
+    constructor(connection: Connection) : this(connection, DefaultDatabaseConfig.config.platform, null, Unit)
 
     private val ownerThread = Thread.currentThread()
     private val jdbcConnection = connection
@@ -149,6 +173,9 @@ class OperationExecutionScope(
 
     @Volatile
     private var activeChildScope: OperationExecutionScope? = null
+
+    /** A session lock is a single, non-reentrant lease on this managed Connection Scope. */
+    private var sessionAdvisoryLockInProgress = false
 
     @Volatile
     var firstFailure: Throwable? = null
@@ -189,6 +216,226 @@ class OperationExecutionScope(
             firstFailure
         }
         return localRejection ?: OperationScopeGuard.rejectIfNotCurrent(this)
+    }
+
+    /**
+     * Runs [block] under a deterministic system lock scoped to this Operation's configured
+     * database identity. The lock name contains only a versioned hash of the logical lock ID and
+     * database identity; acquisition, callback execution, and release use this same root Scope.
+     *
+     * Lock IDs accepted here are 1–128 ASCII characters matching
+     * `[A-Za-z0-9][A-Za-z0-9._:-]*`. This stricter execution-time validation preserves the
+     * existing [SystemLock] constructor contract while rejecting ambiguous identifiers.
+     */
+    fun <T> withSystemLock(
+        systemLock: SystemLock,
+        timeoutSeconds: Int,
+        block: (OperationExecutionScope) -> ExecuteResult<T>,
+    ): ExecuteResult<T> {
+        rejectOperation()?.let { return ExecuteResult.Failure(it) }
+        if (!isValidSystemLockIdentifier(systemLock.id)) {
+            return failed(
+                IllegalArgumentException(
+                    "System lock identifiers must be 1-128 ASCII letters, digits, '.', '_', ':' or '-'",
+                ),
+            )
+        }
+        val identity = databaseIdentity ?: return failed(
+            IllegalStateException("A canonical DatabaseIdentity is required to run a system lock"),
+        )
+
+        val lockName = try {
+            systemLockName(systemLock, identity)
+        } catch (error: Error) {
+            if (fatalError !== error) recordFatal(error)
+            throw error
+        } catch (failure: Exception) {
+            return failed(failure)
+        }
+
+        return withSessionAdvisoryLock(lockName, timeoutSeconds, block)
+    }
+
+    /**
+     * Runs [block] while holding a MySQL-family session advisory lock on this Operation-owned
+     * Connection. The callback runs synchronously, exactly once, and only after acquisition.
+     * The lock is released before this method returns, including when the scope has latched a
+     * failure. This capability is restricted to a managed root Connection Scope; transaction
+     * child scopes and directly constructed, unmanaged scopes fail closed.
+     */
+    fun <T> withSessionAdvisoryLock(
+        lockName: String,
+        timeoutSeconds: Int,
+        block: (OperationExecutionScope) -> ExecuteResult<T>,
+    ): ExecuteResult<T> {
+        rejectOperation()?.let { return ExecuteResult.Failure(it) }
+        if (!OperationScopeGuard.isManagedConnectionScope(this)) {
+            return failed(
+                IllegalStateException(
+                    "Session advisory locks require the active Operation-managed Connection Scope",
+                ),
+            )
+        }
+        if (!isValidSessionAdvisoryLockName(lockName)) {
+            return failed(
+                IllegalArgumentException("Session advisory lock names must be non-blank printable ASCII and at most 64 characters"),
+            )
+        }
+        if (timeoutSeconds !in 0..MAX_SESSION_ADVISORY_LOCK_TIMEOUT_SECONDS) {
+            return failed(
+                IllegalArgumentException(
+                    "Session advisory lock timeout must be between 0 and $MAX_SESSION_ADVISORY_LOCK_TIMEOUT_SECONDS seconds",
+                ),
+            )
+        }
+        when (databasePlatformConfig.dialect) {
+            DialectQuery.MY_SQL, DialectQuery.MARIA_DB -> Unit
+            else -> return failed(
+                UnsupportedOperationException(
+                    "Session advisory locks are not supported for dialect ${databasePlatformConfig.dialect::class.simpleName}",
+                ),
+            )
+        }
+
+        val alreadyRunning = synchronized(this) {
+            if (sessionAdvisoryLockInProgress) {
+                true
+            } else {
+                sessionAdvisoryLockInProgress = true
+                false
+            }
+        }
+        if (alreadyRunning) {
+            return failed(IllegalStateException("Nested or reentrant session advisory locks are not supported"))
+        }
+
+        var acquired = false
+        var outcome: ExecuteResult<T>? = null
+        var fatal: Error? = null
+
+        try {
+            val acquireResult = executeSelect(
+                BoundQuery(
+                    "SELECT GET_LOCK(?, ?) AS acquired",
+                    listOf(
+                        QueryParameterBinding("lockName", lockName, Types.VARCHAR),
+                        QueryParameterBinding("timeoutSeconds", timeoutSeconds, Types.INTEGER),
+                    ),
+                ),
+            ) { rows ->
+                if (!rows.next()) {
+                    throw IllegalStateException("GET_LOCK returned no result row")
+                }
+                val acquiredValue = rows.getInt("acquired")
+                // Set this as soon as a successful grant is observed so statement/ResultSet close
+                // failure still triggers the matching RELEASE_LOCK cleanup.
+                if (acquiredValue == 1) acquired = true
+                if (rows.next()) {
+                    throw IllegalStateException("GET_LOCK returned more than one result row")
+                }
+                acquiredValue
+            }
+
+            if (!acquired) {
+                outcome = when (acquireResult) {
+                    is ExecuteResult.Failure -> acquireResult
+                    is ExecuteResult.Success -> when (acquireResult.result) {
+                        0 -> failed(TimeoutException("Timed out acquiring session advisory lock '$lockName'"))
+                        null -> failed(IllegalStateException("GET_LOCK returned SQL NULL for '$lockName'"))
+                        else -> failed(
+                            IllegalStateException(
+                                "GET_LOCK returned unexpected result '${acquireResult.result}' for '$lockName'",
+                            ),
+                        )
+                    }
+                }
+            } else if (acquireResult is ExecuteResult.Failure) {
+                // The server granted the lock, but the SELECT path later failed (for example while
+                // closing JDBC resources). Do not run user work; release the confirmed grant below.
+                outcome = acquireResult
+            } else {
+                try {
+                    val callbackResult = block(this)
+                    recordResult(callbackResult)
+                    val callbackError = (callbackResult as? ExecuteResult.Failure)?.exception as? Error
+                    if (callbackError != null) {
+                        fatal = callbackError
+                        if (fatalError !== callbackError) recordFatal(callbackError)
+                        outcome = ExecuteResult.Failure(callbackError)
+                    } else {
+                        outcome = firstFailure?.let { ExecuteResult.Failure(it) } ?: callbackResult
+                    }
+                } catch (error: Error) {
+                    fatal = error
+                    if (fatalError !== error) recordFatal(error)
+                    outcome = ExecuteResult.Failure(error)
+                } catch (failure: Throwable) {
+                    val primary = if (hasRecordedFailure(failure)) firstFailure ?: failure else recordFailure(failure)
+                    if (primary !== failure) addSuppressedSafely(primary, failure)
+                    outcome = ExecuteResult.Failure(primary)
+                }
+            }
+        } catch (error: Error) {
+            fatal = error
+            if (fatalError !== error) recordFatal(error)
+            outcome = ExecuteResult.Failure(error)
+        } catch (failure: Throwable) {
+            val primary = if (hasRecordedFailure(failure)) firstFailure ?: failure else recordFailure(failure)
+            if (primary !== failure) addSuppressedSafely(primary, failure)
+            outcome = ExecuteResult.Failure(primary)
+        }
+
+        if (acquired) {
+            try {
+                val releaseResult = executeSessionLockCleanupSelect(
+                    BoundQuery(
+                        "SELECT RELEASE_LOCK(?) AS released",
+                        listOf(QueryParameterBinding("lockName", lockName, Types.VARCHAR)),
+                    ),
+                ) { rows ->
+                    if (!rows.next()) {
+                        throw IllegalStateException("RELEASE_LOCK returned no result row")
+                    }
+                    val releasedValue = rows.getInt("released")
+                    if (rows.next()) {
+                        throw IllegalStateException("RELEASE_LOCK returned more than one result row")
+                    }
+                    releasedValue
+                }
+
+                val releaseFailure = when (releaseResult) {
+                    is ExecuteResult.Failure -> releaseResult.exception
+                    is ExecuteResult.Success -> when (releaseResult.result) {
+                        1 -> null
+                        0 -> IllegalStateException("RELEASE_LOCK did not own session advisory lock '$lockName'")
+                        null -> IllegalStateException("RELEASE_LOCK returned SQL NULL for '$lockName'")
+                        else -> IllegalStateException(
+                            "RELEASE_LOCK returned unexpected result '${releaseResult.result}' for '$lockName'",
+                        )
+                    }
+                }
+                if (releaseFailure != null) {
+                    outcome = mergeSessionLockCleanupFailure(outcome, releaseFailure)
+                }
+            } catch (error: Error) {
+                if (fatal == null) {
+                    fatal = error
+                    if (fatalError !== error) recordFatal(error)
+                } else {
+                    addSuppressedSafely(fatal!!, error)
+                    if (fatalError !== error) recordFatal(error)
+                }
+                outcome = ExecuteResult.Failure(fatal!!)
+            } catch (failure: Throwable) {
+                outcome = mergeSessionLockCleanupFailure(outcome, failure)
+            }
+        }
+
+        synchronized(this) { sessionAdvisoryLockInProgress = false }
+        fatal?.let { throw it }
+        return outcome ?: ExecuteResult.Failure(
+            recordFailure(IllegalStateException("Session advisory lock execution completed without a result")),
+        )
     }
 
     /**
@@ -363,9 +610,11 @@ class OperationExecutionScope(
         queryType: String,
         read: (OperationQueryRows) -> T,
         resultDescription: String = "$queryType SELECT",
+        scopeRejection: () -> Throwable? = { rejectOperation() },
+        preserveLocalFailure: Boolean = false,
         execute: (IQueryExecute, (ExecuteResult<ResultSet>) -> Unit) -> Unit,
     ): ExecuteResult<T> {
-        val rejection = rejectOperation()
+        val rejection = scopeRejection()
         if (rejection != null) return ExecuteResult.Failure(rejection)
 
         var deliveredFailure: Throwable? = null
@@ -379,7 +628,7 @@ class OperationExecutionScope(
                     val duplicateCallback = IllegalStateException(
                         "$resultDescription execution delivered more than one result",
                     )
-                    result = ExecuteResult.Failure(recordFailure(duplicateCallback))
+                    result = ExecuteResult.Failure(recordSelectFailure(duplicateCallback, preserveLocalFailure))
                     return@callback
                 }
 
@@ -403,7 +652,7 @@ class OperationExecutionScope(
                                 val scopedRows = JdbcOperationQueryRows(
                                     rows,
                                     ownerThread,
-                                    ::rejectOperation,
+                                    scopeRejection,
                                 ) { failure -> recordFailure(failure) }
                                 try {
                                     ExecuteResult.Success(read(scopedRows))
@@ -417,14 +666,14 @@ class OperationExecutionScope(
             }
 
             if (callbackCount == 0) {
-                ExecuteResult.Failure(
-                    recordFailure(
-                        IllegalStateException("$resultDescription execution completed without a result"),
-                    ),
-                )
+                val missingResult = IllegalStateException("$resultDescription execution completed without a result")
+                ExecuteResult.Failure(recordSelectFailure(missingResult, preserveLocalFailure))
             } else {
                 val completed = result ?: ExecuteResult.Failure(
-                    recordFailure(IllegalStateException("$resultDescription execution produced no result")),
+                    recordSelectFailure(
+                        IllegalStateException("$resultDescription execution produced no result"),
+                        preserveLocalFailure,
+                    ),
                 )
                 if (!deliveredFailureRecorded) recordResult(completed)
                 completed
@@ -436,19 +685,129 @@ class OperationExecutionScope(
             val primary = deliveredFailure
             if (primary != null && primary !== exception) {
                 addSuppressedSafely(primary, exception)
-                ExecuteResult.Failure(recordFailure(exception))
+                val recorded = recordFailure(exception)
+                ExecuteResult.Failure(if (preserveLocalFailure) primary else recorded)
             } else {
-                failed(exception)
+                ExecuteResult.Failure(recordSelectFailure(exception, preserveLocalFailure))
             }
         } catch (failure: Throwable) {
             val primary = deliveredFailure
             if (primary != null && primary !== failure) {
                 addSuppressedSafely(primary, failure)
-                ExecuteResult.Failure(recordFailure(failure))
+                val recorded = recordFailure(failure)
+                ExecuteResult.Failure(if (preserveLocalFailure) primary else recorded)
             } else {
-                failed(failure)
+                ExecuteResult.Failure(recordSelectFailure(failure, preserveLocalFailure))
             }
         }
+    }
+
+    private fun <T> executeSessionLockCleanupSelect(
+        query: BoundQuery,
+        read: (OperationQueryRows) -> T,
+    ): ExecuteResult<T> = executeSelectQuery(
+        queryType = "Session advisory lock cleanup",
+        read = read,
+        resultDescription = "Session advisory lock cleanup SELECT",
+        scopeRejection = ::rejectCleanupOperation,
+        preserveLocalFailure = true,
+    ) { executor, callback ->
+        executor.executeSelect(query, callback)
+    }
+
+    private fun recordSelectFailure(failure: Throwable, preserveLocalFailure: Boolean): Throwable {
+        if (!preserveLocalFailure) return recordFailure(failure)
+        if (!hasRecordedFailure(failure)) recordFailure(failure)
+        return failure
+    }
+
+    /** Cleanup may ignore a latched failure, but may not ignore scope, thread, or child lifecycle. */
+    private fun rejectCleanupOperation(): Throwable? {
+        activeChildScope?.let { child ->
+            return child.recordFailure(
+                IllegalStateException("Cannot release a session advisory lock while a child transaction is active"),
+            )
+        }
+        val localRejection = synchronized(this) {
+            when {
+                !active -> IllegalStateException("Execution scope has ended; lock cleanup is unavailable")
+                Thread.currentThread() !== ownerThread -> recordFailureLocked(
+                    IllegalStateException("Session advisory lock cleanup must run on the scope callback thread"),
+                )
+                else -> null
+            }
+        }
+        return localRejection ?: OperationScopeGuard.rejectIfNotCurrent(this)
+    }
+
+    private fun <T> mergeSessionLockCleanupFailure(
+        currentOutcome: ExecuteResult<T>?,
+        cleanupFailure: Throwable,
+    ): ExecuteResult<T> {
+        val currentFatal = fatalError
+        if (currentFatal != null) {
+            addSuppressedSafely(currentFatal, cleanupFailure)
+            if (!hasRecordedFailure(cleanupFailure)) recordFailure(cleanupFailure)
+            return ExecuteResult.Failure(currentFatal)
+        }
+
+        val primary = (currentOutcome as? ExecuteResult.Failure)?.exception
+        if (primary != null) {
+            addSuppressedSafely(primary, cleanupFailure)
+            if (!hasRecordedFailure(cleanupFailure)) recordFailure(cleanupFailure)
+            return ExecuteResult.Failure(primary)
+        }
+
+        val recorded = if (hasRecordedFailure(cleanupFailure)) {
+            firstFailure ?: cleanupFailure
+        } else {
+            recordFailure(cleanupFailure)
+        }
+        return ExecuteResult.Failure(recorded)
+    }
+
+    private fun hasRecordedFailure(failure: Throwable): Boolean =
+        firstFailure === failure || laterFailures.any { it === failure } || fatalError === failure
+
+    private fun isValidSessionAdvisoryLockName(value: String): Boolean =
+        value.isNotBlank() && value.length <= MAX_SESSION_ADVISORY_LOCK_NAME_LENGTH &&
+            value.all { it.code in MIN_PRINTABLE_ASCII..MAX_PRINTABLE_ASCII }
+
+    private fun isValidSystemLockIdentifier(value: String): Boolean =
+        SYSTEM_LOCK_IDENTIFIER.matches(value)
+
+    private fun systemLockName(systemLock: SystemLock, identity: DatabaseIdentity): String {
+        val encodedInput = ByteArrayOutputStream().also { buffer ->
+            DataOutputStream(buffer).use { output ->
+                writeSystemLockField(output, SYSTEM_LOCK_HASH_DOMAIN)
+                output.writeInt(SYSTEM_LOCK_HASH_VERSION)
+                writeSystemLockField(output, systemLock.id)
+                writeSystemLockField(output, identity.value)
+            }
+        }.toByteArray()
+        val digest = MessageDigest.getInstance("SHA-256").digest(encodedInput)
+        val hex = digest.joinToString(separator = "") { byte ->
+            (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+        }
+        return SYSTEM_LOCK_NAME_PREFIX + hex.take(SYSTEM_LOCK_HASH_LENGTH)
+    }
+
+    private fun writeSystemLockField(output: DataOutputStream, value: String) {
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        output.writeInt(bytes.size)
+        output.write(bytes)
+    }
+
+    private companion object {
+        const val MAX_SESSION_ADVISORY_LOCK_NAME_LENGTH = 64
+        const val MAX_SESSION_ADVISORY_LOCK_TIMEOUT_SECONDS = 300
+        const val MIN_PRINTABLE_ASCII = 0x20
+        const val MAX_PRINTABLE_ASCII = 0x7E
+        const val SYSTEM_LOCK_HASH_DOMAIN = "textqb.system-lock"
+        const val SYSTEM_LOCK_HASH_VERSION = 1
+        const val SYSTEM_LOCK_NAME_PREFIX = "textqb:syslock:v1:"
+        const val SYSTEM_LOCK_HASH_LENGTH = 46
+        val SYSTEM_LOCK_IDENTIFIER = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
     }
 
     private fun <T> executeDml(
@@ -711,6 +1070,12 @@ internal object OperationScopeGuard {
     private enum class ScopeKind { CONNECTION, TRANSACTION }
 
     private val current = ThreadLocal<State?>()
+
+    /** True only for the active root Connection Scope owned by an Operation lifecycle. */
+    internal fun isManagedConnectionScope(scope: OperationExecutionScope): Boolean {
+        val state = current.get() ?: return false
+        return state.scope === scope && state.scopeKind == ScopeKind.CONNECTION && state.childParent == null
+    }
 
     /** Claims the current thread for a managed scope, or latches a nested-scope rejection. */
     internal fun enter(): Throwable? {
