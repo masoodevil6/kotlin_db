@@ -1,12 +1,13 @@
 package gog.my_project.data_base.migration.example.v1.migrations.composite
 
+import gog.my_project.data_base.migration.example.v1.migrations.DataBaseMigrationTags
 import gog.my_project.data_base_schema.*
 
 import gog.my_project.data_base_migration.core.migrate.Migration
 import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
 import gog.my_project.data_base_migration.api.builder.migration
 
-class CreateCustomersMigrationV1 : Migration {
+class CreateCustomersMigrationV1 : Migration(DataBaseMigrationTags.Items.MIGRATION_1) {
     override fun up(): MigrationDefinition = migration {
         operation(Schema.createTable {
             table { tableName("customers") }

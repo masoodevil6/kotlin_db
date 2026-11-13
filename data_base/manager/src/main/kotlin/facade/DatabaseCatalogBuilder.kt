@@ -63,6 +63,13 @@ class DatabaseRegistrationBuilder {
     /** Required non-secret and secret connection/platform configuration for this registration. */
     var config: DatabaseConfig? = null
 
+    private val attributes = LinkedHashMap<DatabaseRegistrationAttribute<*>, Any>()
+
+    /** Associates a typed, non-null value with this database Registration. */
+    fun <T : Any> attribute(key: DatabaseRegistrationAttribute<T>, value: T) {
+        attributes[key] = key.checkedValue(value)
+    }
+
     internal fun build(key: DatabaseKey): DatabaseRegistration {
         val databaseConfig = requireNotNull(config) {
             "Database '${key::class.qualifiedName}' must declare a DatabaseConfig"
@@ -71,6 +78,7 @@ class DatabaseRegistrationBuilder {
             key = key,
             config = databaseConfig,
             lockIdentity = DatabaseIdentity.from(databaseConfig),
+            attributes = attributes,
         )
     }
 }

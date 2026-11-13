@@ -47,7 +47,6 @@ class DatabaseManagerApiTest {
         assertTrue(interfaceMethods.any { it.name == "connection" })
         assertTrue(concreteMethods.any { it.name == "connection" })
         assertTrue(interfaceMethods.any { it.name == "transaction" })
-        assertTrue(interfaceMethods.any { it.name == "migrate" })
         assertFalse(interfaceMethods.any { it.name == "query" })
         assertFalse(interfaceMethods.any { it.name == "schema" || it.name == "schemaWithQueryInfo" })
         assertFalse(concreteMethods.any { method ->

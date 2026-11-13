@@ -1,5 +1,7 @@
 package gog.my_project.data_base_manager.facade
 
+import gog.my_project.data_base_operation.executor.events.OperationDatabaseEvent
+import gog.my_project.data_base_operation.executor.events.OperationDatabaseEventType
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
@@ -27,6 +29,76 @@ import kotlin.test.assertTrue
 
 class DatabaseHandleOperationScopeTest {
     private object Primary : DatabaseKey
+
+    @Test
+    fun `watch is handle scoped, does not open a connection, and observes the managed operation`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val events = mutableListOf<OperationDatabaseEvent>()
+
+        try {
+            val subscription = handle.watch { event ->
+                if (event is OperationDatabaseEvent) events += event
+            }
+            assertEquals(0, provider.openCount.get())
+
+            assertIs<ExecuteResult.Success<*>>(handle.withOperationScope {
+                ExecuteResult.Success(Unit)
+            })
+            assertEquals(
+                listOf(
+                    OperationDatabaseEventType.CONNECTION_OPENED,
+                    OperationDatabaseEventType.CONNECTION_CLOSED,
+                ),
+                events.map(OperationDatabaseEvent::type),
+            )
+
+            subscription.close()
+            events.clear()
+            assertIs<ExecuteResult.Success<*>>(handle.withOperationScope {
+                ExecuteResult.Success(Unit)
+            })
+            assertTrue(events.isEmpty())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `multiple watchers are isolated and closing one leaves the other active`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        var firstCount = 0
+        var secondCount = 0
+
+        try {
+            val first = handle.watch {
+                firstCount++
+                throw AssertionError("observer failure")
+            }
+            val second = handle.watch {
+                secondCount++
+            }
+
+            assertIs<ExecuteResult.Success<*>>(handle.withOperationScope {
+                ExecuteResult.Success(Unit)
+            })
+            assertTrue(firstCount > 0)
+            assertTrue(secondCount > 0)
+
+            first.close()
+            val previousSecondCount = secondCount
+            assertIs<ExecuteResult.Success<*>>(handle.withOperationScope {
+                ExecuteResult.Success(Unit)
+            })
+            assertEquals(previousSecondCount + 2, secondCount)
+            second.close()
+        } finally {
+            manager.close()
+        }
+    }
 
     @Test
     fun `scope API exposes the managed root scope and connection through callback`() {
@@ -204,6 +276,9 @@ class DatabaseHandleOperationScopeTest {
             ExecuteResult.Success(Unit)
         })
         assertIs<UnsupportedOperationException>(unsupported.exception)
+        assertFailsWith<UnsupportedOperationException> {
+            legacy.watch { }
+        }
         assertFalse(DatabaseHandleApi::class.java.methods.any { it.name == "withOperationScope" })
     }
 

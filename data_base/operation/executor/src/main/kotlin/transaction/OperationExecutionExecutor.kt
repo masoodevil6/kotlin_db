@@ -4,6 +4,10 @@ import gog.my_project.data_base_manager.connection.manager.DatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.executor.events.OperationEvent
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.events.OperationEventType
+import gog.my_project.data_base_operation.executor.events.publish
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.sql.Connection
 
@@ -12,6 +16,7 @@ class OperationExecutionExecutor private constructor(
     private val connectionFactory: () -> Connection,
     private val databasePlatformConfig: DatabasePlatformConfig,
     private val databaseIdentity: DatabaseIdentity?,
+    private val eventListener: OperationEventListener?,
 ) {
     constructor() : this(DatabaseContext.legacyDefault())
 
@@ -19,6 +24,15 @@ class OperationExecutionExecutor private constructor(
         databaseContext::openConnection,
         databaseContext.platformConfig,
         databaseContext.databaseIdentity,
+        null,
+    )
+
+    /** Adds a read-only observer to the lifecycle owned by this Operation executor. */
+    constructor(databaseContext: DatabaseContext, eventListener: OperationEventListener) : this(
+        databaseContext::openConnection,
+        databaseContext.platformConfig,
+        databaseContext.databaseIdentity,
+        eventListener,
     )
 
     /** Compatibility constructor for callers that supply their own Connection factory. */
@@ -27,6 +41,16 @@ class OperationExecutionExecutor private constructor(
         connectionFactory,
         DatabaseContext.legacyDefault().platformConfig,
         null,
+        null,
+    )
+
+    /** Compatibility factory counterpart for caller-supplied Connection providers. */
+    @Suppress("DEPRECATION")
+    constructor(connectionFactory: () -> Connection, eventListener: OperationEventListener) : this(
+        connectionFactory,
+        DatabaseContext.legacyDefault().platformConfig,
+        null,
+        eventListener,
     )
     fun <T> connection(
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
@@ -60,11 +84,18 @@ class OperationExecutionExecutor private constructor(
         }
 
         try {
-            connection = connectionFactory()
+            connection = try {
+                requireNotNull(connectionFactory()).also {
+                    eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPENED))
+                }
+            } catch (failure: Throwable) {
+                eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPEN_FAILED, error = failure))
+                throw failure
+            }
             val ownedConnection = requireNotNull(connection)
 
             val activeScope = try {
-                OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity).also {
+                OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity, eventListener).also {
                     scope = it
                     coordinator.prepareScope(it)
                     OperationScopeGuard.activate(it)
@@ -169,14 +200,17 @@ class OperationExecutionExecutor private constructor(
         connectionFactory,
         databasePlatformConfig,
         databaseIdentity,
+        eventListener,
     )
         .transaction(coordinator, block)
 
     private fun closeConnection(connection: Connection, primary: Throwable?): Throwable? {
         val closeFailure = try {
             connection.close()
+            eventListener.publish(OperationEvent(OperationEventType.CONNECTION_CLOSED))
             return primary
         } catch (failure: Throwable) {
+            eventListener.publish(OperationEvent(OperationEventType.CONNECTION_CLOSE_FAILED, error = failure))
             failure
         }
 

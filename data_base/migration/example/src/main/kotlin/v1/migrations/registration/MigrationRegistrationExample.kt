@@ -5,16 +5,12 @@ import gog.my_project.data_base_schema.*
 import gog.my_project.data_base_migration.core.migrate.Migration
 import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
 import gog.my_project.data_base.core.annotations.migrations.MigrationId
+import gog.my_project.data_base.migration.example.v1.migrations.DataBaseMigrationTags
 import gog.my_project.data_base_migration.api.builder.migration
 import gog.my_project.data_base_migration.api.builder.migrationConfig
 
-object migrationTags {
-    const val create_customers = "create_customers"
-    const val add_customer_email = "add_customer_email"
-}
 
-@MigrationId(migrationTags.create_customers)
-class CreateCustomersRegistrationExample : Migration {
+class CreateCustomersRegistrationExample : Migration(DataBaseMigrationTags.Items.MIGRATION_2) {
     override fun up(): MigrationDefinition = migration {
         operation(Schema.createTable {
             table { tableName("customers") }
@@ -33,8 +29,7 @@ class CreateCustomersRegistrationExample : Migration {
     }
 }
 
-@MigrationId(migrationTags.add_customer_email)
-class AddCustomerEmailRegistrationExample : Migration {
+class AddCustomerEmailRegistrationExample : Migration(DataBaseMigrationTags.Items.MIGRATION_3) {
     override fun up(): MigrationDefinition = migration {
         operation(Schema.addColumn {
             tableName("customers")
@@ -53,10 +48,10 @@ class AddCustomerEmailRegistrationExample : Migration {
 }
 
 fun customerMigrationConfiguration() = migrationConfig {
-    migrationVersion("customers_v1") {
+    migrationVersion(DataBaseMigrationTags.Versions.VERSION_1) {
         migration<CreateCustomersRegistrationExample>()
 
-        migrationGroup("customers") {
+        migrationGroup(DataBaseMigrationTags.Groups.GROUP_1) {
             migration<AddCustomerEmailRegistrationExample>()
         }
     }

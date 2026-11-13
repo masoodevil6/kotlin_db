@@ -9,6 +9,10 @@ import gog.my_project.data_base_migration.executor.service.version.MigrationVers
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionTraversalService
 import gog.my_project.data_base_migration.executor.service.version_selection.MigrationCurrentVersionService
 import gog.my_project.data_base_migration.executor.service.version_selection.MigrationVersionSelectionService
+import gog.my_project.data_base.core.events.DatabaseEventFailure
+import gog.my_project.data_base_migration.core.events.MigrationCommand
+import gog.my_project.data_base_migration.core.events.MigrationEvent
+import gog.my_project.data_base_migration.core.events.MigrationEventType
 import gog.my_project.data_base_operation.config.data_base.SystemLock
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
@@ -41,9 +45,54 @@ internal class MigrationRunOrchestrationService(
     ): ExecuteResult<Boolean> {
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
-        return scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
-            runLocked(lockedScope, target, direction)
+        val command = when (direction) {
+            MigrationVersionSelectionDirection.UP -> MigrationCommand.MIGRATE
+            MigrationVersionSelectionDirection.DOWN -> MigrationCommand.ROLLBACK
         }
+        val targetVersionName = target?.validatedValue
+        scope.publishDatabaseEvent(
+            MigrationEvent(
+                type = MigrationEventType.MIGRATION_STARTED,
+                command = command,
+                targetVersionName = targetVersionName,
+            ),
+        )
+
+        val result = try {
+            scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
+                runLocked(lockedScope, target, direction)
+            }
+        } catch (failure: Throwable) {
+            scope.publishDatabaseEvent(
+                MigrationEvent(
+                    type = MigrationEventType.MIGRATION_FAILED,
+                    command = command,
+                    targetVersionName = targetVersionName,
+                    failure = DatabaseEventFailure.from(failure),
+                ),
+            )
+            throw failure
+        }
+
+        if (result is ExecuteResult.Failure) {
+            scope.publishDatabaseEvent(
+                MigrationEvent(
+                    type = MigrationEventType.MIGRATION_FAILED,
+                    command = command,
+                    targetVersionName = targetVersionName,
+                    failure = DatabaseEventFailure.from(result.exception),
+                ),
+            )
+        } else {
+            scope.publishDatabaseEvent(
+                MigrationEvent(
+                    type = MigrationEventType.MIGRATION_COMPLETED,
+                    command = command,
+                    targetVersionName = targetVersionName,
+                ),
+            )
+        }
+        return result
     }
 
     private fun runLocked(
@@ -79,6 +128,16 @@ internal class MigrationRunOrchestrationService(
             }
 
             for ((prepared, versionTag) in taggedVersions) {
+                scope.publishDatabaseEvent(
+                    MigrationEvent(
+                        type = MigrationEventType.MIGRATION_VERSION_STARTED,
+                        command = when (plan.direction) {
+                            MigrationVersionTraversalDirection.UP -> MigrationCommand.MIGRATE
+                            MigrationVersionTraversalDirection.DOWN -> MigrationCommand.ROLLBACK
+                        },
+                        versionName = prepared.version.name,
+                    ),
+                )
                 val result = when (plan.direction) {
                     MigrationVersionTraversalDirection.UP -> transactionService.transactionUp(scope, versionTag)
                     MigrationVersionTraversalDirection.DOWN -> transactionService.transactionDown(scope, versionTag)
@@ -92,6 +151,20 @@ internal class MigrationRunOrchestrationService(
                         return scope.failed(
                             IllegalStateException(
                                 "Migration Version '${prepared.version.name}' did not complete successfully",
+                            ),
+                        )
+                    } else {
+                        scope.publishDatabaseEvent(
+                            MigrationEvent(
+                                type = when (plan.direction) {
+                                    MigrationVersionTraversalDirection.UP -> MigrationEventType.MIGRATION_VERSION_APPLIED
+                                    MigrationVersionTraversalDirection.DOWN -> MigrationEventType.MIGRATION_VERSION_ROLLED_BACK
+                                },
+                                command = when (plan.direction) {
+                                    MigrationVersionTraversalDirection.UP -> MigrationCommand.MIGRATE
+                                    MigrationVersionTraversalDirection.DOWN -> MigrationCommand.ROLLBACK
+                                },
+                                versionName = prepared.version.name,
                             ),
                         )
                     }

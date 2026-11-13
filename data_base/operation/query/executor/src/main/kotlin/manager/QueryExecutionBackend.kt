@@ -2,17 +2,16 @@ package gog.my_project.data_base_query.executor.manager
 
 import gog.my_project.data_base.core.query.reader.BuiltQuery
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
-import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_manager.execute.query.BoundQuery
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_operation.executor.transaction.OperationQueryRows
 import gog.my_project.data_base_query.ast.interfaces.select_interface.column.IQueryColumnsAst
 import gog.my_project.data_base_query.executor.result.QueryRow
 import gog.my_project.data_base_query.executor.result.QueryRowMaterializer
-import java.sql.Connection
 import java.sql.ResultSet
 
 /** Rendered SQL plus its original binding contract, ready for one execution backend. */
@@ -60,13 +59,48 @@ internal class RootQueryExecutionBackend(
         statement: QueryExecutionStatement,
         callback: (ExecuteResult<ResultSet>) -> Unit,
     ) {
-        // Compatibility path for IQueryBuilderExecutor.execute(ResultSet callback).
-        // Standard fluent SELECT uses selectRows() and Operation's typed SELECT API.
-        val executor = QueryExecute(databaseContext)
-        when (statement) {
-            is QueryExecutionStatement.Built -> executor.executeSelect(statement.query, callback)
-            is QueryExecutionStatement.Bound -> executor.executeSelect(statement.query, callback)
+        // Keep the ResultSet compatibility callback, while executing it inside the Operation-owned
+        // scope so SQL events and resource cleanup remain under that scope's boundary.
+        var delivered: ExecuteResult<ResultSet>? = null
+        var callbackFailure: Throwable? = null
+        val outcome = operationExecutionExecutor.connection { scope ->
+            executeRawSelect(scope, statement) { result ->
+                check(delivered == null) { "Raw SELECT delivered more than one result" }
+                delivered = result
+                try {
+                    callback(result)
+                } catch (failure: Throwable) {
+                    callbackFailure = failure
+                    throw failure
+                }
+            }
         }
+
+        if (callbackFailure != null) {
+            val primary = (outcome as? ExecuteResult.Failure)?.exception ?: callbackFailure!!
+            if (primary !== callbackFailure && primary.suppressed.none { it === callbackFailure }) {
+                primary.addSuppressed(callbackFailure!!)
+            }
+            throw primary
+        }
+        if (delivered == null) {
+            throw (outcome as? ExecuteResult.Failure)?.exception
+                ?: IllegalStateException("Raw SELECT completed without invoking its callback")
+        }
+        if (delivered is ExecuteResult.Success && outcome is ExecuteResult.Failure) {
+            // The callback has already received Success; report a later statement/connection
+            // cleanup failure synchronously instead of invoking it again with Failure.
+            throw outcome.exception
+        }
+    }
+
+    private fun executeRawSelect(
+        scope: OperationExecutionScope,
+        statement: QueryExecutionStatement,
+        callback: (ExecuteResult<ResultSet>) -> Unit,
+    ): ExecuteResult<Boolean> = when (statement) {
+        is QueryExecutionStatement.Built -> scope.executeRawSelect(statement.query, callback)
+        is QueryExecutionStatement.Bound -> scope.executeRawSelect(statement.query, callback)
     }
 
     /** Materializes QueryRows inside Operation's synchronous row callback. */
@@ -170,7 +204,6 @@ internal class RootQueryExecutionBackend(
 /** Executes through the caller-owned Operation context and never acquires or owns JDBC resources. */
 internal class OperationScopeQueryExecutionBackend(
     private val scope: OperationExecutionContext,
-    private val compatibilityConnection: (() -> Connection?)? = null,
 ) : QueryExecutionBackend {
     override val databasePlatformConfig: DatabasePlatformConfig
         get() = scope.databasePlatformConfig
@@ -179,17 +212,16 @@ internal class OperationScopeQueryExecutionBackend(
         statement: QueryExecutionStatement,
         callback: (ExecuteResult<ResultSet>) -> Unit,
     ) {
-        compatibilityConnection?.invoke()?.let { connection ->
-            // Preserve the old low-level callback contract for concrete managed scopes.
-            val executor = QueryExecute(connection)
+        val managedScope = scope as? OperationExecutionScope
+        if (managedScope != null) {
             when (statement) {
-                is QueryExecutionStatement.Built -> executor.executeSelect(statement.query, callback)
-                is QueryExecutionStatement.Bound -> executor.executeSelect(statement.query, callback)
+                is QueryExecutionStatement.Built -> managedScope.executeRawSelect(statement.query, callback)
+                is QueryExecutionStatement.Bound -> managedScope.executeRawSelect(statement.query, callback)
             }
             return
         }
         val unsupported = UnsupportedOperationException(
-            "Raw ResultSet SELECT callbacks are unavailable in Scope-bound mode; use first(), get(), or QueryConsumer",
+            "Raw ResultSet SELECT callbacks require an OperationExecutionScope; use first(), get(), or QueryConsumer",
         )
         val recorded = scope.failed<ResultSet>(unsupported)
         callback(recorded as? ExecuteResult.Failure ?: ExecuteResult.Failure(unsupported))

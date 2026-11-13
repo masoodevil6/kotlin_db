@@ -30,6 +30,7 @@ import gog.my_project.data_base_query.builder.ast.update_builder.query_render_up
 import gog.my_project.data_base_query.cte.declaration.CteDeclaration
 import gog.my_project.data_base_query.executor.result.QueryRow
 import java.sql.Connection
+import java.sql.ResultSet
 import java.sql.Types
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -71,6 +72,21 @@ class ScopeBoundQueryExecutionTest {
             executor.executeOut(selectQuery()) { _, _ -> error("executeOut must not execute") }
         }
         assertEquals(0, scope.selectCalls + scope.insertCalls + scope.updateCalls + scope.deleteCalls)
+    }
+
+    @Test
+    fun `raw SELECT fails closed for a custom scope without the Operation raw SELECT primitive`() {
+        val scope = RecordingOperationContext()
+        val executor = QueryBuilderExecutor.scopeBound(scope)
+        var delivered: ExecuteResult<ResultSet>? = null
+
+        executor.execute(selectQuery(), { delivered = it })
+
+        val failure = assertIs<ExecuteResult.Failure>(delivered).exception
+        assertIs<UnsupportedOperationException>(failure)
+        assertEquals(1, scope.failures.size)
+        assertSame(failure, scope.failures.single())
+        assertEquals(0, scope.selectCalls)
     }
 
     @Test

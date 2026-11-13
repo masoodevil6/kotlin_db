@@ -7,6 +7,7 @@ import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
 import gog.my_project.data_base_schema.executor.integration.SchemaExecutionIntegration
@@ -151,6 +152,28 @@ object Schema {
         databaseContext: DatabaseContext,
         onQueryInfo: ((sql: String, parameters: Map<String, Any?>) -> Unit)? = null,
     ): ExecuteResult<Boolean> = OperationExecutionExecutor(databaseContext).connection { scope ->
+        execute(operation, scope, onQueryInfo)
+    }
+
+    /** Executes one operation in a new Operation-owned scope with SQL events sent to [eventListener]. */
+    fun executeWithEvents(
+        operation: SchemaOperation,
+        eventListener: OperationEventListener,
+        onQueryInfo: ((sql: String, parameters: Map<String, Any?>) -> Unit)? = null,
+    ): ExecuteResult<Boolean> = executeWithEvents(
+        operation,
+        DatabaseContext.legacyDefault(),
+        eventListener,
+        onQueryInfo,
+    )
+
+    /** Executes one operation using [databaseContext] and observes it through the owning Operation. */
+    fun executeWithEvents(
+        operation: SchemaOperation,
+        databaseContext: DatabaseContext,
+        eventListener: OperationEventListener,
+        onQueryInfo: ((sql: String, parameters: Map<String, Any?>) -> Unit)? = null,
+    ): ExecuteResult<Boolean> = OperationExecutionExecutor(databaseContext, eventListener).connection { scope ->
         execute(operation, scope, onQueryInfo)
     }
 

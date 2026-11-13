@@ -8,7 +8,6 @@ import gog.my_project.data_base_schema.Schema
 import gog.my_project.data_base_schema.SchemaDataType
 import gog.my_project.example.DataBaseMigrationTags
 
-//@MigrationId(DataBaseMigrationTags.Items.MANAGER_CUSTOMER)
 class CreateManagerCustomers : Migration(
     DataBaseMigrationTags.Items.MANAGER_CUSTOMER
 ) {
@@ -16,6 +15,7 @@ class CreateManagerCustomers : Migration(
         operation(
             Schema.createTable {
                 table { tableName("manager_customers") }
+                ifNotExists()
                 addColumn {
                     name("id")
                     dataType(SchemaDataType.IntType)
@@ -33,6 +33,10 @@ class CreateManagerCustomers : Migration(
     }
 
     override fun down(): MigrationDefinition = migration {
-        operation(Schema.dropTable { tableName("manager_customers") })
+        operation(
+            Schema.dropTable {
+                tableName("manager_customers")
+            }
+        )
     }
 }

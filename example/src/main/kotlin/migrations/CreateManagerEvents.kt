@@ -8,7 +8,6 @@ import gog.my_project.data_base_schema.Schema
 import gog.my_project.data_base_schema.SchemaDataType
 import gog.my_project.example.DataBaseMigrationTags
 
-//@MigrationId(DataBaseMigrationTags.Items.MANAGER_EVENTS)
 class CreateManagerEvents : Migration(
     DataBaseMigrationTags.Items.MANAGER_EVENTS
 ) {

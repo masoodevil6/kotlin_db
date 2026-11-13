@@ -79,7 +79,11 @@ class DatabaseManager private constructor(
         val registration = registrations[key] ?: throw NoSuchElementException(
             "Database key '$key' (type '${key::class.qualifiedName}') is not registered",
         )
-        DatabaseHandle.managed(registration.key, HandleOperationRunner(registration))
+        DatabaseHandle.managed(
+            registration.key,
+            HandleOperationRunner(registration),
+            registration.attributes,
+        )
     }
 
     /** Returns registered value keys in catalog insertion order. */

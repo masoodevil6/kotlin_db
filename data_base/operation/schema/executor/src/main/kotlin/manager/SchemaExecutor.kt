@@ -8,6 +8,7 @@ import gog.my_project.data_base_operation.executor.transaction.OperationExecutio
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionCoordinator
 import gog.my_project.data_base_operation.executor.transaction.OperationTransactionExecutor
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_schema.api.interfaces.ISchemaApi
 import gog.my_project.data_base_schema.executor.integration.SchemaExecutionIntegration
 import gog.my_project.data_base_schema.renderer.manager.DialectSelector
@@ -27,6 +28,20 @@ class SchemaExecutor(
     private val queryExecutor: IQueryExecute? = queryExecutor
     private val transactionExecutor: OperationTransactionExecutor =
         transactionExecutor ?: OperationTransactionExecutor(databaseContext)
+    private var eventListener: OperationEventListener? = null
+
+    /** Adds an observer to standalone and transaction scopes while preserving the existing constructor. */
+    constructor(
+        databaseContext: DatabaseContext,
+        eventListener: OperationEventListener,
+    ) : this(
+        queryExecutor = null,
+        dialectSelector = DialectSelector(),
+        transactionExecutor = OperationTransactionExecutor(databaseContext, eventListener),
+        databaseContext = databaseContext,
+    ) {
+        this.eventListener = eventListener
+    }
 
     constructor(
         queryExecutor: IQueryExecute,
@@ -112,7 +127,10 @@ class SchemaExecutor(
         var callbackResult: ExecuteResult<Boolean>? = null
         var callbackFailure: Throwable? = null
 
-        val outcome = OperationExecutionExecutor(databaseContext).connection(executionCoordinator) { scope ->
+        val operationExecutor = eventListener?.let { listener ->
+            OperationExecutionExecutor(databaseContext, listener)
+        } ?: OperationExecutionExecutor(databaseContext)
+        val outcome = operationExecutor.connection(executionCoordinator) { scope ->
             val result = operation(scope)
             callbackDelivered = true
             callbackResult = result

@@ -1,6 +1,15 @@
 package gog.my_project.data_base_schema
 
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.executor.events.OperationEvent
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.events.OperationEventType
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
 import gog.my_project.data_base_operation.executor.transaction.OperationParameter
 import gog.my_project.data_base_schema.ast.interfaces.create_table.render_schema_create_table.ISchemaRenderCreateTableAst
@@ -8,6 +17,9 @@ import gog.my_project.data_base_schema.ast.interfaces.modify_column.DefaultDefin
 import gog.my_project.data_base_schema.ast.schema.if_exist.SchemaIfExistAst
 import gog.my_project.data_base_schema.renderer.dialects.MariaDbDialect
 import gog.my_project.data_base_schema.renderer.dialects.MySqlDialect
+import java.lang.reflect.Proxy
+import java.sql.Connection
+import java.sql.PreparedStatement
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -294,6 +306,78 @@ class SchemaFacadeTest {
     }
 
     @Test
+    fun `standalone execution with events uses the Operation-owned connection and publishes one DDL event pair`() {
+        var providerCalls = 0
+        var connectionClosed = false
+        var ddlExecutions = 0
+        val connection = Proxy.newProxyInstance(
+            Connection::class.java.classLoader,
+            arrayOf(Connection::class.java),
+        ) { proxy, method, args ->
+            when (method.name) {
+                "prepareStatement" -> Proxy.newProxyInstance(
+                    PreparedStatement::class.java.classLoader,
+                    arrayOf(PreparedStatement::class.java),
+                ) { _, statementMethod, _ ->
+                    when (statementMethod.name) {
+                        "execute" -> { ddlExecutions++; true }
+                        "close" -> null
+                        "isClosed" -> false
+                        "toString" -> "SchemaEventPreparedStatement"
+                        else -> primitiveDefault(statementMethod.returnType)
+                    }
+                }
+                "close" -> { connectionClosed = true; null }
+                "isClosed" -> connectionClosed
+                "toString" -> "SchemaEventConnection"
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.firstOrNull()
+                else -> primitiveDefault(method.returnType)
+            }
+        } as Connection
+        val context = DatabaseContext(
+            name = "schema-events-test",
+            config = DatabaseConfig(
+                connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
+                platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            ),
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection {
+                    providerCalls++
+                    return connection
+                }
+            },
+        )
+        val received = mutableListOf<OperationEvent>()
+        val operation = Schema.createIndex {
+            tableName("customers")
+            name("idx_customers_email")
+            column("email")
+        }
+
+        val result = Schema.executeWithEvents(operation, context, OperationEventListener {
+            received += it
+            throw AssertionError("standalone Schema event listener failed")
+        })
+
+        assertEquals(ExecuteResult.Success(true), result)
+        assertEquals(1, providerCalls)
+        assertEquals(1, ddlExecutions)
+        assertTrue(connectionClosed)
+        assertEquals(
+            listOf(
+                OperationEventType.CONNECTION_OPENED,
+                OperationEventType.SQL_STARTED,
+                OperationEventType.SQL_SUCCEEDED,
+                OperationEventType.CONNECTION_CLOSED,
+            ),
+            received.map { it.type },
+        )
+        assertEquals(1, received.count { it.type == OperationEventType.SQL_STARTED })
+        assertEquals(1, received.count { it.type == OperationEventType.SQL_SUCCEEDED })
+    }
+
+    @Test
     fun `public facade signatures do not expose implementation types`() {
         val forbidden = listOf(".ast.", ".builder.", ".renderer.", "SqlParameter", "BuiltQuery", "SchemaColumnDataType")
         val publicSchemaSignatures = Schema::class.java.methods
@@ -302,5 +386,17 @@ class SchemaFacadeTest {
         assertTrue(publicSchemaSignatures.none { signature -> forbidden.any(signature::contains) }, publicSchemaSignatures.joinToString("\n"))
         assertTrue(SchemaOperation::class.java.declaredMethods.isEmpty())
         assertTrue(SchemaOperation::class.java.declaredFields.isEmpty())
+    }
+
+    private fun primitiveDefault(type: Class<*>): Any? = when (type) {
+        java.lang.Boolean.TYPE -> false
+        java.lang.Integer.TYPE -> 0
+        java.lang.Long.TYPE -> 0L
+        java.lang.Double.TYPE -> 0.0
+        java.lang.Float.TYPE -> 0f
+        java.lang.Short.TYPE -> 0.toShort()
+        java.lang.Byte.TYPE -> 0.toByte()
+        java.lang.Character.TYPE -> '\u0000'
+        else -> null
     }
 }

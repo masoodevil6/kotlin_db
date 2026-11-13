@@ -1,9 +1,17 @@
 package gog.my_project.data_base_query.executor.manager
 
 import gog.my_project.collection.ICollection
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
+import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.executor.events.OperationEvent
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.events.OperationEventType
 import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.builder.ast.delete_builder.query_render_delete.QueryRenderDeleteBuilder
 import gog.my_project.data_base_query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
@@ -1523,6 +1531,197 @@ class TransactionExecutionTest {
     }
 
     @Test
+    fun `raw SELECT Root Scope and Transaction publish one Operation event pair and preserve callback lifetime`() = withConfig {
+        val jdbc = JdbcScript(selectRows = 1)
+        val context = DatabaseContext(
+            name = "raw-select-events-test",
+            config = DatabaseConfig(
+                connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
+                platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            ),
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection = jdbc.openConnection()
+            },
+        )
+        val operationEvents = mutableListOf<OperationEvent>()
+        val executor = QueryBuilderExecutor(context, OperationEventListener { operationEvents += it })
+
+        fun rawSelect(queryExecutor: IQueryBuilderExecutor) {
+            var seen: ResultSet? = null
+            queryExecutor.execute(selectQuery(), { selected ->
+                val rows = assertIs<ExecuteResult.Success<ResultSet>>(selected).result!!
+                assertTrue(rows.next())
+                assertEquals(42, rows.getInt("value"))
+                seen = rows
+            })
+            assertTrue(requireNotNull(seen).isClosed)
+        }
+
+        rawSelect(executor)
+        val connectionScopeResult = executor.connection { scopeExecutor ->
+            rawSelect(scopeExecutor)
+            ExecuteResult.Success(Unit)
+        }
+        assertIs<ExecuteResult.Success<Unit>>(connectionScopeResult)
+        val transactionResult = executor.transaction { tx ->
+            rawSelect(tx)
+            ExecuteResult.Success(Unit)
+        }
+        assertIs<ExecuteResult.Success<Unit>>(transactionResult)
+
+        var first: ExecuteResult<QueryRow>? = null
+        executor.first(selectQuery(), { first = it })
+        assertIs<ExecuteResult.Success<QueryRow>>(first)
+        var rows: ExecuteResult<List<QueryRow>>? = null
+        executor.get(selectQuery(), { rows = it })
+        assertIs<ExecuteResult.Success<List<QueryRow>>>(rows)
+
+        val sqlEvents = operationEvents.filter { it.type == OperationEventType.SQL_STARTED || it.type == OperationEventType.SQL_SUCCEEDED }
+        assertEquals(
+            List(5) { listOf(OperationEventType.SQL_STARTED, OperationEventType.SQL_SUCCEEDED) }.flatten(),
+            sqlEvents.map { it.type },
+        )
+        assertEquals(5, operationEvents.count { it.type == OperationEventType.SQL_STARTED })
+        assertEquals(5, operationEvents.count { it.type == OperationEventType.SQL_SUCCEEDED })
+        assertEquals(5, jdbc.connectionCreations)
+        assertEquals(1, jdbc.events.count { it == "commit" })
+        assertEquals(5, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `raw Root SELECT SQL failure is delivered once and closes the Operation connection`() = withConfig {
+        val jdbc = JdbcScript(failSelect = true)
+        val operationEvents = mutableListOf<OperationEvent>()
+        val executor = eventAwareExecutor(jdbc, operationEvents)
+        var callbackCount = 0
+        var delivered: ExecuteResult<ResultSet>? = null
+
+        executor.execute(selectQuery(), blockExecute = { result ->
+            callbackCount++
+            delivered = result
+        })
+
+        assertEquals(1, callbackCount)
+        assertSame(jdbc.queryFailure, assertIs<ExecuteResult.Failure>(delivered).exception)
+        assertEquals(
+            listOf(
+                OperationEventType.CONNECTION_OPENED,
+                OperationEventType.SQL_STARTED,
+                OperationEventType.SQL_FAILED,
+                OperationEventType.CONNECTION_CLOSED,
+            ),
+            operationEvents.map { it.type },
+        )
+        assertSame(jdbc.queryFailure, operationEvents.single { it.type == OperationEventType.SQL_FAILED }.error)
+        assertEquals(1, jdbc.events.count { it == "statement.close" })
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `raw Root SELECT SQL failure remains primary when Connection cleanup also fails`() = withConfig {
+        val jdbc = JdbcScript(failSelect = true, failClose = true)
+        val operationEvents = mutableListOf<OperationEvent>()
+        val executor = eventAwareExecutor(jdbc, operationEvents)
+        var delivered: ExecuteResult<ResultSet>? = null
+
+        executor.execute(selectQuery(), blockExecute = { delivered = it })
+
+        assertSame(jdbc.queryFailure, assertIs<ExecuteResult.Failure>(delivered).exception)
+        assertTrue(jdbc.queryFailure.suppressed.any { it === jdbc.closeFailure })
+        assertEquals(
+            listOf(
+                OperationEventType.CONNECTION_OPENED,
+                OperationEventType.SQL_STARTED,
+                OperationEventType.SQL_FAILED,
+                OperationEventType.CONNECTION_CLOSE_FAILED,
+            ),
+            operationEvents.map { it.type },
+        )
+        assertSame(jdbc.queryFailure, operationEvents.single { it.type == OperationEventType.SQL_FAILED }.error)
+        assertSame(jdbc.closeFailure, operationEvents.single { it.type == OperationEventType.CONNECTION_CLOSE_FAILED }.error)
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `raw Root SELECT callback failure remains primary through ResultSet and Connection cleanup`() = withConfig {
+        val jdbc = JdbcScript(failClose = true)
+        val operationEvents = mutableListOf<OperationEvent>()
+        val executor = eventAwareExecutor(jdbc, operationEvents)
+        val callbackFailure = IllegalStateException("raw SELECT consumer failed")
+        var callbackCount = 0
+        var capturedRows: ResultSet? = null
+
+        val thrown = assertFailsWith<IllegalStateException> {
+            executor.execute(selectQuery(), blockExecute = { result ->
+                callbackCount++
+                val rows = assertIs<ExecuteResult.Success<ResultSet>>(result).result!!
+                capturedRows = rows
+                assertTrue(rows.next())
+                jdbc.events += "callback"
+                throw callbackFailure
+            })
+        }
+
+        assertSame(callbackFailure, thrown)
+        assertEquals(1, callbackCount)
+        assertTrue(requireNotNull(capturedRows).isClosed)
+        assertEquals(
+            listOf(
+                OperationEventType.CONNECTION_OPENED,
+                OperationEventType.SQL_STARTED,
+                OperationEventType.SQL_FAILED,
+                OperationEventType.CONNECTION_CLOSE_FAILED,
+            ),
+            operationEvents.map { it.type },
+        )
+        assertSame(callbackFailure, operationEvents.single { it.type == OperationEventType.SQL_FAILED }.error)
+        assertTrue(callbackFailure.suppressed.any { it === jdbc.closeFailure })
+        assertSame(jdbc.closeFailure, operationEvents.single { it.type == OperationEventType.CONNECTION_CLOSE_FAILED }.error)
+        assertTrue(jdbc.events.indexOf("callback") < jdbc.events.indexOf("statement.close"))
+        assertTrue(jdbc.events.indexOf("statement.close") < jdbc.events.indexOf("resultSet.close"))
+        assertTrue(jdbc.events.indexOf("statement.close") < jdbc.events.indexOf("event:SQL_FAILED"))
+        assertTrue(jdbc.events.indexOf("event:SQL_FAILED") < jdbc.events.indexOf("connection.close"))
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
+    fun `raw Root SELECT keeps SQL success when Connection cleanup fails after callback success`() = withConfig {
+        val jdbc = JdbcScript(failClose = true)
+        val operationEvents = mutableListOf<OperationEvent>()
+        val executor = eventAwareExecutor(jdbc, operationEvents)
+        var callbackCount = 0
+
+        val thrown = assertFailsWith<IllegalStateException> {
+            executor.execute(selectQuery(), blockExecute = { result ->
+                callbackCount++
+                val rows = assertIs<ExecuteResult.Success<ResultSet>>(result).result!!
+                assertTrue(rows.next())
+                jdbc.events += "callback"
+            })
+        }
+
+        assertSame(jdbc.closeFailure, thrown.cause)
+        assertEquals(1, callbackCount)
+        assertEquals(
+            listOf(
+                OperationEventType.CONNECTION_OPENED,
+                OperationEventType.SQL_STARTED,
+                OperationEventType.SQL_SUCCEEDED,
+                OperationEventType.CONNECTION_CLOSE_FAILED,
+            ),
+            operationEvents.map { it.type },
+        )
+        assertEquals(1, operationEvents.count { it.type == OperationEventType.SQL_STARTED })
+        assertEquals(1, operationEvents.count { it.type == OperationEventType.SQL_SUCCEEDED })
+        assertEquals(0, operationEvents.count { it.type == OperationEventType.SQL_FAILED })
+        assertSame(jdbc.closeFailure, operationEvents.single { it.type == OperationEventType.CONNECTION_CLOSE_FAILED }.error)
+        assertTrue(jdbc.events.indexOf("callback") < jdbc.events.indexOf("statement.close"))
+        assertTrue(jdbc.events.indexOf("statement.close") < jdbc.events.indexOf("event:SQL_SUCCEEDED"))
+        assertTrue(jdbc.events.indexOf("event:SQL_SUCCEEDED") < jdbc.events.indexOf("connection.close"))
+        assertEquals(1, jdbc.events.count { it == "connection.close" })
+    }
+
+    @Test
     fun `root query failure is returned by Operation and its coordinator remains reusable`() = withConfig {
         val failingJdbc = JdbcScript(failExecutionAt = 1)
         val recoveredJdbc = JdbcScript()
@@ -1805,6 +2004,26 @@ class TransactionExecutionTest {
         assertEquals(0, connectionFactoryCalls)
     }
 
+    private fun eventAwareExecutor(
+        jdbc: JdbcScript,
+        received: MutableList<OperationEvent>,
+    ): QueryBuilderExecutor {
+        val context = DatabaseContext(
+            name = "raw-select-root-events-test",
+            config = DatabaseConfig(
+                connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
+                platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            ),
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection = jdbc.openConnection()
+            },
+        )
+        return QueryBuilderExecutor(context, OperationEventListener { event ->
+            received += event
+            jdbc.events += "event:${event.type}"
+        })
+    }
+
     private fun updateQuery(value: Int) = QueryRenderUpdateBuilder()
         .table { table("records") }
         .addValue {
@@ -1912,6 +2131,7 @@ class TransactionExecutionTest {
         private val rollbackError: Error? = null,
         private val failClose: Boolean = false,
         private val failCloseError: Error? = null,
+        private val failSelect: Boolean = false,
         private val selectRows: Int = 1,
         private val selectColumnLabel: String = "value",
         val executionError: Error? = null,
@@ -1982,8 +2202,9 @@ class TransactionExecutionTest {
             }
         }
 
-        private fun statementProxy(statementIndex: Int): PreparedStatement =
-            proxy(PreparedStatement::class.java) { _, method, args ->
+        private fun statementProxy(statementIndex: Int): PreparedStatement {
+            val resultSets = mutableListOf<ResultSet>()
+            return proxy(PreparedStatement::class.java) { _, method, args ->
                 when (method.name) {
                     "setObject", "setNull", "setInt", "setLong", "setString" -> {
                         bindings[statementIndex - 1] += args.orEmpty().toList()
@@ -1998,16 +2219,25 @@ class TransactionExecutionTest {
                         }
                         1
                     }
-                    "executeQuery" -> resultSet(selectRows, "resultSet.close")
-                    "getGeneratedKeys" -> resultSet(1, "generatedKeys.close")
-                    "close" -> { events += "statement.close"; null }
+                    "executeQuery" -> {
+                        if (failSelect) throw queryFailure
+                        resultSet(selectRows, "resultSet.close").also(resultSets::add)
+                    }
+                    "getGeneratedKeys" -> resultSet(1, "generatedKeys.close").also(resultSets::add)
+                    "close" -> {
+                        events += "statement.close"
+                        resultSets.filterNot { it.isClosed }.forEach { it.close() }
+                        null
+                    }
                     "isClosed" -> false
                     else -> defaultValue(method.returnType)
                 }
             }
+        }
 
         private fun resultSet(rowCount: Int, closeEvent: String): ResultSet {
             var row = 0
+            var closed = false
             return proxy(ResultSet::class.java) { _, method, _ ->
                 when (method.name) {
                     "next" -> row++ < rowCount
@@ -2016,7 +2246,12 @@ class TransactionExecutionTest {
                     "getString" -> "value"
                     "wasNull" -> false
                     "getMetaData" -> resultSetMetadata()
-                    "close" -> { events += closeEvent; null }
+                    "close" -> {
+                        if (!closed) events += closeEvent
+                        closed = true
+                        null
+                    }
+                    "isClosed" -> closed
                     else -> defaultValue(method.returnType)
                 }
             }

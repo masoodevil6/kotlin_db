@@ -6,6 +6,7 @@ import gog.my_project.data_base_manager.execute.query.BoundQuery
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_query.api.interfaces.api.IQueryApi
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
@@ -44,10 +45,7 @@ class QueryBuilderExecutor private constructor(
 
     private val executionBackend: QueryExecutionBackend = when {
         operationExecutionContext != null -> OperationScopeQueryExecutionBackend(operationExecutionContext)
-        transactionScope != null -> OperationScopeQueryExecutionBackend(
-            transactionScope,
-            { transactionScope.connection },
-        )
+        transactionScope != null -> OperationScopeQueryExecutionBackend(transactionScope)
         else -> RootQueryExecutionBackend(
             requireNotNull(operationExecutionExecutor),
             requireNotNull(suppliedDatabaseContext),
@@ -62,6 +60,16 @@ class QueryBuilderExecutor private constructor(
 
     constructor(databaseContext: DatabaseContext) : this(
         OperationExecutionExecutor(databaseContext),
+        null,
+        TransactionGuardRegistry.shared,
+        RootExecutionCoordinator(),
+        databaseContext,
+        null,
+    )
+
+    /** Adds a read-only observer to Root operations without changing Query rendering or mapping. */
+    constructor(databaseContext: DatabaseContext, eventListener: OperationEventListener) : this(
+        OperationExecutionExecutor(databaseContext, eventListener),
         null,
         TransactionGuardRegistry.shared,
         RootExecutionCoordinator(),

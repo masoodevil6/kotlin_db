@@ -9,6 +9,10 @@ import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
 import gog.my_project.data_base_operation.executor.transaction.OperationTransactionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
+import gog.my_project.data_base_operation.executor.events.OperationEvent
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.events.OperationEventType
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
@@ -28,6 +32,88 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class SchemaExecutorTransactionTest {
+    @Test
+    fun `standalone SchemaExecutor listener observes one DDL event through its owned scope`() {
+        val previousConfig = DefaultDatabaseConfig.config
+        val jdbcEvents = mutableListOf<String>()
+        val executedConnections = mutableListOf<Connection>()
+        val connection = connection(jdbcEvents, executedConnections)
+        val context = databaseContext(connection)
+        val operationEvents = mutableListOf<OperationEvent>()
+        val executor = SchemaExecutor(context, OperationEventListener {
+            operationEvents += it
+            throw AssertionError("standalone SchemaExecutor event listener failed")
+        })
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+
+        try {
+            var result: ExecuteResult<Boolean>? = null
+            executor.execute(createIndex(), blockExecute = { result = it })
+
+            assertEquals(ExecuteResult.Success(true), result)
+            assertEquals(listOf(connection), executedConnections)
+            assertEquals(listOf("close"), jdbcEvents)
+            assertEquals(
+                listOf(
+                    OperationEventType.CONNECTION_OPENED,
+                    OperationEventType.SQL_STARTED,
+                    OperationEventType.SQL_SUCCEEDED,
+                    OperationEventType.CONNECTION_CLOSED,
+                ),
+                operationEvents.map { it.type },
+            )
+            assertEquals(1, operationEvents.count { it.type == OperationEventType.SQL_STARTED })
+            assertEquals(1, operationEvents.count { it.type == OperationEventType.SQL_SUCCEEDED })
+        } finally {
+            DefaultDatabaseConfig.config = previousConfig
+        }
+    }
+
+    @Test
+    fun `SchemaExecutor on existing Operation scope uses that Scope listener exactly once`() {
+        val previousConfig = DefaultDatabaseConfig.config
+        val jdbcEvents = mutableListOf<String>()
+        val executedConnections = mutableListOf<Connection>()
+        val connection = connection(jdbcEvents, executedConnections)
+        val operationEvents = mutableListOf<OperationEvent>()
+        val operationExecutor = OperationExecutionExecutor(
+            { connection },
+            OperationEventListener {
+                operationEvents += it
+                throw AssertionError("scoped Schema event listener failed")
+            },
+        )
+        val schemaExecutor = SchemaExecutor(databaseContext = databaseContext(connection))
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+
+        try {
+            val outcome = operationExecutor.connection { scope ->
+                var result: ExecuteResult<Boolean>? = null
+                schemaExecutor.execute(createIndex(), scope, blockExecute = { result = it })
+                assertEquals(ExecuteResult.Success(true), result)
+                ExecuteResult.Success(Unit)
+            }
+
+            assertEquals(ExecuteResult.Success(Unit), outcome)
+            assertEquals(1, executedConnections.size)
+            assertSame(connection, executedConnections.single())
+            assertEquals(
+                listOf(
+                    OperationEventType.CONNECTION_OPENED,
+                    OperationEventType.SQL_STARTED,
+                    OperationEventType.SQL_SUCCEEDED,
+                    OperationEventType.CONNECTION_CLOSED,
+                ),
+                operationEvents.map { it.type },
+            )
+            assertEquals(1, operationEvents.count { it.type == OperationEventType.SQL_STARTED })
+            assertEquals(1, operationEvents.count { it.type == OperationEventType.SQL_SUCCEEDED })
+            assertEquals(1, jdbcEvents.count { it == "close" })
+        } finally {
+            DefaultDatabaseConfig.config = previousConfig
+        }
+    }
+
     @Test
     fun `multiple schema operations share the operation transaction connection`() {
         val previousConfig = DefaultDatabaseConfig.config
@@ -98,7 +184,7 @@ class SchemaExecutorTransactionTest {
             queryExecutor = rawQueryExecutor,
             transactionExecutor = OperationTransactionExecutor { connection },
         )
-        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.clsconfig = previousConfig.copy(dialect = DialectQuery.MY_SQL)
 
         try {
             val operation = SchemaCreateIndexBuilder()

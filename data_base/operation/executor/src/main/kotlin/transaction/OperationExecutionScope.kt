@@ -11,6 +11,12 @@ import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.SystemLock
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.executor.events.OperationEvent
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.events.OperationEventType
+import gog.my_project.data_base.core.events.DatabaseEvent
+import gog.my_project.data_base_operation.executor.events.DatabaseEventPublisher
+import gog.my_project.data_base_operation.executor.events.publish
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.math.BigDecimal
@@ -144,6 +150,7 @@ class OperationExecutionScope private constructor(
     connection: Connection,
     override val databasePlatformConfig: DatabasePlatformConfig,
     val databaseIdentity: DatabaseIdentity?,
+    internal val eventListener: OperationEventListener?,
     @Suppress("UNUSED_PARAMETER") constructorMarker: Unit,
 ) : OperationExecutionContext {
 
@@ -151,17 +158,25 @@ class OperationExecutionScope private constructor(
     constructor(
         connection: Connection,
         databasePlatformConfig: DatabasePlatformConfig,
-    ) : this(connection, databasePlatformConfig, null, Unit)
+    ) : this(connection, databasePlatformConfig, null, null, Unit)
 
     /** Internal Operation construction path that carries the registration's destination identity. */
     internal constructor(
         connection: Connection,
         databasePlatformConfig: DatabasePlatformConfig,
         databaseIdentity: DatabaseIdentity?,
-    ) : this(connection, databasePlatformConfig, databaseIdentity, Unit)
+    ) : this(connection, databasePlatformConfig, databaseIdentity, null, Unit)
+
+    /** Internal managed path that propagates its Operation-owned event observer to child scopes. */
+    internal constructor(
+        connection: Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+        databaseIdentity: DatabaseIdentity?,
+        eventListener: OperationEventListener?,
+    ) : this(connection, databasePlatformConfig, databaseIdentity, eventListener, Unit)
 
     @Suppress("DEPRECATION")
-    constructor(connection: Connection) : this(connection, DefaultDatabaseConfig.config.platform, null, Unit)
+    constructor(connection: Connection) : this(connection, DefaultDatabaseConfig.config.platform, null, null, Unit)
 
     private val ownerThread = Thread.currentThread()
     private val jdbcConnection = connection
@@ -451,6 +466,19 @@ class OperationExecutionScope private constructor(
         if (result is ExecuteResult.Failure) recordFailure(result.exception)
     }
 
+    /**
+     * Publishes a domain event through the listener captured when this Operation Scope started.
+     * The method is intentionally additive and does not expose the listener or JDBC lifecycle.
+     * Legacy scopes without a Watch listener fail closed by producing no observation.
+     */
+    fun publishDatabaseEvent(event: DatabaseEvent) {
+        try {
+            (eventListener as? DatabaseEventPublisher)?.publishDatabaseEvent(event)
+        } catch (_: Throwable) {
+            // Event observers are best-effort and must not affect Operation semantics.
+        }
+    }
+
     fun recordFailure(failure: Throwable): Throwable {
         activeChildScope?.let { child -> return child.recordFailure(failure) }
         return synchronized(this) {
@@ -563,6 +591,7 @@ class OperationExecutionScope private constructor(
         executeDml(
             queryType = "Scoped DDL BuiltQuery",
             executionExecutor = queryExecutor,
+            sql = jdbcSql(query),
             missingResultMessage = "Schema query executor completed without delivering an execution result",
         ) { executor, callback ->
             executor.executeTable(jdbcConnection, query, callback)
@@ -571,38 +600,138 @@ class OperationExecutionScope private constructor(
     override fun <T> executeSelect(
         query: BuiltQuery,
         read: (OperationQueryRows) -> T,
-    ): ExecuteResult<T> = executeSelectQuery("BuiltQuery", read) { executor, callback ->
+    ): ExecuteResult<T> = executeSelectQuery("BuiltQuery", read, sql = jdbcSql(query)) { executor, callback ->
         executor.executeSelect(query, callback)
     }
 
     override fun <T> executeSelect(
         query: BoundQuery,
         read: (OperationQueryRows) -> T,
-    ): ExecuteResult<T> = executeSelectQuery("BoundQuery", read) { executor, callback ->
+    ): ExecuteResult<T> = executeSelectQuery("BoundQuery", read, sql = query.jdbcSql) { executor, callback ->
         executor.executeSelect(query, callback)
     }
 
-    override fun executeInsert(query: BuiltQuery): ExecuteResult<Long> = executeDml("INSERT BuiltQuery") { executor, callback ->
+    /**
+     * Executes the legacy raw ResultSet callback on this scope's Connection. The ResultSet is
+     * usable only during [callback]; the underlying statement is closed before this method returns.
+     * SQL observation stays at the Operation boundary, including callback and statement cleanup.
+     */
+    fun executeRawSelect(
+        query: BuiltQuery,
+        callback: (ExecuteResult<ResultSet>) -> Unit,
+    ): ExecuteResult<Boolean> = executeRawSelect(
+        queryType = "Raw BuiltQuery SELECT",
+        sql = jdbcSql(query),
+        callback = callback,
+    ) { executor, resultCallback -> executor.executeSelect(query, resultCallback) }
+
+    /** Executes an identity-aware raw ResultSet SELECT on this scope's Connection. */
+    fun executeRawSelect(
+        query: BoundQuery,
+        callback: (ExecuteResult<ResultSet>) -> Unit,
+    ): ExecuteResult<Boolean> = executeRawSelect(
+        queryType = "Raw BoundQuery SELECT",
+        sql = query.jdbcSql,
+        callback = callback,
+    ) { executor, resultCallback -> executor.executeSelect(query, resultCallback) }
+
+    private fun executeRawSelect(
+        queryType: String,
+        sql: String?,
+        callback: (ExecuteResult<ResultSet>) -> Unit,
+        execute: (IQueryExecute, (ExecuteResult<ResultSet>) -> Unit) -> Unit,
+    ): ExecuteResult<Boolean> {
+        val rejection = rejectOperation()
+        if (rejection != null) return ExecuteResult.Failure(rejection)
+
+        var delivered: ExecuteResult<ResultSet>? = null
+        var callbackFailure: Throwable? = null
+        return observeSql(sql) {
+            try {
+                execute(typedQueryExecutor) { result ->
+                    if (delivered != null) {
+                        throw IllegalStateException("$queryType delivered more than one result")
+                    }
+                    delivered = result
+                    try {
+                        callback(result)
+                    } catch (failure: Throwable) {
+                        callbackFailure = failure
+                        throw failure
+                    }
+                    recordResult(result)
+                }
+
+                when (val result = delivered) {
+                    null -> ExecuteResult.Failure(
+                        recordFailure(IllegalStateException("$queryType completed without a result")),
+                    )
+                    is ExecuteResult.Failure -> result
+                    is ExecuteResult.Success -> ExecuteResult.Success(true)
+                }
+            } catch (error: Error) {
+                if (callbackFailure === error) {
+                    (delivered as? ExecuteResult.Failure)?.exception?.let { addSuppressedSafely(error, it) }
+                } else {
+                    (delivered as? ExecuteResult.Failure)?.let(::recordResult)
+                }
+                recordFatal(error)
+                throw error
+            } catch (failure: Exception) {
+                val deliveredFailure = (delivered as? ExecuteResult.Failure)?.exception
+                if (callbackFailure === failure) {
+                    if (deliveredFailure != null) addSuppressedSafely(failure, deliveredFailure)
+                    recordFailure(failure)
+                    throw failure
+                }
+                if (deliveredFailure != null && deliveredFailure !== failure) {
+                    addSuppressedSafely(deliveredFailure, failure)
+                    recordFailure(failure)
+                    ExecuteResult.Failure(deliveredFailure)
+                } else {
+                    recordFailure(failure)
+                    throw failure
+                }
+            } catch (failure: Throwable) {
+                val deliveredFailure = (delivered as? ExecuteResult.Failure)?.exception
+                if (callbackFailure === failure) {
+                    if (deliveredFailure != null) addSuppressedSafely(failure, deliveredFailure)
+                    recordFailure(failure)
+                    throw failure
+                }
+                if (deliveredFailure != null && deliveredFailure !== failure) {
+                    addSuppressedSafely(deliveredFailure, failure)
+                    recordFailure(failure)
+                    ExecuteResult.Failure(deliveredFailure)
+                } else {
+                    recordFailure(failure)
+                    throw failure
+                }
+            }
+        }
+    }
+
+    override fun executeInsert(query: BuiltQuery): ExecuteResult<Long> = executeDml("INSERT BuiltQuery", sql = jdbcSql(query)) { executor, callback ->
         executor.executeInsert(query, callback)
     }
 
-    override fun executeInsert(query: BoundQuery): ExecuteResult<Long> = executeDml("INSERT BoundQuery") { executor, callback ->
+    override fun executeInsert(query: BoundQuery): ExecuteResult<Long> = executeDml("INSERT BoundQuery", sql = query.jdbcSql) { executor, callback ->
         executor.executeInsert(query, callback)
     }
 
-    override fun executeUpdate(query: BuiltQuery): ExecuteResult<Int> = executeDml("UPDATE BuiltQuery") { executor, callback ->
+    override fun executeUpdate(query: BuiltQuery): ExecuteResult<Int> = executeDml("UPDATE BuiltQuery", sql = jdbcSql(query)) { executor, callback ->
         executor.executeUpdate(query, callback)
     }
 
-    override fun executeUpdate(query: BoundQuery): ExecuteResult<Int> = executeDml("UPDATE BoundQuery") { executor, callback ->
+    override fun executeUpdate(query: BoundQuery): ExecuteResult<Int> = executeDml("UPDATE BoundQuery", sql = query.jdbcSql) { executor, callback ->
         executor.executeUpdate(query, callback)
     }
 
-    override fun executeDelete(query: BuiltQuery): ExecuteResult<Int> = executeDml("DELETE BuiltQuery") { executor, callback ->
+    override fun executeDelete(query: BuiltQuery): ExecuteResult<Int> = executeDml("DELETE BuiltQuery", sql = jdbcSql(query)) { executor, callback ->
         executor.executeDelete(query, callback)
     }
 
-    override fun executeDelete(query: BoundQuery): ExecuteResult<Int> = executeDml("DELETE BoundQuery") { executor, callback ->
+    override fun executeDelete(query: BoundQuery): ExecuteResult<Int> = executeDml("DELETE BoundQuery", sql = query.jdbcSql) { executor, callback ->
         executor.executeDelete(query, callback)
     }
 
@@ -610,6 +739,7 @@ class OperationExecutionScope private constructor(
         queryType: String,
         read: (OperationQueryRows) -> T,
         resultDescription: String = "$queryType SELECT",
+        sql: String? = null,
         scopeRejection: () -> Throwable? = { rejectOperation() },
         preserveLocalFailure: Boolean = false,
         execute: (IQueryExecute, (ExecuteResult<ResultSet>) -> Unit) -> Unit,
@@ -619,85 +749,87 @@ class OperationExecutionScope private constructor(
 
         var deliveredFailure: Throwable? = null
         var deliveredFailureRecorded = false
-        return try {
-            var callbackCount = 0
-            var result: ExecuteResult<T>? = null
-            execute(typedQueryExecutor) callback@{ selected ->
-                callbackCount++
-                if (callbackCount > 1) {
-                    val duplicateCallback = IllegalStateException(
-                        "$resultDescription execution delivered more than one result",
-                    )
-                    result = ExecuteResult.Failure(recordSelectFailure(duplicateCallback, preserveLocalFailure))
-                    return@callback
-                }
-
-                result = when (selected) {
-                    is ExecuteResult.Failure -> {
-                        // Latch the database failure before Statement.use can report a cleanup
-                        // failure, so the original SQL failure remains primary.
-                        deliveredFailure = selected.exception
-                        recordResult(selected)
-                        deliveredFailureRecorded = true
-                        selected
+        return observeSql(sql) {
+            try {
+                var callbackCount = 0
+                var result: ExecuteResult<T>? = null
+                execute(typedQueryExecutor) callback@{ selected ->
+                    callbackCount++
+                    if (callbackCount > 1) {
+                        val duplicateCallback = IllegalStateException(
+                            "$resultDescription execution delivered more than one result",
+                        )
+                        result = ExecuteResult.Failure(recordSelectFailure(duplicateCallback, preserveLocalFailure))
+                        return@callback
                     }
-                    is ExecuteResult.Success -> {
-                        val resultSet = selected.result
-                        if (resultSet == null) {
-                            ExecuteResult.Failure(
-                                IllegalStateException("$resultDescription completed without a row result"),
-                            )
-                        } else {
-                            resultSet.use { rows ->
-                                val scopedRows = JdbcOperationQueryRows(
-                                    rows,
-                                    ownerThread,
-                                    scopeRejection,
-                                ) { failure -> recordFailure(failure) }
-                                try {
-                                    ExecuteResult.Success(read(scopedRows))
-                                } finally {
-                                    scopedRows.invalidate()
+
+                    result = when (selected) {
+                        is ExecuteResult.Failure -> {
+                            // Latch the database failure before Statement.use can report a cleanup
+                            // failure, so the original SQL failure remains primary.
+                            deliveredFailure = selected.exception
+                            recordResult(selected)
+                            deliveredFailureRecorded = true
+                            selected
+                        }
+                        is ExecuteResult.Success -> {
+                            val resultSet = selected.result
+                            if (resultSet == null) {
+                                ExecuteResult.Failure(
+                                    IllegalStateException("$resultDescription completed without a row result"),
+                                )
+                            } else {
+                                resultSet.use { rows ->
+                                    val scopedRows = JdbcOperationQueryRows(
+                                        rows,
+                                        ownerThread,
+                                        scopeRejection,
+                                    ) { failure -> recordFailure(failure) }
+                                    try {
+                                        ExecuteResult.Success(read(scopedRows))
+                                    } finally {
+                                        scopedRows.invalidate()
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (callbackCount == 0) {
-                val missingResult = IllegalStateException("$resultDescription execution completed without a result")
-                ExecuteResult.Failure(recordSelectFailure(missingResult, preserveLocalFailure))
-            } else {
-                val completed = result ?: ExecuteResult.Failure(
-                    recordSelectFailure(
-                        IllegalStateException("$resultDescription execution produced no result"),
-                        preserveLocalFailure,
-                    ),
-                )
-                if (!deliveredFailureRecorded) recordResult(completed)
-                completed
-            }
-        } catch (error: Error) {
-            recordFatal(error)
-            throw error
-        } catch (exception: Exception) {
-            val primary = deliveredFailure
-            if (primary != null && primary !== exception) {
-                addSuppressedSafely(primary, exception)
-                val recorded = recordFailure(exception)
-                ExecuteResult.Failure(if (preserveLocalFailure) primary else recorded)
-            } else {
-                ExecuteResult.Failure(recordSelectFailure(exception, preserveLocalFailure))
-            }
-        } catch (failure: Throwable) {
-            val primary = deliveredFailure
-            if (primary != null && primary !== failure) {
-                addSuppressedSafely(primary, failure)
-                val recorded = recordFailure(failure)
-                ExecuteResult.Failure(if (preserveLocalFailure) primary else recorded)
-            } else {
-                ExecuteResult.Failure(recordSelectFailure(failure, preserveLocalFailure))
+                if (callbackCount == 0) {
+                    val missingResult = IllegalStateException("$resultDescription execution completed without a result")
+                    ExecuteResult.Failure(recordSelectFailure(missingResult, preserveLocalFailure))
+                } else {
+                    val completed = result ?: ExecuteResult.Failure(
+                        recordSelectFailure(
+                            IllegalStateException("$resultDescription execution produced no result"),
+                            preserveLocalFailure,
+                        ),
+                    )
+                    if (!deliveredFailureRecorded) recordResult(completed)
+                    completed
+                }
+            } catch (error: Error) {
+                recordFatal(error)
+                throw error
+            } catch (exception: Exception) {
+                val primary = deliveredFailure
+                if (primary != null && primary !== exception) {
+                    addSuppressedSafely(primary, exception)
+                    val recorded = recordFailure(exception)
+                    ExecuteResult.Failure(if (preserveLocalFailure) primary else recorded)
+                } else {
+                    ExecuteResult.Failure(recordSelectFailure(exception, preserveLocalFailure))
+                }
+            } catch (failure: Throwable) {
+                val primary = deliveredFailure
+                if (primary != null && primary !== failure) {
+                    addSuppressedSafely(primary, failure)
+                    val recorded = recordFailure(failure)
+                    ExecuteResult.Failure(if (preserveLocalFailure) primary else recorded)
+                } else {
+                    ExecuteResult.Failure(recordSelectFailure(failure, preserveLocalFailure))
+                }
             }
         }
     }
@@ -709,6 +841,7 @@ class OperationExecutionScope private constructor(
         queryType = "Session advisory lock cleanup",
         read = read,
         resultDescription = "Session advisory lock cleanup SELECT",
+        sql = query.jdbcSql,
         scopeRejection = ::rejectCleanupOperation,
         preserveLocalFailure = true,
     ) { executor, callback ->
@@ -813,46 +946,63 @@ class OperationExecutionScope private constructor(
     private fun <T> executeDml(
         queryType: String,
         executionExecutor: IQueryExecute = typedQueryExecutor,
+        sql: String? = null,
         missingResultMessage: String = "$queryType execution completed without a result",
         execute: (IQueryExecute, (ExecuteResult<T>) -> Unit) -> Unit,
     ): ExecuteResult<T> {
         val rejection = rejectOperation()
         if (rejection != null) return ExecuteResult.Failure(rejection)
 
-        return try {
-            var callbackCount = 0
-            var result: ExecuteResult<T>? = null
-            execute(executionExecutor) { delivered ->
-                callbackCount++
-                if (callbackCount == 1) {
-                    result = delivered
-                    recordResult(delivered)
-                } else {
-                    val duplicateCallback = IllegalStateException(
-                        "$queryType execution delivered more than one result",
+        var deliveredFailure: Throwable? = null
+        return observeSql(sql) {
+            try {
+                var callbackCount = 0
+                var result: ExecuteResult<T>? = null
+                execute(executionExecutor) { delivered ->
+                    callbackCount++
+                    if (callbackCount == 1) {
+                        result = delivered
+                        deliveredFailure = (delivered as? ExecuteResult.Failure)?.exception
+                        recordResult(delivered)
+                    } else {
+                        val duplicateCallback = IllegalStateException(
+                            "$queryType execution delivered more than one result",
+                        )
+                        result = ExecuteResult.Failure(recordFailure(duplicateCallback))
+                    }
+                }
+
+                if (callbackCount == 0) {
+                    ExecuteResult.Failure(
+                        recordFailure(
+                            IllegalStateException(missingResultMessage),
+                        ),
                     )
-                    result = ExecuteResult.Failure(recordFailure(duplicateCallback))
+                } else {
+                    result ?: ExecuteResult.Failure(
+                        recordFailure(IllegalStateException("$queryType execution produced no result")),
+                    )
+                }
+            } catch (error: Error) {
+                recordFatal(error)
+                throw error
+            } catch (exception: Exception) {
+                val primary = synchronized(this) { firstFailure } ?: deliveredFailure
+                if (primary != null && primary !== exception) {
+                    addSuppressedSafely(primary, exception)
+                    ExecuteResult.Failure(primary)
+                } else {
+                    failed(exception)
+                }
+            } catch (failure: Throwable) {
+                val primary = synchronized(this) { firstFailure } ?: deliveredFailure
+                if (primary != null && primary !== failure) {
+                    addSuppressedSafely(primary, failure)
+                    ExecuteResult.Failure(primary)
+                } else {
+                    failed(failure)
                 }
             }
-
-            if (callbackCount == 0) {
-                ExecuteResult.Failure(
-                    recordFailure(
-                        IllegalStateException(missingResultMessage),
-                    ),
-                )
-            } else {
-                result ?: ExecuteResult.Failure(
-                    recordFailure(IllegalStateException("$queryType execution produced no result")),
-                )
-            }
-        } catch (error: Error) {
-            recordFatal(error)
-            throw error
-        } catch (exception: Exception) {
-            failed(exception)
-        } catch (failure: Throwable) {
-            failed(failure)
         }
     }
 
@@ -899,25 +1049,28 @@ class OperationExecutionScope private constructor(
             parameters.map { QueryParameterBinding(it.name, it.value, it.sqlTypeCode) }.toMutableList(),
         )
         var deliveredFailure: Throwable? = null
-        try {
-            typedQueryExecutor.executeTable(query) { executed ->
-                result = executed
-                deliveredFailure = (executed as? ExecuteResult.Failure)?.exception
+        return observeSql(jdbcSql(query)) {
+            try {
+                typedQueryExecutor.executeTable(query) { executed ->
+                    result = executed
+                    deliveredFailure = (executed as? ExecuteResult.Failure)?.exception
+                }
+            } catch (error: Error) {
+                deliveredFailure?.let { addSuppressedSafely(error, it) }
+                throw error
+            } catch (failure: Throwable) {
+                val primary = deliveredFailure
+                if (primary != null && primary !== failure) {
+                    addSuppressedSafely(primary, failure)
+                    ExecuteResult.Failure(primary)
+                } else {
+                    throw failure
+                }
             }
-        } catch (error: Error) {
-            deliveredFailure?.let { addSuppressedSafely(error, it) }
-            throw error
-        } catch (failure: Throwable) {
-            val primary = deliveredFailure
-            if (primary != null && primary !== failure) {
-                addSuppressedSafely(primary, failure)
-                return ExecuteResult.Failure(primary)
-            }
-            throw failure
+            result ?: ExecuteResult.Failure(
+                IllegalStateException("Scoped DDL execution completed without a result"),
+            )
         }
-        return result ?: ExecuteResult.Failure(
-            IllegalStateException("Scoped DDL execution completed without a result"),
-        )
     }
 
     private fun classifyDdlFailure(
@@ -956,17 +1109,39 @@ class OperationExecutionScope private constructor(
         sql: String,
         parameters: List<OperationParameter>,
         read: (OperationQueryRows) -> T,
-    ): ExecuteResult<T> = executeSelectQuery(
-        queryType = "Scoped read",
-        read = read,
-        resultDescription = "Scoped read",
-    ) { executor, callback ->
+    ): ExecuteResult<T> {
         val query = BuiltQuery(
             sql,
             parameters.map { QueryParameterBinding(it.name, it.value, it.sqlTypeCode) }.toMutableList(),
         )
-        executor.executeSelect(query, callback)
+        return executeSelectQuery(
+            queryType = "Scoped read",
+            read = read,
+            resultDescription = "Scoped read",
+            sql = jdbcSql(query),
+        ) { executor, callback ->
+            executor.executeSelect(query, callback)
+        }
     }
+
+    private inline fun <T> observeSql(sql: String?, execution: () -> ExecuteResult<T>): ExecuteResult<T> {
+        eventListener.publish(OperationEvent(OperationEventType.SQL_STARTED, sql))
+        return try {
+            val result = execution()
+            when (result) {
+                is ExecuteResult.Success -> eventListener.publish(OperationEvent(OperationEventType.SQL_SUCCEEDED, sql))
+                is ExecuteResult.Failure -> eventListener.publish(
+                    OperationEvent(OperationEventType.SQL_FAILED, sql, result.exception),
+                )
+            }
+            result
+        } catch (failure: Throwable) {
+            eventListener.publish(OperationEvent(OperationEventType.SQL_FAILED, sql, failure))
+            throw failure
+        }
+    }
+
+    private fun jdbcSql(query: BuiltQuery): String? = query.getReadyQuery()
 
     override fun <T> failed(failure: Throwable): ExecuteResult<T> =
         ExecuteResult.Failure(recordFailure(failure))
