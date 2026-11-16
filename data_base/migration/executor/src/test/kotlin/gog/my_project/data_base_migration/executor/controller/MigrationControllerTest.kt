@@ -90,7 +90,7 @@ class MigrationControllerTest {
     @Test
     fun `current propagates invalid History failure`() {
         val invalid = history(appliedVersionCount = 1).copy(
-            versions = listOf(mapOf("id" to 100, "tagId" to 999)),
+            versions = listOf(mapOf("id" to 100, "tagId" to 999, "status" to 3)),
         )
         val jdbc = historyConnection(invalid)
         val scope = testScope(jdbc.connection)
@@ -142,7 +142,7 @@ class MigrationControllerTest {
             listOf(MigrationVersionStatus.PENDING, MigrationVersionStatus.PENDING, MigrationVersionStatus.PENDING),
             report.versions.map { it.status },
         )
-        assertEquals(1, jdbc.queryCount)
+        assertEquals(2, jdbc.queryCount)
         assertEquals(0, jdbc.transactionControlCalls)
         assertEquals(0, jdbc.connectionCloseCount)
     }
@@ -220,7 +220,7 @@ class MigrationControllerTest {
             )
         }
         val persistedVersions = versions.take(appliedVersionCount).map { (_, tagId, versionId) ->
-            mapOf("id" to versionId, "tagId" to tagId)
+            mapOf("id" to versionId, "tagId" to tagId, "status" to 3)
         }
         return HistoryRows(tags, persistedVersions, emptyList())
     }
@@ -298,6 +298,7 @@ class MigrationControllerTest {
 
     private inner class StatusJdbc(
         private val rows: List<Map<String, Any?>>,
+        private val versionRows: List<Map<String, Any?>> = emptyList(),
         private val queryFailure: Throwable? = null,
     ) {
         var queryCount = 0
@@ -321,8 +322,8 @@ class MigrationControllerTest {
                         when (statementMethod.name) {
                             "executeQuery" -> {
                                 queryCount++
-                                queryFailure?.let { throw it }
-                                resultSet(rows, statementSql)
+                                if (queryCount == 1) queryFailure?.let { throw it }
+                                resultSet(if (queryCount == 1) rows else versionRows, statementSql)
                             }
                             "close" -> null
                             "isClosed" -> false

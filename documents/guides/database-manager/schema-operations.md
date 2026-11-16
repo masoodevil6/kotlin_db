@@ -1,20 +1,28 @@
-# Schema عملیات
+# تعریف Schema
 
-Schema API برای تعریف عملیات DDL در ماژول `data_base:operation:schema` قرار دارد. DatabaseManager فعلاً از طریق `DatabaseHandle`، اجرای مستقیم Schema را ارائه نمی‌کند و runtime قدیمی Migration نیز حذف شده است.
-
-تعریف عملیات همچنان با Schema DSL انجام می‌شود؛ برای نمونه:
+Schema API عملیات DDL را تعریف می‌کند. برنامهٔ مصرف‌کننده آن‌ها را در `Migration.up()` و `Migration.down()` برمی‌گرداند؛ برای اجرای عادی DDL از مسیر Migration استفاده کنید. `DatabaseHandle` اجرای مستقیم Schema را در Connection یا Transaction مصرف‌کننده عرضه نمی‌کند.
 
 ```kotlin
-val createCustomers: SchemaOperation = Schema.createTable {
-    table { tableName("customers") }
-    addColumn {
-        name("id")
-        dataType(SchemaDataType.IntType)
-        notNull()
-        autoIncrement()
-        primaryKey()
+class CreateCustomers : Migration(AppMigrationTags.Items.CREATE_CUSTOMERS) {
+    override fun up(): MigrationDefinition = migration {
+        operation(Schema.createTable {
+            table { tableName("customers") }
+            addColumn {
+                name("id")
+                dataType(SchemaDataType.IntType)
+                notNull()
+                autoIncrement()
+                primaryKey()
+            }
+        })
+    }
+
+    override fun down(): MigrationDefinition = migration {
+        operation(Schema.dropTable { tableName("customers") })
     }
 }
 ```
 
-برای رندر نمونه‌های Schema بدون اتصال به دیتابیس، ماژول `data_base:migration:example` را ببینید. اجرای DDL از طریق Manager تا آماده‌شدن مسیر اجرایی جدید در دسترس نیست.
+Migration برای Connection و اجرای Schema از Operation Scope همان Handle استفاده می‌کند. در مسیر رسمی برای هر Version Transaction مستقلی ساخته نمی‌شود؛ Atomicity کلی یا rollbackپذیری همهٔ DDLها تضمین نشده است و به رفتار دیتابیس وابسته است. جزئیات چرخه در [راهنمای Migration](../migration/execution.md) آمده است.
+
+ماژول `data_base:migration:example` نمونه‌های Schema را به SQL رندر می‌کند و به دیتابیس متصل نمی‌شود. نمونهٔ اجرای opt-in API عمومی در [example ریشهٔ پروژه](../../../example/README.md) قرار دارد.

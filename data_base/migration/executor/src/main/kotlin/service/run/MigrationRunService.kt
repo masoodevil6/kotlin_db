@@ -3,6 +3,7 @@ package gog.my_project.data_base_migration.executor.service.run
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
 import gog.my_project.data_base_migration.core.migrate.Migration
+import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationQuery
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationTagQuery
 import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationDeleteQuery
@@ -10,6 +11,8 @@ import gog.my_project.data_base_migration.core.system_migration.query.SystemMigr
 import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationTagDeleteQuery
 import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationTagInsertQuery
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
+import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
+import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
@@ -20,67 +23,245 @@ import gog.my_project.data_base_schema.Schema
 import java.lang.reflect.InvocationTargetException
 import kotlin.jvm.java
 
+/** Separates failures before a migration attempt from the outcome of an actual attempt. */
+internal sealed interface MigrationRunOutcome {
+    data class PreflightFailure(val failure: ExecuteResult.Failure) : MigrationRunOutcome
+
+    data class Attempt(val result: MigrationExecutionResult) : MigrationRunOutcome
+}
+
+/** A registered Migration and the single runtime instance prepared for its execution. */
+internal class PreparedMigration internal constructor(
+    val registration: RegisteredMigration,
+    val instance: Migration,
+)
+
 /** Executes one registered Migration within a caller-owned Operation transaction scope. */
-class MigrationRunService {
+internal class MigrationRunService {
     /** Runs exactly one Migration's up operation and records it under a persisted Version. */
     fun runUp(
         versionId: Int,
         scope: OperationExecutionScope,
         migration: RegisteredMigration,
-    ): ExecuteResult<Boolean> = safely(scope) {
-        requirePositiveVersionId(versionId, scope)?.let { return@safely it }
+    ): ExecuteResult<Boolean> = runUpInternal(null, versionId, scope, migration).toExecuteResult()
 
-        // Refuse an already applied item before invoking user migration code.
-        val existingTag = readMigrationTagsByName(scope, migration.id.value).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not read Migration Tag '${migration.id.value}'")
-        if (existingTag.size > 1) {
-            return@safely failure(scope, "Duplicate Migration tags exist for '${migration.id.value}'")
-        }
-        existingTag.singleOrNull()?.let { tag ->
-            val applied = readAppliedByTag(scope, tag.id).valueOrReturn(scope)
-                ?: return@safely failureAfterLookup(scope, "Could not read Migration history for '${migration.id.value}'")
-            if (applied.isNotEmpty()) {
-                return@safely failure(
+    /** Internal path used by the Version service to retain the Version tag in the attempt result. */
+    internal fun runUpAttempt(
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        scope: OperationExecutionScope,
+        migration: RegisteredMigration,
+    ): MigrationRunOutcome = runUpInternal(versionTag, versionId, scope, migration)
+
+    /** Runs UP with an instance prepared before the Version marker was recorded. */
+    internal fun runUpAttempt(
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        scope: OperationExecutionScope,
+        preparedMigration: PreparedMigration,
+    ): MigrationRunOutcome = runUpInternal(
+        versionTag,
+        versionId,
+        scope,
+        preparedMigration.registration,
+        preparedMigration,
+    )
+
+    private fun runUpInternal(
+        versionTag: MigrationVersionTag?,
+        versionId: Int,
+        scope: OperationExecutionScope,
+        migration: RegisteredMigration,
+        preparedMigration: PreparedMigration? = null,
+    ): MigrationRunOutcome {
+        var attemptStarted = false
+        var stage = MigrationExecutionResult.FailureStage.EXECUTION
+        return try {
+            scope.rejectOperation()?.let {
+                if (it is Error) {
+                    scope.recordFatal(it)
+                    throw it
+                }
+                return MigrationRunOutcome.PreflightFailure(ExecuteResult.Failure(it))
+            }
+            requirePositiveVersionId(versionId, scope)?.let {
+                return preflightFailure(scope, it.exception)
+            }
+
+            // Refuse an already applied item before invoking user migration code.
+            val existingTag = readMigrationTagsByName(scope, migration.id.value).valueOrReturn(scope)
+                ?: return preflightFailure(
                     scope,
-                    "Migration '${migration.id.value}' is already applied under persisted Version " +
-                        applied.joinToString { it.versionId.toString() },
+                    failureAfterLookup(scope, "Could not read Migration Tag '${migration.id.value}'").exception,
+                )
+            if (existingTag.size > 1) {
+                return preflightFailure(
+                    scope,
+                    failure(scope, "Duplicate Migration tags exist for '${migration.id.value}'").exception,
                 )
             }
-        }
-
-        val instance = instantiate(scope, migration).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not instantiate Migration '${migration.id.value}'")
-        val upResult = Schema.execute(instance.up().operation, scope)
-        when (upResult) {
-            is ExecuteResult.Failure -> return@safely upResult
-            is ExecuteResult.Success -> if (upResult.result != true) {
-                return@safely failure(scope, "Migration '${migration.id.value}' up() did not complete successfully")
+            existingTag.singleOrNull()?.let { tag ->
+                val applied = readAppliedByTag(scope, tag.id).valueOrReturn(scope)
+                    ?: return preflightFailure(
+                        scope,
+                        failureAfterLookup(scope, "Could not read Migration history for '${migration.id.value}'").exception,
+                    )
+                if (applied.isNotEmpty()) {
+                    return preflightFailure(
+                        scope,
+                        failure(
+                            scope,
+                            "Migration '${migration.id.value}' is already applied under persisted Version " +
+                                applied.joinToString { it.versionId.toString() },
+                        ).exception,
+                    )
+                }
             }
-        }
 
-        // Resolve/create the item Tag only after the schema operation succeeds.
-        val tagAfterUp = readMigrationTagsByName(scope, migration.id.value).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not read Migration Tag '${migration.id.value}'")
-        if (tagAfterUp.size > 1) {
-            return@safely failure(scope, "Duplicate Migration tags exist for '${migration.id.value}'")
-        }
-        val tagId = tagAfterUp.singleOrNull()?.id ?: insertMigrationTag(scope, migration.id.value)
-            .valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not create Migration Tag '${migration.id.value}'")
+            val instance = if (preparedMigration != null) {
+                preparedMigration.instance
+            } else {
+                val prepared = prepareMigration(scope, migration).valueOrReturn(scope)
+                    ?: return preflightFailure(
+                        scope,
+                        failureAfterLookup(scope, "Could not instantiate Migration '${migration.id.value}'").exception,
+                    )
+                prepared.instance
+            }
 
-        // Recheck before writing history so a visible concurrent/conflicting record is never ignored.
-        val conflictingHistory = readAppliedByTag(scope, tagId).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not verify Migration history for '${migration.id.value}'")
-        if (conflictingHistory.isNotEmpty()) {
-            return@safely failure(
+            attemptStarted = true
+            val upResult = Schema.execute(instance.up().operation, scope)
+            when (upResult) {
+                is ExecuteResult.Failure -> return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    MigrationExecutionResult.FailureStage.EXECUTION,
+                    upResult.exception,
+                )
+                is ExecuteResult.Success -> if (upResult.result != true) {
+                    return attemptFailure(
+                        scope,
+                        MigrationExecutionResult.Direction.UP,
+                        versionTag,
+                        versionId,
+                        migration.id,
+                        MigrationExecutionResult.FailureStage.EXECUTION,
+                        IllegalStateException("Migration '${migration.id.value}' up() did not complete successfully"),
+                    )
+                }
+            }
+
+            stage = MigrationExecutionResult.FailureStage.HISTORY_RECORD
+
+            // Resolve/create the item Tag only after the schema operation succeeds.
+            val tagAfterUp = readMigrationTagsByName(scope, migration.id.value).valueOrReturn(scope)
+                ?: return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failureAfterLookup(scope, "Could not read Migration Tag '${migration.id.value}'").exception,
+                )
+            if (tagAfterUp.size > 1) {
+                return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failure(scope, "Duplicate Migration tags exist for '${migration.id.value}'").exception,
+                )
+            }
+            val tagId = tagAfterUp.singleOrNull()?.id ?: insertMigrationTag(scope, migration.id.value)
+                .valueOrReturn(scope)
+                ?: return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failureAfterLookup(scope, "Could not create Migration Tag '${migration.id.value}'").exception,
+                )
+
+            // Recheck before writing history so a visible concurrent/conflicting record is never ignored.
+            val conflictingHistory = readAppliedByTag(scope, tagId).valueOrReturn(scope)
+                ?: return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failureAfterLookup(scope, "Could not verify Migration history for '${migration.id.value}'").exception,
+                )
+            if (conflictingHistory.isNotEmpty()) {
+                return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failure(
+                        scope,
+                        "Migration '${migration.id.value}' acquired an applied history record before it could be recorded",
+                    ).exception,
+                )
+            }
+
+            val inserted = insertApplied(scope, tagId, versionId)
+            if (inserted is ExecuteResult.Failure) {
+                return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.UP,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    inserted.exception,
+                )
+            }
+            MigrationRunOutcome.Attempt(
+                MigrationExecutionResult.Success(
+                    direction = MigrationExecutionResult.Direction.UP,
+                    versionTag = versionTag,
+                    versionRecordId = versionId,
+                    migrationId = migration.id,
+                ),
+            )
+        } catch (error: Error) {
+            if (!attemptStarted) {
+                scope.recordFatal(error)
+                throw error
+            }
+            attemptFatal(
                 scope,
-                "Migration '${migration.id.value}' acquired an applied history record before it could be recorded",
+                MigrationExecutionResult.Direction.UP,
+                versionTag,
+                versionId,
+                migration.id,
+                stage,
+                error,
+            )
+        } catch (failure: Throwable) {
+            if (!attemptStarted) return preflightFailure(scope, failure)
+            attemptFailure(
+                scope,
+                MigrationExecutionResult.Direction.UP,
+                versionTag,
+                versionId,
+                migration.id,
+                stage,
+                failure,
             )
         }
-
-        val inserted = insertApplied(scope, tagId, versionId)
-        if (inserted is ExecuteResult.Failure) return@safely inserted
-        ExecuteResult.Success(true)
     }
 
     /** Runs exactly one Migration's down operation and removes only its matching Version record. */
@@ -88,83 +269,254 @@ class MigrationRunService {
         versionId: Int,
         scope: OperationExecutionScope,
         migration: RegisteredMigration,
-    ): ExecuteResult<Boolean> = safely(scope) {
-        requirePositiveVersionId(versionId, scope)?.let { return@safely it }
+    ): ExecuteResult<Boolean> = runDownInternal(null, versionId, scope, migration).toExecuteResult()
 
-        val namedTags = readTagsByName(scope, migration.id.value).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not read Tag '${migration.id.value}'")
-        if (namedTags.isEmpty()) {
-            return@safely failure(scope, "No applied history exists for Migration '${migration.id.value}'")
-        }
-        val migrationTags = namedTags.filter { it.tagType == MigrationTagType.ITEM.code }
-        if (migrationTags.isEmpty()) {
-            return@safely failure(
-                scope,
-                "Tag '${migration.id.value}' exists but is not a Migration item Tag",
-            )
-        }
-        if (migrationTags.size != 1) {
-            return@safely failure(scope, "Duplicate Migration item Tags exist for '${migration.id.value}'")
-        }
-        val tag = migrationTags.single()
+    /** Internal path used by the Version service to retain the Version tag in the attempt result. */
+    internal fun runDownAttempt(
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        scope: OperationExecutionScope,
+        migration: RegisteredMigration,
+    ): MigrationRunOutcome = runDownInternal(versionTag, versionId, scope, migration)
 
-        val applied = readAppliedByTag(scope, tag.id).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not read Migration history for '${migration.id.value}'")
-        val matchingHistory = applied.filter { it.versionId == versionId }
-        if (matchingHistory.isEmpty()) {
-            if (applied.isNotEmpty()) {
-                return@safely failure(
+    /** Runs DOWN with an instance prepared before the Version marker was recorded. */
+    internal fun runDownAttempt(
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        scope: OperationExecutionScope,
+        preparedMigration: PreparedMigration,
+    ): MigrationRunOutcome = runDownInternal(
+        versionTag,
+        versionId,
+        scope,
+        preparedMigration.registration,
+        preparedMigration,
+    )
+
+    private fun runDownInternal(
+        versionTag: MigrationVersionTag?,
+        versionId: Int,
+        scope: OperationExecutionScope,
+        migration: RegisteredMigration,
+        preparedMigration: PreparedMigration? = null,
+    ): MigrationRunOutcome {
+        var attemptStarted = false
+        var stage = MigrationExecutionResult.FailureStage.EXECUTION
+        return try {
+            scope.rejectOperation()?.let {
+                if (it is Error) {
+                    scope.recordFatal(it)
+                    throw it
+                }
+                return MigrationRunOutcome.PreflightFailure(ExecuteResult.Failure(it))
+            }
+            requirePositiveVersionId(versionId, scope)?.let {
+                return preflightFailure(scope, it.exception)
+            }
+
+            val namedTags = readTagsByName(scope, migration.id.value).valueOrReturn(scope)
+                ?: return preflightFailure(
                     scope,
-                    "Migration '${migration.id.value}' is applied under persisted Version " +
-                        applied.joinToString { it.versionId.toString() } + ", not $versionId",
+                    failureAfterLookup(scope, "Could not read Tag '${migration.id.value}'").exception,
+                )
+            if (namedTags.isEmpty()) {
+                return preflightFailure(
+                    scope,
+                    failure(scope, "No applied history exists for Migration '${migration.id.value}'").exception,
                 )
             }
-            return@safely failure(scope, "No applied history exists for Migration '${migration.id.value}'")
-        }
-        if (matchingHistory.size != 1) {
-            return@safely failure(
-                scope,
-                "Migration '${migration.id.value}' has duplicate history under Version $versionId",
-            )
-        }
-
-        val instance = instantiate(scope, migration).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not instantiate Migration '${migration.id.value}'")
-        val downResult = Schema.execute(instance.down().operation, scope)
-        when (downResult) {
-            is ExecuteResult.Failure -> return@safely downResult
-            is ExecuteResult.Success -> if (downResult.result != true) {
-                return@safely failure(scope, "Migration '${migration.id.value}' down() did not complete successfully")
-            }
-        }
-
-        val historyDelete = deleteApplied(scope, tag.id, versionId)
-        if (historyDelete is ExecuteResult.Failure) return@safely historyDelete
-        val deletedHistoryCount = (historyDelete as ExecuteResult.Success).result
-        if (deletedHistoryCount != 1) {
-            return@safely failure(
-                scope,
-                "Expected to delete one applied history record for '${migration.id.value}', " +
-                    "but deleted $deletedHistoryCount",
-            )
-        }
-
-        val remaining = readAppliedByTag(scope, tag.id).valueOrReturn(scope)
-            ?: return@safely failureAfterLookup(scope, "Could not verify remaining history for '${migration.id.value}'")
-        if (remaining.isEmpty()) {
-            val tagDelete = deleteMigrationTag(scope, tag.id)
-            if (tagDelete is ExecuteResult.Failure) return@safely tagDelete
-            val deletedTagCount = (tagDelete as ExecuteResult.Success).result
-            if (deletedTagCount != 1) {
-                return@safely failure(
+            val migrationTags = namedTags.filter { it.tagType == MigrationTagType.ITEM.code }
+            if (migrationTags.isEmpty()) {
+                return preflightFailure(
                     scope,
-                    "Expected to delete one unreferenced Migration Tag '${migration.id.value}', " +
-                        "but deleted $deletedTagCount",
+                    failure(
+                        scope,
+                        "Tag '${migration.id.value}' exists but is not a Migration item Tag",
+                    ).exception,
                 )
             }
-        }
+            if (migrationTags.size != 1) {
+                return preflightFailure(
+                    scope,
+                    failure(scope, "Duplicate Migration item Tags exist for '${migration.id.value}'").exception,
+                )
+            }
+            val tag = migrationTags.single()
 
-        ExecuteResult.Success(true)
+            val applied = readAppliedByTag(scope, tag.id).valueOrReturn(scope)
+                ?: return preflightFailure(
+                    scope,
+                    failureAfterLookup(scope, "Could not read Migration history for '${migration.id.value}'").exception,
+                )
+            val matchingHistory = applied.filter { it.versionId == versionId }
+            if (matchingHistory.isEmpty()) {
+                if (applied.isNotEmpty()) {
+                    return preflightFailure(
+                        scope,
+                        failure(
+                            scope,
+                            "Migration '${migration.id.value}' is applied under persisted Version " +
+                                applied.joinToString { it.versionId.toString() } + ", not $versionId",
+                        ).exception,
+                    )
+                }
+                return preflightFailure(
+                    scope,
+                    failure(scope, "No applied history exists for Migration '${migration.id.value}'").exception,
+                )
+            }
+            if (matchingHistory.size != 1) {
+                return preflightFailure(
+                    scope,
+                    failure(
+                        scope,
+                        "Migration '${migration.id.value}' has duplicate history under Version $versionId",
+                    ).exception,
+                )
+            }
+
+            val instance = if (preparedMigration != null) {
+                preparedMigration.instance
+            } else {
+                val prepared = prepareMigration(scope, migration).valueOrReturn(scope)
+                    ?: return preflightFailure(
+                        scope,
+                        failureAfterLookup(scope, "Could not instantiate Migration '${migration.id.value}'").exception,
+                    )
+                prepared.instance
+            }
+
+            attemptStarted = true
+            val downResult = Schema.execute(instance.down().operation, scope)
+            when (downResult) {
+                is ExecuteResult.Failure -> return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.DOWN,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    MigrationExecutionResult.FailureStage.EXECUTION,
+                    downResult.exception,
+                )
+                is ExecuteResult.Success -> if (downResult.result != true) {
+                    return attemptFailure(
+                        scope,
+                        MigrationExecutionResult.Direction.DOWN,
+                        versionTag,
+                        versionId,
+                        migration.id,
+                        MigrationExecutionResult.FailureStage.EXECUTION,
+                        IllegalStateException("Migration '${migration.id.value}' down() did not complete successfully"),
+                    )
+                }
+            }
+
+            stage = MigrationExecutionResult.FailureStage.HISTORY_RECORD
+
+            val historyDelete = deleteApplied(scope, tag.id, versionId)
+            if (historyDelete is ExecuteResult.Failure) {
+                return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.DOWN,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    historyDelete.exception,
+                )
+            }
+            val deletedHistoryCount = (historyDelete as ExecuteResult.Success).result
+            if (deletedHistoryCount != 1) {
+                return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.DOWN,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failure(
+                        scope,
+                        "Expected to delete one applied history record for '${migration.id.value}', " +
+                            "but deleted $deletedHistoryCount",
+                    ).exception,
+                )
+            }
+
+            val remaining = readAppliedByTag(scope, tag.id).valueOrReturn(scope)
+                ?: return attemptFailure(
+                    scope,
+                    MigrationExecutionResult.Direction.DOWN,
+                    versionTag,
+                    versionId,
+                    migration.id,
+                    stage,
+                    failureAfterLookup(scope, "Could not verify remaining history for '${migration.id.value}'").exception,
+                )
+            if (remaining.isEmpty()) {
+                val tagDelete = deleteMigrationTag(scope, tag.id)
+                if (tagDelete is ExecuteResult.Failure) {
+                    return attemptFailure(
+                        scope,
+                        MigrationExecutionResult.Direction.DOWN,
+                        versionTag,
+                        versionId,
+                        migration.id,
+                        stage,
+                        tagDelete.exception,
+                    )
+                }
+                val deletedTagCount = (tagDelete as ExecuteResult.Success).result
+                if (deletedTagCount != 1) {
+                    return attemptFailure(
+                        scope,
+                        MigrationExecutionResult.Direction.DOWN,
+                        versionTag,
+                        versionId,
+                        migration.id,
+                        stage,
+                        failure(
+                            scope,
+                            "Expected to delete one unreferenced Migration Tag '${migration.id.value}', " +
+                                "but deleted $deletedTagCount",
+                        ).exception,
+                    )
+                }
+            }
+
+            MigrationRunOutcome.Attempt(
+                MigrationExecutionResult.Success(
+                    direction = MigrationExecutionResult.Direction.DOWN,
+                    versionTag = versionTag,
+                    versionRecordId = versionId,
+                    migrationId = migration.id,
+                ),
+            )
+        } catch (error: Error) {
+            if (!attemptStarted) {
+                scope.recordFatal(error)
+                throw error
+            }
+            attemptFatal(
+                scope,
+                MigrationExecutionResult.Direction.DOWN,
+                versionTag,
+                versionId,
+                migration.id,
+                stage,
+                error,
+            )
+        } catch (failure: Throwable) {
+            if (!attemptStarted) return preflightFailure(scope, failure)
+            attemptFailure(
+                scope,
+                MigrationExecutionResult.Direction.DOWN,
+                versionTag,
+                versionId,
+                migration.id,
+                stage,
+                failure,
+            )
+        }
     }
 
     private fun requirePositiveVersionId(
@@ -173,10 +525,11 @@ class MigrationRunService {
     ): ExecuteResult.Failure? =
         if (versionId > 0) null else failure(scope, "Persisted Migration version id must be positive")
 
-    private fun instantiate(
+    /** Constructs and validates one runtime Migration instance without running its UP or DOWN callback. */
+    internal fun prepareMigration(
         scope: OperationExecutionScope,
         registration: RegisteredMigration,
-    ): ExecuteResult<Migration> {
+    ): ExecuteResult<PreparedMigration> {
         return try {
             val migration = registration.migrationClass.java.getDeclaredConstructor()
                 .apply { isAccessible = true }
@@ -189,7 +542,7 @@ class MigrationRunService {
                     ),
                 )
             }
-            ExecuteResult.Success(migration)
+            ExecuteResult.Success(PreparedMigration(registration, migration))
         } catch (failure: Throwable) {
             val cause = (failure as? InvocationTargetException)?.targetException ?: failure
             if (cause is Error) {
@@ -333,17 +686,75 @@ class MigrationRunService {
         .queryBuilder(query)
         .execute()
 
-    private inline fun <T> safely(
+    private fun preflightFailure(
         scope: OperationExecutionScope,
-        block: () -> ExecuteResult<T>,
-    ): ExecuteResult<T> = try {
-        val rejection = scope.rejectOperation()
-        if (rejection != null) ExecuteResult.Failure(rejection) else block()
-    } catch (error: Error) {
+        failure: Throwable,
+    ): MigrationRunOutcome.PreflightFailure {
+        if (failure is Error) {
+            scope.recordFatal(failure)
+            throw failure
+        }
+        val primary = scope.recordFailure(failure)
+        if (primary is Error) throw primary
+        return MigrationRunOutcome.PreflightFailure(ExecuteResult.Failure(primary))
+    }
+
+    private fun attemptFailure(
+        scope: OperationExecutionScope,
+        direction: MigrationExecutionResult.Direction,
+        versionTag: MigrationVersionTag?,
+        versionId: Int,
+        migrationId: MigrationIdentity,
+        stage: MigrationExecutionResult.FailureStage,
+        failure: Throwable,
+    ): MigrationRunOutcome.Attempt {
+        if (failure is Error) return attemptFatal(scope, direction, versionTag, versionId, migrationId, stage, failure)
+        val primary = scope.recordFailure(failure)
+        if (primary is Error) return attemptFatal(scope, direction, versionTag, versionId, migrationId, stage, primary)
+        return MigrationRunOutcome.Attempt(
+            MigrationExecutionResult.Failure(
+                direction = direction,
+                versionTag = versionTag,
+                versionRecordId = versionId,
+                migrationId = migrationId,
+                stage = stage,
+                cause = primary,
+            ),
+        )
+    }
+
+    private fun attemptFatal(
+        scope: OperationExecutionScope,
+        direction: MigrationExecutionResult.Direction,
+        versionTag: MigrationVersionTag?,
+        versionId: Int,
+        migrationId: MigrationIdentity,
+        stage: MigrationExecutionResult.FailureStage,
+        error: Error,
+    ): MigrationRunOutcome.Attempt {
         scope.recordFatal(error)
-        throw error
-    } catch (failure: Throwable) {
-        scope.failed(failure)
+        return MigrationRunOutcome.Attempt(
+            MigrationExecutionResult.Fatal(
+                direction = direction,
+                versionTag = versionTag,
+                versionRecordId = versionId,
+                migrationId = migrationId,
+                stage = stage,
+                error = error,
+            ),
+        )
+    }
+
+    private fun MigrationRunOutcome.toExecuteResult(): ExecuteResult<Boolean> = when (this) {
+        is MigrationRunOutcome.PreflightFailure -> {
+            if (failure.exception is Error) throw failure.exception
+            failure
+        }
+        is MigrationRunOutcome.Attempt -> when (val attemptResult = result) {
+            is MigrationExecutionResult.Success -> ExecuteResult.Success(true)
+            is MigrationExecutionResult.Failure -> ExecuteResult.Failure(attemptResult.cause)
+            is MigrationExecutionResult.Fatal -> throw attemptResult.error
+        }
     }
 
     private fun failure(scope: OperationExecutionScope, message: String): ExecuteResult.Failure =

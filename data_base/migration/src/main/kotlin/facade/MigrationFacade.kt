@@ -40,7 +40,7 @@ class MigrationFacade internal constructor(
  * The block's return value is preserved; callers choose how to collect results when invoking
  * multiple commands, and each command returns its individual [ExecuteResult].
  */
-fun <T> migrationFacade(
+internal fun <T> migrationFacade(
     configuration: MigrationConfiguration,
     scope: OperationExecutionScope,
     block: MigrationFacade.() -> T,

@@ -47,7 +47,113 @@ internal class MigrationVersionHistoryValidator(
             validateExpectedMigrations(indexed, persisted.id, prepared.migrations)
             prepared
         }
-        return MigrationVersionHistoryState(applied)
+        return MigrationVersionHistoryState(snapshot, applied)
+    }
+
+    /**
+     * Validates all selected UP registrations against the already-read Snapshot before any Version
+     * transaction starts. A missing item Tag is valid; an existing unreferenced item Tag is also
+     * valid because runUp reuses it. Any persisted applied row for a selected Migration is a conflict.
+     */
+    fun validatePendingUpMigrations(
+        snapshot: MigrationVersionHistorySnapshot,
+        selectedVersions: List<PreparedMigrationVersion>,
+    ) {
+        val indexed = indexAndValidateRows(snapshot)
+        val selectedVersionNames = HashSet<String>()
+        val migrationOwners = HashMap<String, String>()
+
+        selectedVersions.forEach { prepared ->
+            val versionName = prepared.version.name
+            if (!selectedVersionNames.add(versionName)) {
+                invalid("Migration Version '$versionName' is selected more than once")
+            }
+
+            val versionTags = snapshot.tags.filter {
+                it.name == versionName && it.type == MigrationTagType.VERSION.code
+            }
+            if (versionTags.size > 1) {
+                invalid("Duplicate Version Tags exist for '$versionName'")
+            }
+            versionTags.singleOrNull()?.let { versionTag ->
+                val persistedVersions = snapshot.versions.filter { it.tagId == versionTag.id }
+                if (persistedVersions.isNotEmpty()) {
+                    invalid("Migration Version '$versionName' is already applied")
+                }
+            }
+
+            prepared.migrations.forEach { migration ->
+                val migrationId = migration.id.value
+                val previousVersion = migrationOwners.putIfAbsent(migrationId, versionName)
+                if (previousVersion != null) {
+                    invalid(
+                        "Migration '$migrationId' is registered more than once in selected Versions " +
+                            "'$previousVersion' and '$versionName'",
+                    )
+                }
+
+                val itemTags = indexed.itemTagsByName[migrationId].orEmpty()
+                if (itemTags.size > 1) {
+                    invalid("Duplicate Migration item Tags exist for '$migrationId'")
+                }
+                itemTags.singleOrNull()?.let { itemTag ->
+                    val appliedRows = indexed.migrationsByTag[itemTag.id].orEmpty()
+                    if (appliedRows.isNotEmpty()) {
+                        invalid(
+                            "Migration '$migrationId' already has persisted history under Version " +
+                                appliedRows.joinToString { it.versionId.toString() },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Confirms every selected DOWN Version is represented by the validated applied state and that
+     * its exact Version row and Migration rows in the same Snapshot match its registrations.
+     * No History query is needed here; transactionDown retains its live validation for execution-time changes.
+     */
+    fun validateSelectedDownVersions(
+        state: MigrationVersionHistoryState,
+        selectedVersions: List<PreparedMigrationVersion>,
+    ) {
+        val snapshot = state.snapshot
+        val indexed = indexAndValidateRows(snapshot)
+        val appliedByName = state.appliedVersions.groupBy { it.version.name }
+        val selectedNames = HashSet<String>()
+
+        selectedVersions.forEach { selected ->
+            val versionName = selected.version.name
+            if (!selectedNames.add(versionName)) {
+                invalid("Migration Version '$versionName' is selected more than once for rollback")
+            }
+
+            val appliedMatches = appliedByName[versionName].orEmpty()
+            if (appliedMatches.size != 1) {
+                invalid(
+                    "Rollback Version '$versionName' is not present exactly once in the validated applied state",
+                )
+            }
+            val applied = appliedMatches.single()
+            if (applied.migrations.map { it.id.value } != selected.migrations.map { it.id.value }) {
+                invalid("Rollback Version '$versionName' registrations differ from the validated applied state")
+            }
+
+            val versionTags = snapshot.tags.filter {
+                it.name == versionName && it.type == MigrationTagType.VERSION.code
+            }
+            if (versionTags.size != 1) {
+                invalid("Rollback Version '$versionName' does not have exactly one persisted Version Tag")
+            }
+            val versionTag = versionTags.single()
+            val versionRows = snapshot.versions.filter { it.tagId == versionTag.id }
+            if (versionRows.size != 1) {
+                invalid("Rollback Version '$versionName' does not have exactly one persisted Version row")
+            }
+            val versionRow = versionRows.single()
+            validateExpectedMigrations(indexed, versionRow.id, selected.migrations)
+        }
     }
 
     /** Validates one Version using the same row and migration matching rules as whole-history validation. */
@@ -87,6 +193,11 @@ internal class MigrationVersionHistoryValidator(
         val duplicateVersionTags = snapshot.versions.groupBy(MigrationHistoryVersion::tagId).filterValues { it.size > 1 }
         if (duplicateVersionTags.isNotEmpty()) invalid("More than one persisted Version references the same Version Tag")
         snapshot.versions.forEach { version ->
+            if (version.status != MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED) {
+                invalid(
+                    "Persisted Migration Version ${version.id} has non-completed status ${version.status}",
+                )
+            }
             val tag = tagsById[version.tagId]
                 ?: invalid("Persisted Migration Version ${version.id} references missing Tag ${version.tagId}")
             if (tag.type != MigrationTagType.VERSION.code) {
@@ -183,8 +294,14 @@ internal class MigrationVersionHistoryValidator(
 }
 
 internal class MigrationVersionHistoryState(
+    /** The exact immutable snapshot validated by [MigrationVersionHistoryValidator]. */
+    val snapshot: MigrationVersionHistorySnapshot,
     appliedVersions: List<PreparedMigrationVersion>,
 ) {
     val appliedVersions: List<PreparedMigrationVersion> =
         Collections.unmodifiableList(ArrayList(appliedVersions))
+
+    /** Latest applied Version in Configuration order, matching the former current-version lookup. */
+    val currentVersion: PreparedMigrationVersion?
+        get() = appliedVersions.lastOrNull()
 }

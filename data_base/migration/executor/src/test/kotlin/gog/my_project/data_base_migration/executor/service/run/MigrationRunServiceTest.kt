@@ -17,6 +17,7 @@ import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_migration.executor.controller.MigrationController
+import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionTransactionService
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
@@ -50,11 +51,234 @@ class MigrationRunServiceTest {
     @BeforeTest
     fun setUp() {
         SampleMigration.reset()
+        PreparedMigrationTrace.reset()
         VersionMigrationTrace.reset()
+        PreparedOrchestrationTrace.reset()
         database = FakeDatabase()
         scope = OperationExecutionScope(
             database.connection,
             DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        )
+    }
+
+    @Test
+    fun `preparation returns the registered migration and its runtime instance without running it`() {
+        val preparedRegistration = RegisteredMigration(registration.id, PreparedInstanceMigration::class)
+
+        val prepared = assertIs<PreparedMigration>(
+            assertIs<ExecuteResult.Success<PreparedMigration>>(
+                service.prepareMigration(scope, preparedRegistration),
+            ).result,
+        )
+
+        assertSame(preparedRegistration, prepared.registration)
+        assertSame<Migration>(requireNotNull(PreparedMigrationTrace.constructedInstance), prepared.instance)
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+        assertEquals(0, PreparedMigrationTrace.upCalls)
+        assertEquals(0, PreparedMigrationTrace.downCalls)
+        assertTrue(database.events.isEmpty())
+    }
+
+    @Test
+    fun `preparation rejects a runtime identity that differs from its registration`() {
+        val mismatchedRegistration = RegisteredMigration(
+            MigrationIdentity.fromValue("different_migration"),
+            PreparedInstanceMigration::class,
+        )
+
+        val failure = assertIs<ExecuteResult.Failure>(
+            service.prepareMigration(scope, mismatchedRegistration),
+        )
+
+        assertIs<IllegalArgumentException>(failure.exception)
+        assertSame(failure.exception, scope.firstFailure)
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+        assertEquals(0, PreparedMigrationTrace.upCalls)
+        assertEquals(0, PreparedMigrationTrace.downCalls)
+        assertTrue(database.events.isEmpty())
+    }
+
+    @Test
+    fun `preparation returns constructor failure before any prepared execution`() {
+        val failingRegistration = RegisteredMigration(registration.id, ConstructorFailingMigration::class)
+
+        val failure = assertIs<ExecuteResult.Failure>(
+            service.prepareMigration(scope, failingRegistration),
+        )
+
+        assertSame(PreparationFailures.constructorFailure, failure.exception)
+        assertSame(failure.exception, scope.firstFailure)
+        assertEquals(0, database.events.size)
+    }
+
+    @Test
+    fun `preparation rethrows the original constructor Error`() {
+        val fatalRegistration = RegisteredMigration(registration.id, FatalConstructorMigration::class)
+
+        val thrown = assertFailsWith<AssertionError> {
+            service.prepareMigration(scope, fatalRegistration)
+        }
+
+        assertSame(PreparationFailures.constructorFatal, thrown)
+        assertSame(thrown, scope.fatalError)
+        assertSame(thrown, scope.firstFailure)
+        assertTrue(database.events.isEmpty())
+    }
+
+    @Test
+    fun `prepared UP executes the same instance without constructing it again`() {
+        val prepared = prepareObservableMigration()
+        database.respond(emptyList(), emptyList(), emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, prepared)
+
+        val success = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.UP, success.direction)
+        assertEquals(registration.id, success.migrationId)
+        assertSame<Migration>(prepared.instance, requireNotNull(PreparedMigrationTrace.upInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+        assertEquals(1, PreparedMigrationTrace.upCalls)
+        assertEquals(0, PreparedMigrationTrace.downCalls)
+    }
+
+    @Test
+    fun `prepared DOWN executes the same instance without constructing it again`() {
+        val prepared = prepareObservableMigration()
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+            emptyList(),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, prepared)
+
+        val success = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.DOWN, success.direction)
+        assertEquals(registration.id, success.migrationId)
+        assertSame<Migration>(prepared.instance, requireNotNull(PreparedMigrationTrace.downInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+        assertEquals(0, PreparedMigrationTrace.upCalls)
+        assertEquals(1, PreparedMigrationTrace.downCalls)
+    }
+
+    @Test
+    fun `prepared DOWN schema failure remains an EXECUTION failure`() {
+        val prepared = prepareObservableMigration()
+        database.failDdl = true
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, prepared)
+        val failure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+
+        assertEquals(MigrationExecutionResult.FailureStage.EXECUTION, failure.stage)
+        assertSame<Migration>(prepared.instance, requireNotNull(PreparedMigrationTrace.downInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `prepared DOWN Error remains Fatal with the original reference`() {
+        val prepared = prepareObservableMigration()
+        val fatal = AssertionError("prepared down failed")
+        PreparedMigrationTrace.downFailure = fatal
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, prepared)
+        val fatalResult = assertIs<MigrationExecutionResult.Fatal>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+
+        assertSame(fatal, fatalResult.error)
+        assertSame(fatal, scope.fatalError)
+        assertSame<Migration>(prepared.instance, requireNotNull(PreparedMigrationTrace.downInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `prepared UP schema failure remains an EXECUTION failure`() {
+        val preparedUp = prepareObservableMigration()
+        database.failDdl = true
+        database.respond(emptyList())
+
+        val upOutcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, preparedUp)
+        val upFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(upOutcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.EXECUTION, upFailure.stage)
+        assertSame<Migration>(preparedUp.instance, requireNotNull(PreparedMigrationTrace.upInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+    }
+
+    @Test
+    fun `prepared UP history failure remains a HISTORY_RECORD failure`() {
+        val prepared = prepareObservableMigration()
+        database.failDmlCalls += 2
+        database.respond(emptyList(), emptyList(), emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, prepared)
+        val failure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.HISTORY_RECORD, failure.stage)
+        assertSame<Migration>(prepared.instance, requireNotNull(PreparedMigrationTrace.upInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+    }
+
+    @Test
+    fun `prepared DOWN history failure remains a HISTORY_RECORD failure`() {
+        val preparedDown = prepareObservableMigration()
+        database.failDmlCalls += 1
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val downOutcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, preparedDown)
+        val downFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(downOutcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.HISTORY_RECORD, downFailure.stage)
+        assertSame<Migration>(preparedDown.instance, requireNotNull(PreparedMigrationTrace.downInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+    }
+
+    @Test
+    fun `prepared Migration Error remains Fatal with the original reference`() {
+        val prepared = prepareObservableMigration()
+        val fatal = AssertionError("prepared migration failed")
+        PreparedMigrationTrace.upFailure = fatal
+        database.respond(emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, prepared)
+
+        val fatalResult = assertIs<MigrationExecutionResult.Fatal>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertSame(fatal, fatalResult.error)
+        assertSame(fatal, scope.fatalError)
+        assertSame<Migration>(prepared.instance, requireNotNull(PreparedMigrationTrace.upInstance))
+        assertEquals(1, PreparedMigrationTrace.constructorCalls)
+    }
+
+    private fun prepareObservableMigration(): PreparedMigration {
+        val preparedRegistration = RegisteredMigration(registration.id, PreparedInstanceMigration::class)
+        return assertIs<PreparedMigration>(
+            assertIs<ExecuteResult.Success<PreparedMigration>>(
+                service.prepareMigration(scope, preparedRegistration),
+            ).result,
         )
     }
 
@@ -121,6 +345,144 @@ class MigrationRunServiceTest {
         assertTrue(historyInsert.sql.contains("system_migration", ignoreCase = true))
         assertTrue(!historyInsert.sql.contains("system_migration_tag", ignoreCase = true))
         assertEquals(listOf(MIGRATION_TAG_ID, VERSION_ID), historyInsert.parameters)
+    }
+
+    @Test
+    fun `runUp attempt success includes Version and Migration identity`() {
+        database.respond(emptyList(), emptyList(), emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val success = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.UP, success.direction)
+        assertSame(VersionTag, success.versionTag)
+        assertEquals(VERSION_ID, success.versionRecordId)
+        assertEquals(registration.id, success.migrationId)
+        assertEquals(1, SampleMigration.upCalls)
+        assertEquals(2, database.dmlCount)
+    }
+
+    @Test
+    fun `runUp preflight failure is separate from a Migration attempt`() {
+        database.failReadCalls += 1
+        database.respond(emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val failure = assertIs<MigrationRunOutcome.PreflightFailure>(outcome).failure
+        assertIs<SQLException>(failure.exception)
+        assertSame(failure.exception, scope.firstFailure)
+        assertEquals(0, SampleMigration.upCalls)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `runUp rejects a failed Scope as a preflight failure without issuing queries`() {
+        val failure = IllegalStateException("Scope is already failed")
+        scope.failed<Unit>(failure)
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val preflight = assertIs<MigrationRunOutcome.PreflightFailure>(outcome).failure
+        assertSame(failure, preflight.exception)
+        assertEquals(0, SampleMigration.upCalls)
+        assertTrue(database.events.isEmpty())
+    }
+
+    @Test
+    fun `runUp attempt rethrows the original Error from an already Fatal Scope`() {
+        val fatal = AssertionError("Scope is already fatal")
+        scope.recordFatal(fatal)
+
+        val thrown = assertFailsWith<AssertionError> {
+            service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, scope.fatalError)
+        assertSame(fatal, scope.firstFailure)
+        assertEquals(0, SampleMigration.upCalls)
+        assertTrue(database.events.isEmpty())
+
+        val wrapperThrown = assertFailsWith<AssertionError> {
+            service.runUp(VERSION_ID, scope, registration)
+        }
+        assertSame(fatal, wrapperThrown)
+    }
+
+    @Test
+    fun `runUp callback failure is an EXECUTION attempt failure`() {
+        val failure = IllegalArgumentException("up failed")
+        SampleMigration.upFailure = failure
+        database.respond(emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val attemptFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.EXECUTION, attemptFailure.stage)
+        assertEquals(MigrationExecutionResult.Direction.UP, attemptFailure.direction)
+        assertSame(VersionTag, attemptFailure.versionTag)
+        assertEquals(VERSION_ID, attemptFailure.versionRecordId)
+        assertEquals(registration.id, attemptFailure.migrationId)
+        assertSame(failure, attemptFailure.cause)
+        assertSame(failure, scope.firstFailure)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `runUp history insert failure is a HISTORY_RECORD attempt failure`() {
+        database.failDmlCalls += 2
+        database.respond(emptyList(), emptyList(), emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val attemptFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.HISTORY_RECORD, attemptFailure.stage)
+        assertEquals(MigrationExecutionResult.Direction.UP, attemptFailure.direction)
+        assertSame(VersionTag, attemptFailure.versionTag)
+        assertEquals(VERSION_ID, attemptFailure.versionRecordId)
+        assertEquals(registration.id, attemptFailure.migrationId)
+        assertIs<SQLException>(attemptFailure.cause)
+        assertSame(attemptFailure.cause, scope.firstFailure)
+        assertEquals(2, database.dmlCount)
+        assertEquals(1, database.insertHistoryCount)
+    }
+
+    @Test
+    fun `runUp Error remains Fatal in internal result and legacy wrapper`() {
+        val fatal = AssertionError("fatal up")
+        SampleMigration.upFailure = fatal
+        database.respond(emptyList())
+
+        val outcome = service.runUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val fatalResult = assertIs<MigrationExecutionResult.Fatal>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertSame(fatal, fatalResult.error)
+        assertSame(fatal, scope.fatalError)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `legacy runUp wrapper rethrows the original Migration Error`() {
+        val fatal = AssertionError("fatal up")
+        SampleMigration.upFailure = fatal
+        database.respond(emptyList())
+
+        val thrown = assertFailsWith<AssertionError> {
+            service.runUp(VERSION_ID, scope, registration)
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, scope.fatalError)
+        assertEquals(0, database.dmlCount)
     }
 
     @Test
@@ -233,6 +595,178 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertEquals(0, database.connectionCloseCount)
+    }
+
+    @Test
+    fun `runDown attempt success includes Version and Migration identity`() {
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+            emptyList(),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val success = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.DOWN, success.direction)
+        assertSame(VersionTag, success.versionTag)
+        assertEquals(VERSION_ID, success.versionRecordId)
+        assertEquals(registration.id, success.migrationId)
+        assertEquals(1, SampleMigration.downCalls)
+        assertEquals(2, database.dmlCount)
+    }
+
+    @Test
+    fun `runDown preflight failure is separate from a Migration attempt`() {
+        database.failReadCalls += 1
+        database.respond(emptyList())
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val failure = assertIs<MigrationRunOutcome.PreflightFailure>(outcome).failure
+        assertIs<SQLException>(failure.exception)
+        assertSame(failure.exception, scope.firstFailure)
+        assertEquals(0, SampleMigration.downCalls)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `runDown callback failure is an EXECUTION attempt failure`() {
+        val failure = IllegalStateException("down failed")
+        SampleMigration.downFailure = failure
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val attemptFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.EXECUTION, attemptFailure.stage)
+        assertEquals(MigrationExecutionResult.Direction.DOWN, attemptFailure.direction)
+        assertSame(VersionTag, attemptFailure.versionTag)
+        assertEquals(VERSION_ID, attemptFailure.versionRecordId)
+        assertEquals(registration.id, attemptFailure.migrationId)
+        assertSame(failure, attemptFailure.cause)
+        assertSame(failure, scope.firstFailure)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `runDown attempt rethrows the original Error from an already Fatal Scope`() {
+        val fatal = AssertionError("Scope is already fatal")
+        scope.recordFatal(fatal)
+
+        val thrown = assertFailsWith<AssertionError> {
+            service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, scope.fatalError)
+        assertSame(fatal, scope.firstFailure)
+        assertEquals(0, SampleMigration.downCalls)
+        assertTrue(database.events.isEmpty())
+
+        val wrapperThrown = assertFailsWith<AssertionError> {
+            service.runDown(VERSION_ID, scope, registration)
+        }
+        assertSame(fatal, wrapperThrown)
+    }
+
+    @Test
+    fun `runDown Error is Fatal and legacy wrapper rethrows the original Error`() {
+        val fatal = AssertionError("fatal down")
+        SampleMigration.downFailure = fatal
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val thrown = assertFailsWith<AssertionError> {
+            service.runDown(VERSION_ID, scope, registration)
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, scope.fatalError)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `runDown attempt returns Fatal with original Error and complete metadata`() {
+        val fatal = AssertionError("fatal down")
+        SampleMigration.downFailure = fatal
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val fatalResult = assertIs<MigrationExecutionResult.Fatal>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.DOWN, fatalResult.direction)
+        assertSame(VersionTag, fatalResult.versionTag)
+        assertEquals(VERSION_ID, fatalResult.versionRecordId)
+        assertEquals(registration.id, fatalResult.migrationId)
+        assertEquals(MigrationExecutionResult.FailureStage.EXECUTION, fatalResult.stage)
+        assertSame(fatal, fatalResult.error)
+        assertSame(fatal, scope.fatalError)
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `runDown history deletion failure is a HISTORY_RECORD attempt failure`() {
+        database.failDmlCalls += 1
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val attemptFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.HISTORY_RECORD, attemptFailure.stage)
+        assertEquals(MigrationExecutionResult.Direction.DOWN, attemptFailure.direction)
+        assertSame(VersionTag, attemptFailure.versionTag)
+        assertEquals(VERSION_ID, attemptFailure.versionRecordId)
+        assertEquals(registration.id, attemptFailure.migrationId)
+        assertIs<SQLException>(attemptFailure.cause)
+        assertSame(attemptFailure.cause, scope.firstFailure)
+        assertEquals(1, database.dmlCount)
+        assertEquals(0, database.deleteTagCount)
+    }
+
+    @Test
+    fun `runDown item Tag deletion failure is a HISTORY_RECORD attempt failure`() {
+        database.failDmlCalls += 2
+        database.respond(
+            rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
+            rows(id = APPLIED_ID, versionId = VERSION_ID),
+            emptyList(),
+        )
+
+        val outcome = service.runDownAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val attemptFailure = assertIs<MigrationExecutionResult.Failure>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.FailureStage.HISTORY_RECORD, attemptFailure.stage)
+        assertEquals(MigrationExecutionResult.Direction.DOWN, attemptFailure.direction)
+        assertSame(VersionTag, attemptFailure.versionTag)
+        assertEquals(VERSION_ID, attemptFailure.versionRecordId)
+        assertEquals(registration.id, attemptFailure.migrationId)
+        assertIs<SQLException>(attemptFailure.cause)
+        assertSame(attemptFailure.cause, scope.firstFailure)
+        assertEquals(2, database.dmlCount)
+        assertEquals(1, database.deleteHistoryCount)
+        assertEquals(1, database.deleteTagCount)
     }
 
     @Test
@@ -367,7 +901,7 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `transactionUp executes a Version in declaration order in one shared transaction`() {
+    fun `transactionUp executes a Version in declaration order on the supplied operation scope`() {
         VersionMigrationTrace.reset()
         database.respond(
             emptyList(), // Version Tag lookup.
@@ -381,13 +915,13 @@ class MigrationRunServiceTest {
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
         assertEquals(listOf("up:first", "up:second"), VersionMigrationTrace.events)
         assertEquals(1, database.connectionBuildCount)
-        assertEquals(1, database.autoCommitFalseCount)
-        assertEquals(1, database.autoCommitRestoreCount)
-        assertEquals(1, database.commitCount)
+        assertEquals(0, database.autoCommitFalseCount)
+        assertEquals(0, database.autoCommitRestoreCount)
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionCloseCount)
-        assertTrue(database.autoCommitAtPrepareStatement.all { !it })
-        assertEquals(listOf("autoCommit:false", "commit", "autoCommit:true", "close"), database.lifecycleEvents)
+        assertTrue(database.autoCommitAtPrepareStatement.all { it })
+        assertEquals(listOf("close"), database.lifecycleEvents)
         assertEquals(1, database.dmlCalls.count {
             it.sql.contains("INSERT", true) && it.parameters == listOf(VersionTag.value, VERSION_TAG_TYPE)
         })
@@ -397,10 +931,41 @@ class MigrationRunServiceTest {
             it.sql.contains("system_migration_version", true) }
         val versionId = database.generatedIdForVersionInsert
         assertEquals(listOf(1000), versionInsert.parameters)
+        val completionUpdate = database.dmlCalls.last()
+        assertTrue(completionUpdate.sql.contains("UPDATE", true))
+        assertTrue(completionUpdate.sql.contains("system_migration_version", true))
+        assertEquals(listOf(STATUS_MIGRATE_COMPLETED, versionId.toInt()), completionUpdate.parameters)
+        assertEquals(1, database.dmlCalls.count {
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        })
         val historyInserts = database.dmlCalls.filter { it.sql.contains("INSERT", true) &&
             it.sql.contains("version_id", true) }
         assertEquals(2, historyInserts.size)
         assertTrue(historyInserts.all { versionId.toInt() in it.parameters })
+    }
+
+    @Test
+    fun `transactionUp fails and leaves Version started when completion update count is not one`() {
+        database.respondUpdateCounts(1, 1, 0)
+        database.respond(*emptyReadResponses())
+        val configuration = migrationConfig { migrationVersion(VersionTagOne) { } }
+
+        val result = versionService(configuration).transactionUp(VersionTagOne)
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        val versionInsert = database.dmlCalls.first { it.sql.contains("INSERT", true) &&
+            it.sql.contains("system_migration_version", true) }
+        val completionUpdate = database.dmlCalls.last()
+        assertTrue(completionUpdate.sql.contains("UPDATE", true))
+        assertEquals(
+            listOf(STATUS_MIGRATE_COMPLETED, database.generatedIdForVersionInsert.toInt()),
+            completionUpdate.parameters,
+        )
+        assertEquals(0, database.commitCount)
+        assertEquals(0, database.rollbackCount)
+        assertTrue(database.dmlCalls.none { it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true) })
+        assertTrue(versionInsert.sql.contains("system_migration_version", true))
     }
 
     @Test
@@ -419,7 +984,7 @@ class MigrationRunServiceTest {
         assertTrue(VersionMigrationTrace.events.isEmpty())
         assertEquals(0, database.dmlCount)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
     }
 
     @Test
@@ -442,12 +1007,12 @@ class MigrationRunServiceTest {
         assertTrue(VersionMigrationTrace.events.isEmpty())
         assertEquals(0, database.dmlCount)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionCloseCount)
     }
 
     @Test
-    fun `transactionUp stops on a middle Migration failure and rolls back the Version`() {
+    fun `transactionUp stops on a middle Migration failure and leaves Version started`() {
         VersionMigrationTrace.reset()
         database.failDdlCalls += 2
         database.respond(
@@ -462,13 +1027,13 @@ class MigrationRunServiceTest {
         assertIs<ExecuteResult.Failure>(result)
         assertEquals(listOf("up:first", "up:second"), VersionMigrationTrace.events)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
-        assertEquals(
-            listOf("autoCommit:false", "rollback", "autoCommit:true", "close"),
-            database.lifecycleEvents,
-        )
+        assertEquals(0, database.rollbackCount)
+        assertEquals(listOf("close"), database.lifecycleEvents)
         assertTrue(database.executedSql.none { it.contains("DELETE", true) &&
             it.contains("system_migration_version", true) })
+        assertTrue(database.dmlCalls.none {
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        })
     }
 
     @Test
@@ -483,7 +1048,7 @@ class MigrationRunServiceTest {
         assertTrue(VersionMigrationTrace.events.isEmpty())
         assertTrue(database.generatedIdForVersionInsert > Int.MAX_VALUE.toLong())
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
     }
 
     @Test
@@ -500,11 +1065,11 @@ class MigrationRunServiceTest {
         assertTrue(database.dmlCalls.any { it.sql.contains("system_migration_tag", true) })
         assertTrue(database.dmlCalls.any { it.sql.contains("system_migration_version", true) })
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
     }
 
     @Test
-    fun `transactionDown runs Migrations in reverse order and deletes the Version last`() {
+    fun `transactionDown marks Version started then runs reverse order and deletes Version last`() {
         VersionMigrationTrace.reset()
         database.respond(
             tagRows(
@@ -512,7 +1077,7 @@ class MigrationRunServiceTest {
                 tag(52, VersionItemSecond.value, MIGRATION_TAG_TYPE),
                 tag(53, VersionItemFirst.value, MIGRATION_TAG_TYPE),
             ),
-            rows(id = VERSION_ID, tagId = 51),
+            rows(id = VERSION_ID, tagId = 51, status = STATUS_MIGRATE_COMPLETED),
             historyRows(history(61, 53, VERSION_ID), history(62, 52, VERSION_ID)),
             rows(id = 52, tagType = MIGRATION_TAG_TYPE), rows(id = 62, versionId = VERSION_ID), emptyList(),
             rows(id = 53, tagType = MIGRATION_TAG_TYPE), rows(id = 61, versionId = VERSION_ID), emptyList(),
@@ -530,11 +1095,21 @@ class MigrationRunServiceTest {
         )
         assertEquals(listOf("down:second", "down:first"), VersionMigrationTrace.events)
         assertEquals(1, database.connectionBuildCount)
-        assertEquals(1, database.autoCommitFalseCount)
-        assertEquals(1, database.autoCommitRestoreCount)
-        assertEquals(1, database.commitCount)
+        assertEquals(0, database.autoCommitFalseCount)
+        assertEquals(0, database.autoCommitRestoreCount)
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
-        assertTrue(database.autoCommitAtPrepareStatement.all { !it })
+        assertTrue(database.autoCommitAtPrepareStatement.all { it })
+        val startUpdate = database.dmlCalls.first { it.sql.contains("UPDATE", true) }
+        assertTrue(startUpdate.sql.contains("system_migration_version", true))
+        assertEquals(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID), startUpdate.parameters)
+        val startUpdateEvent = database.events.indexOfFirst {
+            it.startsWith("dml:") && it.contains("UPDATE", true) && it.contains("system_migration_version", true)
+        }
+        val firstDdlEvent = database.events.indexOfFirst { it.startsWith("ddl:") }
+        val firstHistoryDeleteEvent = database.events.indexOfFirst { it.startsWith("delete-history:") }
+        assertTrue(startUpdateEvent >= 0 && startUpdateEvent < firstDdlEvent)
+        assertTrue(firstDdlEvent < firstHistoryDeleteEvent)
         val historyDeletes = database.dmlCalls.filter { it.sql.contains("DELETE", true) &&
             it.sql.contains("version_id", true) }
         assertEquals(2, historyDeletes.size)
@@ -548,6 +1123,29 @@ class MigrationRunServiceTest {
     }
 
     @Test
+    fun `transactionDown stops before migrations when STARTED update count is not one`() {
+        VersionMigrationTrace.reset()
+        database.respondUpdateCounts(0)
+        database.respond(
+            tagRows(
+                tag(51, VersionTag.value, VERSION_TAG_TYPE),
+                tag(52, VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+            rows(id = VERSION_ID, tagId = 51, status = STATUS_MIGRATE_COMPLETED),
+            historyRows(history(61, 52, VERSION_ID)),
+        )
+
+        val result = versionService(versionConfiguration(firstRegistration)).transactionDown(VersionTag)
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(1, database.dmlCalls.size)
+        assertEquals(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID), database.dmlCalls.single().parameters)
+        assertEquals(0, database.commitCount)
+        assertEquals(0, database.rollbackCount)
+    }
+
+    @Test
     fun `transactionDown stops after a middle Migration failure and retains Version record`() {
         VersionMigrationTrace.reset()
         database.failDdlCalls += 2
@@ -558,7 +1156,7 @@ class MigrationRunServiceTest {
                 tag(53, VersionItemSecond.value, MIGRATION_TAG_TYPE),
                 tag(54, VersionItemThird.value, MIGRATION_TAG_TYPE),
             ),
-            rows(id = VERSION_ID, tagId = 51),
+            rows(id = VERSION_ID, tagId = 51, status = STATUS_MIGRATE_COMPLETED),
             historyRows(
                 history(61, 52, VERSION_ID),
                 history(62, 53, VERSION_ID),
@@ -576,7 +1174,8 @@ class MigrationRunServiceTest {
         assertTrue(database.dmlCalls.none { it.sql.contains("DELETE", true) &&
             it.sql.contains("system_migration_version", true) })
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
+        assertEquals(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID), database.dmlCalls.first().parameters)
     }
 
     @Test
@@ -594,19 +1193,19 @@ class MigrationRunServiceTest {
         assertTrue(VersionMigrationTrace.events.isEmpty())
         assertEquals(0, database.dmlCount)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
     }
 
     @Test
     fun `transactionDown rolls back when deleting anything other than exactly one Version`() {
         VersionMigrationTrace.reset()
-        database.respondUpdateCounts(1, 1, 0)
+        database.respondUpdateCounts(1, 1, 1, 0)
         database.respond(
             tagRows(
                 tag(51, VersionTag.value, VERSION_TAG_TYPE),
                 tag(52, VersionItemFirst.value, MIGRATION_TAG_TYPE),
             ),
-            rows(id = VERSION_ID, tagId = 51),
+            rows(id = VERSION_ID, tagId = 51, status = STATUS_MIGRATE_COMPLETED),
             historyRows(history(61, 52, VERSION_ID)),
             rows(id = 52, tagType = MIGRATION_TAG_TYPE), rows(id = 61, versionId = VERSION_ID), emptyList(),
         )
@@ -616,7 +1215,7 @@ class MigrationRunServiceTest {
         assertIs<ExecuteResult.Failure>(result)
         assertEquals(listOf("down:first"), VersionMigrationTrace.events)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
         assertTrue(database.dmlCalls.last().sql.contains("system_migration_version", true))
         assertEquals(listOf(VERSION_ID), database.dmlCalls.last().parameters)
     }
@@ -637,11 +1236,14 @@ class MigrationRunServiceTest {
         assertEquals(1, database.dmlCalls.count {
             it.sql.contains("INSERT", true) && it.sql.contains("system_migration_version", true)
         })
+        val completionUpdate = database.dmlCalls.last()
+        assertTrue(completionUpdate.sql.contains("UPDATE", true))
+        assertEquals(listOf(STATUS_MIGRATE_COMPLETED, database.generatedIdForVersionInsert.toInt()), completionUpdate.parameters)
         assertTrue(database.dmlCalls.none {
             it.sql.contains("INSERT", true) && it.sql.contains("system_migration_tag", true) &&
                 it.parameters.firstOrNull() == VersionTag.value
         })
-        assertEquals(1, database.commitCount)
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
     }
 
@@ -684,9 +1286,12 @@ class MigrationRunServiceTest {
                 if (caseName == "wrong version") add(tag(55, "other_version", VERSION_TAG_TYPE))
             }
             val versions = if (caseName == "wrong version") {
-                listOf(mapOf("id" to VERSION_ID, "tagId" to 51), mapOf("id" to OTHER_VERSION_ID, "tagId" to 55))
+                listOf(
+                    mapOf("id" to VERSION_ID, "tagId" to 51, "status" to STATUS_MIGRATE_COMPLETED),
+                    mapOf("id" to OTHER_VERSION_ID, "tagId" to 55, "status" to STATUS_MIGRATE_COMPLETED),
+                )
             } else {
-                listOf(mapOf("id" to VERSION_ID, "tagId" to 51))
+                listOf(mapOf("id" to VERSION_ID, "tagId" to 51, "status" to STATUS_MIGRATE_COMPLETED))
             }
             database.respond(
                 tagRows(*tags.toTypedArray()),
@@ -709,7 +1314,7 @@ class MigrationRunServiceTest {
             assertTrue(VersionMigrationTrace.events.isEmpty(), caseName)
             assertTrue(database.dmlCalls.isEmpty(), caseName)
             assertEquals(0, database.commitCount, caseName)
-            assertEquals(1, database.rollbackCount, caseName)
+            assertEquals(0, database.rollbackCount, caseName)
         }
     }
 
@@ -722,7 +1327,7 @@ class MigrationRunServiceTest {
                 tag(51, VersionTag.value, VERSION_TAG_TYPE),
                 tag(52, VersionItemFirst.value, MIGRATION_TAG_TYPE),
             ),
-            rows(id = VERSION_ID, tagId = 51),
+            rows(id = VERSION_ID, tagId = 51, status = STATUS_MIGRATE_COMPLETED),
             historyRows(history(61, 52, VERSION_ID)),
             rows(id = 52, tagType = MIGRATION_TAG_TYPE),
             rows(id = 61, versionId = VERSION_ID),
@@ -741,7 +1346,7 @@ class MigrationRunServiceTest {
 
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(up).result)
         assertEquals(listOf("down:first", "up:first"), VersionMigrationTrace.events)
-        assertEquals(2, database.commitCount)
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertEquals(2, database.dmlCalls.count {
             it.sql.contains("system_migration_version", true) && it.sql.contains("DELETE", true)
@@ -758,7 +1363,7 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `transaction preparation failure is reported before starting a child transaction`() {
+    fun `transaction preparation failure is reported before executing on the supplied scope`() {
         VersionMigrationTrace.reset()
 
         val result = versionService(versionConfiguration(firstRegistration, versionName = "another_version"))
@@ -774,7 +1379,51 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `migrate runs all pending Versions in ascending order with one transaction each`() {
+    fun `version transaction rethrows original Error from an already Fatal Scope`() {
+        val fatal = AssertionError("Scope is already fatal")
+        scope.recordFatal(fatal)
+        val service = MigrationVersionTransactionService(versionConfiguration(firstRegistration))
+
+        val thrown = assertFailsWith<AssertionError> {
+            service.transactionUp(scope, VersionTag)
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, scope.fatalError)
+        assertSame(fatal, scope.firstFailure)
+        assertTrue(database.events.isEmpty())
+
+        val rollbackThrown = assertFailsWith<AssertionError> {
+            service.transactionDown(scope, VersionTag)
+        }
+        assertSame(fatal, rollbackThrown)
+        assertTrue(database.events.isEmpty())
+    }
+
+    @Test
+    fun `orchestration rethrows original Error from an already Fatal Scope`() {
+        val fatal = AssertionError("Scope is already fatal")
+        scope.recordFatal(fatal)
+        val controller = MigrationController(orchestrationConfiguration())
+
+        val thrown = assertFailsWith<AssertionError> {
+            controller.migrate(scope)
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, scope.fatalError)
+        assertSame(fatal, scope.firstFailure)
+        assertTrue(database.events.isEmpty())
+
+        val rollbackThrown = assertFailsWith<AssertionError> {
+            controller.rollback(scope)
+        }
+        assertSame(fatal, rollbackThrown)
+        assertTrue(database.events.isEmpty())
+    }
+
+    @Test
+    fun `migrate runs all pending Versions in ascending order on the supplied scope`() {
         VersionMigrationTrace.reset()
         database.respond(*emptyReadResponses())
         val orchestration = MigrationController(orchestrationConfiguration())
@@ -788,21 +1437,173 @@ class MigrationRunServiceTest {
             listOf("up:first", "up:second", "up:third", "up:fourth", "up:fifth"),
             VersionMigrationTrace.events,
         )
-        assertEquals(4, database.commitCount) // Includes the configured empty Version.
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
-        assertEquals(4, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
+        assertEquals(8, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
         assertEquals(1, database.connectionBuildCount)
-        assertEquals(4, database.autoCommitFalseCount)
-        assertEquals(4, database.autoCommitRestoreCount)
+        assertEquals(0, database.autoCommitFalseCount)
+        assertEquals(0, database.autoCommitRestoreCount)
         assertEquals(1, database.connectionCloseCount)
         assertEquals(1, database.events.count { it == "lock-acquire" })
         assertEquals(1, database.events.count { it == "lock-release" })
         val events = database.events
         val firstRead = events.indexOfFirst { it.startsWith("read:") }
-        val lastCommit = events.indexOfLast { it == "commit" }
+        val lastVersionUpdate = events.indexOfLast {
+            it.startsWith("dml:") && it.contains("UPDATE", true) && it.contains("system_migration_version", true)
+        }
         assertTrue(events.indexOf("lock-acquire") < firstRead)
-        assertTrue(lastCommit < events.indexOf("lock-release"))
+        assertTrue(lastVersionUpdate < events.indexOf("lock-release"))
         assertTrue(events.indexOf("lock-release") < events.indexOf("connection-close"))
+    }
+
+    @Test
+    fun `migrate preflights every selected Version tag before writing the first marker`() {
+        VersionMigrationTrace.reset()
+        val firstVersion = migrationConfig {
+            migrationVersion(VersionTagOne) { migration<VersionFirstMigration>() }
+        }.registrations.single()
+        val configuration = MigrationConfiguration(
+            listOf(
+                firstVersion,
+                MigrationVersion("tagless_version", listOf(SingleMigration(thirdRegistration))),
+            ),
+        )
+        database.respond(*emptyReadResponses())
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(configuration).migrate(scope)
+        }
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("no valid MigrationVersionTag"))
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.executedSql.none { it.contains("CREATE TABLE", ignoreCase = true) })
+        assertEquals(3, database.events.count { it.startsWith("read:") })
+        assertEquals(0, database.commitCount)
+        assertEquals(0, database.rollbackCount)
+    }
+
+    @Test
+    fun `migrate prepares every selected Migration before the first Version marker and reuses each instance`() {
+        val configuration = migrationConfig {
+            migrationVersion(PreparedVersionOne) { migration<PreparedFirstMigration>() }
+            migrationVersion(PreparedVersionTwo) { migration<PreparedSecondMigration>() }
+        }
+        // Configuration registration resolves identity by constructing each type once; count only
+        // the distinct runtime instances prepared by the orchestration path below.
+        PreparedOrchestrationTrace.reset()
+        database.onVersionWrite = { PreparedOrchestrationTrace.events += "marker" }
+        database.respond(*emptyReadResponses())
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(configuration).migrate(scope)
+        }
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        val firstMarker = PreparedOrchestrationTrace.events.indexOf("marker")
+        assertTrue(firstMarker >= 0)
+        assertTrue(PreparedOrchestrationTrace.events.indexOf("constructor:first") < firstMarker)
+        assertTrue(PreparedOrchestrationTrace.events.indexOf("constructor:second") < firstMarker)
+        assertEquals(1, PreparedOrchestrationTrace.events.count { it == "constructor:first" })
+        assertEquals(1, PreparedOrchestrationTrace.events.count { it == "constructor:second" })
+        assertEquals(
+            listOf("up:first", "up:second"),
+            PreparedOrchestrationTrace.events.filter { it.startsWith("up:") },
+        )
+        assertSame(
+            PreparedOrchestrationTrace.constructedInstances.getValue("first"),
+            PreparedOrchestrationTrace.executedInstances.getValue("first"),
+        )
+        assertSame(
+            PreparedOrchestrationTrace.constructedInstances.getValue("second"),
+            PreparedOrchestrationTrace.executedInstances.getValue("second"),
+        )
+    }
+
+    @Test
+    fun `constructor failure in the last selected Version prevents all markers and Migration execution`() {
+        val configuration = migrationConfig {
+            migrationVersion(PreparedVersionOne) { migration<PreparedFirstMigration>() }
+            migrationVersion(PreparedVersionTwo) { migration<PreparedFailingMigration>() }
+        }
+        PreparedOrchestrationTrace.reset()
+        PreparedOrchestrationTrace.failingConstructorEnabled = true
+        database.onVersionWrite = { PreparedOrchestrationTrace.events += "marker" }
+        database.respond(*emptyReadResponses())
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(configuration).migrate(scope)
+        }
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertSame(PreparedOrchestrationTrace.constructorFailure, failure)
+        assertEquals(
+            listOf("constructor:first", "constructor:failing"),
+            PreparedOrchestrationTrace.events,
+        )
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+        assertTrue(PreparedOrchestrationTrace.executedInstances.isEmpty())
+    }
+
+    @Test
+    fun `rollback prepares all selected Migrations and reuses the same instances in reverse order`() {
+        val configuration = migrationConfig {
+            migrationVersion(PreparedVersionOne) {
+                migration<PreparedFirstMigration>()
+                migration<PreparedSecondMigration>()
+            }
+        }
+        PreparedOrchestrationTrace.reset()
+        database.onVersionWrite = { PreparedOrchestrationTrace.events += "marker" }
+        val tags = listOf(
+            tag(501, PreparedVersionOne.value, VERSION_TAG_TYPE),
+            tag(601, PreparedFirstItem.value, MIGRATION_TAG_TYPE),
+            tag(602, PreparedSecondItem.value, MIGRATION_TAG_TYPE),
+        )
+        val versions = listOf(
+            mapOf("id" to 701, "tagId" to 501, "status" to STATUS_MIGRATE_COMPLETED),
+        )
+        val migrations = listOf(
+            history(801, 601, 701),
+            history(802, 602, 701),
+        )
+        database.respond(
+            tags, versions, migrations, // Orchestrator History Snapshot.
+            tags, versions, migrations, // Live Version History validation.
+            rows(id = 602, tagType = MIGRATION_TAG_TYPE),
+            rows(id = 802, versionId = 701),
+            emptyList(),
+            rows(id = 601, tagType = MIGRATION_TAG_TYPE),
+            rows(id = 801, versionId = 701),
+            emptyList(),
+        )
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(configuration).rollback(scope)
+        }
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        val firstMarker = PreparedOrchestrationTrace.events.indexOf("marker")
+        assertTrue(firstMarker >= 0)
+        assertTrue(PreparedOrchestrationTrace.events.indexOf("constructor:first") < firstMarker)
+        assertTrue(PreparedOrchestrationTrace.events.indexOf("constructor:second") < firstMarker)
+        assertEquals(
+            listOf("down:second", "down:first"),
+            PreparedOrchestrationTrace.events.filter { it.startsWith("down:") },
+        )
+        assertEquals(1, PreparedOrchestrationTrace.events.count { it == "constructor:first" })
+        assertEquals(1, PreparedOrchestrationTrace.events.count { it == "constructor:second" })
+        assertSame(
+            PreparedOrchestrationTrace.constructedInstances.getValue("first"),
+            PreparedOrchestrationTrace.executedInstances.getValue("first"),
+        )
+        assertSame(
+            PreparedOrchestrationTrace.constructedInstances.getValue("second"),
+            PreparedOrchestrationTrace.executedInstances.getValue("second"),
+        )
+        assertEquals(1, database.dmlCalls.count { it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true) })
     }
 
     @Test
@@ -817,8 +1618,8 @@ class MigrationRunServiceTest {
 
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
         assertEquals(listOf("up:first", "up:second", "up:third"), VersionMigrationTrace.events)
-        assertEquals(2, database.commitCount)
-        assertEquals(2, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
+        assertEquals(0, database.commitCount)
+        assertEquals(4, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
         assertEquals(1, database.connectionBuildCount)
     }
 
@@ -925,7 +1726,7 @@ class MigrationRunServiceTest {
         }
 
         assertSame(fatal, thrown)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
         assertTrue(database.events.indexOf("lock-acquire") < database.events.indexOf("lock-release"))
         assertTrue(database.events.indexOf("lock-release") < database.events.indexOf("connection-close"))
     }
@@ -943,8 +1744,12 @@ class MigrationRunServiceTest {
 
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
         assertEquals(listOf("down:fifth", "down:fourth"), VersionMigrationTrace.events)
-        assertEquals(1, database.commitCount)
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
+        val startUpdates = database.dmlCalls.filter {
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        }
+        assertEquals(listOf(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID_THREE)), startUpdates.map { it.parameters })
         val versionDeletes = database.dmlCalls.filter {
             it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true)
         }
@@ -966,7 +1771,14 @@ class MigrationRunServiceTest {
 
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
         assertEquals(listOf("down:fifth", "down:fourth", "down:third"), VersionMigrationTrace.events)
-        assertEquals(2, database.commitCount)
+        assertEquals(0, database.commitCount)
+        val startUpdates = database.dmlCalls.filter {
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        }
+        assertEquals(
+            listOf(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID_THREE), listOf(STATUS_ROLLBACK_STARTED, VERSION_ID_TWO)),
+            startUpdates.map { it.parameters },
+        )
         val versionDeletes = database.dmlCalls.filter {
             it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true)
         }
@@ -976,7 +1788,7 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `failed later Version rolls back only itself and keeps earlier Version committed`() {
+    fun `failed later Version leaves it started and keeps earlier Version completed`() {
         VersionMigrationTrace.reset()
         database.failDdlCalls += 2
         database.respond(*emptyReadResponses())
@@ -991,11 +1803,75 @@ class MigrationRunServiceTest {
 
         assertIs<ExecuteResult.Failure>(result)
         assertEquals(listOf("up:first", "up:third"), VersionMigrationTrace.events)
-        assertEquals(1, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.commitCount)
+        assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionBuildCount)
-        assertEquals(2, database.autoCommitFalseCount)
-        assertEquals(2, database.autoCommitRestoreCount)
+        assertEquals(0, database.autoCommitFalseCount)
+        assertEquals(0, database.autoCommitRestoreCount)
+        val statusUpdates = database.dmlCalls.filter {
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        }
+        assertEquals(1, statusUpdates.size)
+        assertEquals(STATUS_MIGRATE_COMPLETED, statusUpdates.single().parameters.first())
+    }
+
+    @Test
+    fun `migrate stops before writes when any persisted Version has incomplete status`() {
+        val history = withVersionStatus(
+            orchestrationHistory(appliedVersionCount = 2),
+            VERSION_ID_ONE,
+            status = 0,
+        )
+        val controller = MigrationController(orchestrationConfiguration())
+
+        assertIncompleteVersionBlocks(history, expectedStatus = 0) { scope ->
+            controller.migrate(scope)
+        }
+    }
+
+    @Test
+    fun `migrate to target checks incomplete persisted Versions outside the selected range`() {
+        val history = withVersionStatus(
+            orchestrationHistory(appliedVersionCount = 1),
+            VERSION_ID_ONE,
+            status = STATUS_ROLLBACK_STARTED,
+        )
+        val controller = MigrationController(orchestrationConfiguration())
+
+        // v1 is already applied and lies before the pending v2-v3 selection.
+        assertIncompleteVersionBlocks(history, expectedStatus = STATUS_ROLLBACK_STARTED) { scope ->
+            controller.migrate(VersionTagThree, scope)
+        }
+    }
+
+    @Test
+    fun `rollback checks incomplete persisted Versions outside the latest selected Version`() {
+        val history = withVersionStatus(
+            orchestrationHistory(appliedVersionCount = 3),
+            VERSION_ID_TWO,
+            status = 2,
+        )
+        val controller = MigrationController(orchestrationConfiguration())
+
+        // rollback() would select only v3; the incomplete v2 must still stop the command.
+        assertIncompleteVersionBlocks(history, expectedStatus = 2) { scope ->
+            controller.rollback(scope)
+        }
+    }
+
+    @Test
+    fun `rollback to target checks incomplete target Version excluded from down selection`() {
+        val history = withVersionStatus(
+            orchestrationHistory(appliedVersionCount = 2),
+            VERSION_ID_ONE,
+            status = STATUS_ROLLBACK_STARTED,
+        )
+        val controller = MigrationController(orchestrationConfiguration())
+
+        // rollback(v1) selects v2 for DOWN and excludes v1, but the global gate still checks v1.
+        assertIncompleteVersionBlocks(history, expectedStatus = STATUS_ROLLBACK_STARTED) { scope ->
+            controller.rollback(VersionTagOne, scope)
+        }
     }
 
     @Test
@@ -1064,7 +1940,7 @@ class MigrationRunServiceTest {
         }
         val tag = mapOf("id" to 51, "tagName" to VersionTagOne.value, "tagType" to VERSION_TAG_TYPE)
         val item = mapOf("id" to 71, "tagName" to UnsupportedDownItem.value, "tagType" to MIGRATION_TAG_TYPE)
-        val version = mapOf("id" to 101, "tagId" to 51)
+        val version = mapOf("id" to 101, "tagId" to 51, "status" to STATUS_MIGRATE_COMPLETED)
         val applied = mapOf("id" to 801, "tagId" to 71, "versionId" to 101)
         database.respond(
             listOf(tag, item), listOf(version), listOf(applied), // Current-version validation.
@@ -1081,8 +1957,12 @@ class MigrationRunServiceTest {
         assertIs<UnsupportedOperationException>(failure.exception)
         assertEquals(listOf("down:unsupported"), VersionMigrationTrace.events)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
         assertTrue(database.dmlCalls.none { it.sql.contains("DELETE", true) })
+        val startUpdate = database.dmlCalls.single {
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        }
+        assertEquals(listOf(STATUS_ROLLBACK_STARTED, 101), startUpdate.parameters)
     }
 
     @Test
@@ -1127,9 +2007,9 @@ class MigrationRunServiceTest {
 
         val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.migrate(scope)).result)
-            assertEquals(4, database.dmlCount)
+            assertEquals(5, database.dmlCount)
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.migrate(scope)).result)
-            assertEquals(4, database.dmlCount)
+            assertEquals(5, database.dmlCount)
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.rollback(scope)).result)
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.rollback(scope)).result)
             ExecuteResult.Success(true)
@@ -1137,13 +2017,13 @@ class MigrationRunServiceTest {
 
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
         assertEquals(listOf("up:first", "down:first"), VersionMigrationTrace.events)
-        assertEquals(2, database.commitCount)
+        assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionBuildCount)
     }
 
     @Test
-    fun `empty Version is persisted and committed instead of silently skipped`() {
+    fun `empty Version is persisted and marked completed instead of silently skipped`() {
         database.respond(*emptyReadResponses())
         val configuration = migrationConfig { migrationVersion(VersionTagOne) { } }
 
@@ -1152,8 +2032,10 @@ class MigrationRunServiceTest {
         }
 
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
-        assertEquals(1, database.commitCount)
-        assertEquals(1, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
+        assertEquals(0, database.commitCount)
+        assertEquals(2, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
+        val versionUpdate = database.dmlCalls.single { it.sql.contains("UPDATE", true) }
+        assertEquals(listOf(STATUS_MIGRATE_COMPLETED, database.generatedIdForVersionInsert.toInt()), versionUpdate.parameters)
         assertEquals(0, database.executedSql.count { it.contains("CREATE TABLE", true) })
     }
 
@@ -1196,7 +2078,7 @@ class MigrationRunServiceTest {
             }
         }
         val versions = definitions.take(appliedVersionCount).map { (version, _) ->
-            mapOf("id" to version.third, "tagId" to version.second)
+            mapOf("id" to version.third, "tagId" to version.second, "status" to STATUS_MIGRATE_COMPLETED)
         }
         var historyId = 700
         val migrations = definitions.take(appliedVersionCount).flatMap { (version, items) ->
@@ -1207,16 +2089,71 @@ class MigrationRunServiceTest {
         return OrchestrationHistory(tags, versions, migrations)
     }
 
+    private fun withVersionStatus(
+        history: OrchestrationHistory,
+        versionId: Int,
+        status: Int,
+    ): OrchestrationHistory {
+        val matchingVersions = history.versions.filter { it["id"] == versionId }
+        assertEquals(1, matchingVersions.size, "Expected exactly one fixture Version row with id $versionId")
+        return history.copy(
+            versions = history.versions.map { version ->
+                if (version["id"] == versionId) version + ("status" to status) else version
+            },
+        )
+    }
+
+    private fun assertIncompleteVersionBlocks(
+        history: OrchestrationHistory,
+        expectedStatus: Int,
+        command: (OperationExecutionScope) -> ExecuteResult<Boolean>,
+    ) {
+        VersionMigrationTrace.reset()
+        database.respond(history.tags, history.versions, history.migrations)
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection(command)
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("non-completed status $expectedStatus"), failure.message)
+        assertTrue(VersionMigrationTrace.events.isEmpty(), "No Migration UP/DOWN method may execute")
+
+        // DML covers Version markers, Version/ITEM Tags, and Migration History writes/deletes.
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.dmlCalls.none { it.sql.contains("system_migration_version", ignoreCase = true) })
+        assertEquals(0, database.insertHistoryCount)
+        assertEquals(0, database.deleteHistoryCount)
+        assertEquals(0, database.deleteTagCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") }, "No Schema operation may execute")
+        assertTrue(database.executedSql.none { it.contains("CREATE TABLE", ignoreCase = true) })
+
+        // GET_LOCK is expected; the full History read must follow it and complete before release.
+        val readIndexes = database.events.indices.filter { database.events[it].startsWith("read:") }
+        assertEquals(3, readIndexes.size, "The complete Tag/Version/History snapshot must be read")
+        val lockAcquire = database.events.indexOf("lock-acquire")
+        val lockRelease = database.events.indexOf("lock-release")
+        val connectionClose = database.events.indexOf("connection-close")
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertEquals(1, database.events.count { it == "lock-release" })
+        assertTrue(lockAcquire >= 0 && lockAcquire < readIndexes.first())
+        assertTrue(readIndexes.last() < lockRelease)
+        assertTrue(lockRelease < connectionClose)
+        assertEquals(1, database.connectionCloseCount)
+        assertEquals(0, database.commitCount)
+        assertEquals(0, database.rollbackCount)
+    }
+
     private fun singleMigrationHistory(): OrchestrationHistory = OrchestrationHistory(
         tags = listOf(
             mapOf("id" to VERSION_TAG_ID_ONE, "tagName" to VersionTagOne.value, "tagType" to VERSION_TAG_TYPE),
             mapOf("id" to ITEM_TAG_ID_FIRST, "tagName" to VersionItemFirst.value, "tagType" to MIGRATION_TAG_TYPE),
         ),
-        versions = listOf(mapOf("id" to VERSION_ID_ONE, "tagId" to VERSION_TAG_ID_ONE)),
+        versions = listOf(
+            mapOf("id" to VERSION_ID_ONE, "tagId" to VERSION_TAG_ID_ONE, "status" to STATUS_MIGRATE_COMPLETED),
+        ),
         migrations = listOf(mapOf("id" to 700, "tagId" to ITEM_TAG_ID_FIRST, "versionId" to VERSION_ID_ONE)),
     )
 
-    /** Queues the initial preflight and each child transaction's reads in their execution order. */
+    /** Queues the initial preflight and each selected Version's reads in execution order. */
     private fun respondForRollback(history: OrchestrationHistory, descendingVersionNames: List<String>) {
         fun respondSnapshot() = database.respond(history.tags, history.versions, history.migrations)
         respondSnapshot() // Preflight validates complete history before the first rollback.
@@ -1227,7 +2164,7 @@ class MigrationRunServiceTest {
             VersionTagFour.value to emptyList(),
         )
         descendingVersionNames.forEach { versionName ->
-            respondSnapshot() // Per-Version transaction validation.
+            respondSnapshot() // Per-Version history validation.
             val versionId = history.versions.first { it["tagId"] == when (versionName) {
                 VersionTagOne.value -> VERSION_TAG_ID_ONE
                 VersionTagTwo.value -> VERSION_TAG_ID_TWO
@@ -1271,7 +2208,7 @@ class MigrationRunServiceTest {
         assertIs<ExecuteResult.Failure>(outerResult)
         assertEquals(1, database.connectionBuildCount)
         assertEquals(0, database.commitCount)
-        assertEquals(1, database.rollbackCount)
+        assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionCloseCount)
     }
 
@@ -1307,7 +2244,7 @@ class MigrationRunServiceTest {
         )
     }
 
-    /** Parent owns the Connection; each Migration Version owns one child transaction. */
+    /** The caller-owned Operation scope supplies the Connection for each Version operation. */
     private class VersionTransactionHarness(
         private val service: MigrationVersionTransactionService,
         private val callerExecutor: OperationExecutionExecutor,
@@ -1339,12 +2276,14 @@ class MigrationRunServiceTest {
         tagType: Int? = null,
         versionId: Int? = null,
         otherVersionId: Int? = null,
+        status: Int? = null,
     ): List<Map<String, Any?>> = listOfNotNull(
         mapOfNotNull(
             "id" to id,
             "tagId" to tagId,
             "tagType" to tagType,
             "versionId" to versionId,
+            "status" to status,
         ),
         otherVersionId?.let { mapOf("id" to OTHER_APPLIED_ID, "versionId" to it) },
     )
@@ -1380,6 +2319,7 @@ class MigrationRunServiceTest {
 
         val readParameters = mutableListOf<List<Any?>>()
         val dmlCalls = mutableListOf<DmlCall>()
+        var onVersionWrite: (() -> Unit)? = null
         var connectionBuildCount = 0
         private var connectionAutoCommit = true
         var autoCommitFalseCount = 0
@@ -1506,6 +2446,7 @@ class MigrationRunServiceTest {
             dmlCount++
             val lower = sql.lowercase()
             dmlCalls += DmlCall(sql, values)
+            if (lower.contains("system_migration_version")) onVersionWrite?.invoke()
             if (lower.contains("insert into") && lower.contains("system_migration_version")) {
                 lastGeneratedId = nextGeneratedId++
                 generatedIdForVersionInsert = lastGeneratedId
@@ -1590,6 +2531,8 @@ class MigrationRunServiceTest {
     }
 
     private companion object {
+        const val STATUS_ROLLBACK_STARTED = 4
+        const val STATUS_MIGRATE_COMPLETED = 3
         const val VERSION_ID = 7
         const val VERSION_TAG_TYPE = 0
         const val MIGRATION_TAG_ID = 21
@@ -1657,6 +2600,74 @@ private class SampleMigration : Migration(MigrationItem) {
     }
 }
 
+private class PreparedInstanceMigration : Migration(MigrationItem) {
+    init {
+        PreparedMigrationTrace.constructorCalls++
+        PreparedMigrationTrace.constructedInstance = this
+    }
+
+    override fun up(): MigrationDefinition {
+        PreparedMigrationTrace.upCalls++
+        PreparedMigrationTrace.upInstance = this
+        PreparedMigrationTrace.upFailure?.let { throw it }
+        return versionDefinition("prepared_instance")
+    }
+
+    override fun down(): MigrationDefinition {
+        PreparedMigrationTrace.downCalls++
+        PreparedMigrationTrace.downInstance = this
+        PreparedMigrationTrace.downFailure?.let { throw it }
+        return versionDefinition("prepared_instance")
+    }
+}
+
+private class ConstructorFailingMigration : Migration(MigrationItem) {
+    init {
+        throw PreparationFailures.constructorFailure
+    }
+
+    override fun up(): MigrationDefinition = error("Preparation must not run up()")
+
+    override fun down(): MigrationDefinition = error("Preparation must not run down()")
+}
+
+private class FatalConstructorMigration : Migration(MigrationItem) {
+    init {
+        throw PreparationFailures.constructorFatal
+    }
+
+    override fun up(): MigrationDefinition = error("Preparation must not run up()")
+
+    override fun down(): MigrationDefinition = error("Preparation must not run down()")
+}
+
+private object PreparationFailures {
+    val constructorFailure = IllegalStateException("constructor failed")
+    val constructorFatal = AssertionError("fatal constructor failure")
+}
+
+private object PreparedMigrationTrace {
+    var constructorCalls = 0
+    var constructedInstance: PreparedInstanceMigration? = null
+    var upCalls = 0
+    var upInstance: PreparedInstanceMigration? = null
+    var upFailure: Throwable? = null
+    var downCalls = 0
+    var downInstance: PreparedInstanceMigration? = null
+    var downFailure: Throwable? = null
+
+    fun reset() {
+        constructorCalls = 0
+        constructedInstance = null
+        upCalls = 0
+        upInstance = null
+        upFailure = null
+        downCalls = 0
+        downInstance = null
+        downFailure = null
+    }
+}
+
 private object VersionTag : MigrationVersionTag {
     override val value: String = "version_transaction_test"
 }
@@ -1699,6 +2710,83 @@ private object VersionItemFifth : MigrationItemTag {
 
 private object UnsupportedDownItem : MigrationItemTag {
     override val value: String = "unsupported_down_item"
+}
+
+private object PreparedFirstItem : MigrationItemTag {
+    override val value: String = "prepared_orchestration_first"
+}
+
+private object PreparedSecondItem : MigrationItemTag {
+    override val value: String = "prepared_orchestration_second"
+}
+
+private object PreparedFailingItem : MigrationItemTag {
+    override val value: String = "prepared_orchestration_failing"
+}
+
+private object PreparedVersionOne : MigrationVersionTag {
+    override val value: String = "prepared_orchestration_v1"
+}
+
+private object PreparedVersionTwo : MigrationVersionTag {
+    override val value: String = "prepared_orchestration_v2"
+}
+
+private object PreparedOrchestrationTrace {
+    val events = mutableListOf<String>()
+    val constructedInstances = mutableMapOf<String, Migration>()
+    val executedInstances = mutableMapOf<String, Migration>()
+    var failingConstructorEnabled = false
+    val constructorFailure = IllegalStateException("late Version Migration constructor failed")
+
+    fun constructed(name: String, migration: Migration) {
+        events += "constructor:$name"
+        constructedInstances[name] = migration
+        if (name == "failing" && failingConstructorEnabled) throw constructorFailure
+    }
+
+    fun executed(direction: String, name: String, migration: Migration): MigrationDefinition {
+        events += "$direction:$name"
+        executedInstances[name] = migration
+        return versionDefinition("prepared_orchestration_$name")
+    }
+
+    fun reset() {
+        events.clear()
+        constructedInstances.clear()
+        executedInstances.clear()
+        failingConstructorEnabled = false
+    }
+}
+
+private class PreparedFirstMigration : Migration(PreparedFirstItem) {
+    init {
+        PreparedOrchestrationTrace.constructed("first", this)
+    }
+
+    override fun up(): MigrationDefinition = PreparedOrchestrationTrace.executed("up", "first", this)
+
+    override fun down(): MigrationDefinition = PreparedOrchestrationTrace.executed("down", "first", this)
+}
+
+private class PreparedSecondMigration : Migration(PreparedSecondItem) {
+    init {
+        PreparedOrchestrationTrace.constructed("second", this)
+    }
+
+    override fun up(): MigrationDefinition = PreparedOrchestrationTrace.executed("up", "second", this)
+
+    override fun down(): MigrationDefinition = PreparedOrchestrationTrace.executed("down", "second", this)
+}
+
+private class PreparedFailingMigration : Migration(PreparedFailingItem) {
+    init {
+        PreparedOrchestrationTrace.constructed("failing", this)
+    }
+
+    override fun up(): MigrationDefinition = error("UP must not execute after failed global preparation")
+
+    override fun down(): MigrationDefinition = error("DOWN must not execute after failed global preparation")
 }
 
 private object VersionMigrationTrace {

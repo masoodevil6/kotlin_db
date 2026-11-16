@@ -11,10 +11,12 @@ import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
 import gog.my_project.data_base_migration.core.tags.MigrationTagTypeCodes
+import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryState
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
+import model.version_history.MigrationHistoryVersion
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -76,6 +78,25 @@ class MigrationCurrentVersionServiceTest {
     }
 
     @Test
+    fun validatedHistoryStateRetainsSnapshotAndCurrentVersionFromOneRead() {
+        val jdbc = HistoryJdbc(history(appliedVersionCount = 2))
+        val scope = newScope(jdbc.connection)
+
+        val state = assertNotNull(
+            assertIs<ExecuteResult.Success<MigrationVersionHistoryState>>(
+                service.validatedHistoryState(scope),
+            ).result,
+        )
+
+        assertEquals(listOf("v1", "v2"), state.appliedVersions.map { it.version.name })
+        assertEquals("v2", state.currentVersion?.version?.name)
+        assertEquals(listOf(100, 200), state.snapshot.versions.map { it.id })
+        assertEquals(listOf(1000, 1001), state.snapshot.migrations.map { it.id })
+        assertEquals(3, jdbc.queryCount)
+        assertEquals(0, jdbc.dmlCount)
+    }
+
+    @Test
     fun invalidHistoryReturnsLatchedFailure() {
         val valid = history(appliedVersionCount = 1)
         val invalid = valid.copy(
@@ -86,6 +107,18 @@ class MigrationCurrentVersionServiceTest {
         val failure = assertIs<ExecuteResult.Failure>(invocation.result)
         assertTrue(failure.exception.message.orEmpty().contains("references missing Version"))
         assertSame(failure.exception, invocation.scope.firstFailure)
+    }
+
+    @Test
+    fun incompleteVersionStatusIsRejectedInsteadOfBecomingCurrent() {
+        val valid = history(appliedVersionCount = 1)
+        val incomplete = valid.copy(versions = valid.versions.map { it + ("status" to 0) })
+        val invocation = invoke(incomplete)
+
+        val failure = assertIs<ExecuteResult.Failure>(invocation.result)
+        assertTrue(failure.exception.message.orEmpty().contains("non-completed status 0"))
+        assertSame(failure.exception, invocation.scope.firstFailure)
+        assertEquals(3, invocation.jdbc.queryCount)
     }
 
     @Test
@@ -181,7 +214,11 @@ class MigrationCurrentVersionServiceTest {
             }
         }
         val versions = versionRows.take(appliedVersionCount).map { row ->
-            mapOf("id" to row.versionId, "tagId" to row.tagId)
+            mapOf(
+                "id" to row.versionId,
+                "tagId" to row.tagId,
+                "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED,
+            )
         }
         val applied = versionRows.take(appliedVersionCount).mapIndexed { index, row ->
             mapOf("id" to 1000 + index, "tagId" to row.itemTagId, "versionId" to row.versionId)

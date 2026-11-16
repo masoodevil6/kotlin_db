@@ -8,7 +8,7 @@ import gog.my_project.data_base_operation.executor.transaction.OperationExecutio
 import gog.my_project.data_base_schema.Schema
 
 /** Creates the system migration storage tables without running user migrations. */
-class SystemMigrationInitializer {
+internal class SystemMigrationInitializer {
     /** Creates tag, version, then migration storage in the caller's Operation scope. */
     fun init(scope: OperationExecutionScope): ExecuteResult<Boolean> = safely(scope) {
         val tagResult = Schema.execute(

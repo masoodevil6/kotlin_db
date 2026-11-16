@@ -25,6 +25,17 @@ object SystemMigrationVersionTable {
             notNull()
         }
         addColumn {
+            name("status")
+            dataType(SchemaDataType.IntType)
+            notNull()
+            default(0)
+        }
+        addColumn {
+            name("message")
+            dataType(SchemaDataType.TextType)
+            nullable()
+        }
+        addColumn {
             name("created_at")
             dataType(SchemaDataType.TimestampType())
             nullable()

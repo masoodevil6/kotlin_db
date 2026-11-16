@@ -11,7 +11,8 @@ repositories {
 }
 
 dependencies {
-    api(project(":data_base:migration:executor"))
+    implementation(project(":data_base:migration:executor"))
+    api(project(":data_base:migration:api"))
     api(project(":data_base:manager"))
 
     testImplementation(kotlin("test"))

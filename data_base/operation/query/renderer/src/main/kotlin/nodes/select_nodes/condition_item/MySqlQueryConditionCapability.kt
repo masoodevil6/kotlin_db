@@ -26,7 +26,7 @@ class MySqlQueryConditionCapability :
         val conditionOperation: String? = ast.metadata.conditionOperation;
         val conditionSideRight = ast.conditionSideRight;
 
-        val conditionSideLeftStr = ctx.registry.render(conditionSideLeft , ctx.dialect , QueryColumnBaseData());
+        val conditionSideLeftStr = ctx.registry.render(conditionSideLeft , ctx.dialect , QueryColumnBaseData(_withAlias = dataClass?._withAlias ?: true));
         if (conditionSideLeftStr == null) return null
 
         val conditionSideRightStr =

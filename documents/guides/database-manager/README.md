@@ -1,6 +1,6 @@
 # Database Manager و چند پایگاه داده
 
-این راهنما API مصرف‌کنندهٔ `:data_base:manager` را معرفی می‌کند. برنامه از `DatabaseManager` برای ثبت و مالکیت پایگاه‌های داده استفاده می‌کند و در کد مصرف‌کننده بهتر است آن را با قرارداد `DatabaseManagerApi` نگه دارد. هر registration با یک `DatabaseKey` انتخاب می‌شود و `DatabaseHandleApi` مسیرهای Connection Scope، Transaction Scope و Migration همان پایگاه داده را ارائه می‌کند. Query Builder عملیات Query را می‌سازد و اجرا می‌کند؛ Schema برای تعریف DDL استفاده می‌شود و اعمال آن از طریق Migration انجام می‌گیرد.
+این راهنما API مصرف‌کنندهٔ `:data_base:manager` را معرفی می‌کند. برنامه از `DatabaseManager` برای ثبت پایگاه‌های داده استفاده می‌کند و در کد مصرف‌کننده بهتر است آن را با قرارداد `DatabaseManagerApi` نگه دارد. هر registration با یک `DatabaseKey` انتخاب می‌شود و Handle مسیرهای Connection و Transaction همان پایگاه داده را ارائه می‌کند. برای افزودن Migration به Handle، به Aggregate ماژول `:data_base:migration` وابسته شوید؛ این ماژول extension عمومی `DatabaseHandleApi.migration` را عرضه می‌کند. Query Builder عملیات Query را می‌سازد و اجرا می‌کند؛ Schema برای تعریف DDL استفاده می‌شود و اعمال آن از مسیر Migration انجام می‌گیرد.
 
 هر راهنما روی بخشی از گردش کار تمرکز دارد:
 

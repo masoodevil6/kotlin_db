@@ -103,8 +103,8 @@ class MigrationFacadeTest {
         val secondReport = assertIs<ExecuteResult.Success<MigrationStatusReport>>(second).result
         assertEquals(listOf("MainVersion"), firstReport?.versions?.map { it.name })
         assertEquals(listOf("AnalyticsVersion"), secondReport?.versions?.map { it.name })
-        assertEquals(1, firstJdbc.queryCount)
-        assertEquals(1, secondJdbc.queryCount)
+        assertEquals(2, firstJdbc.queryCount)
+        assertEquals(2, secondJdbc.queryCount)
     }
 
     @Test
@@ -128,15 +128,15 @@ class MigrationFacadeTest {
 
         val result = migrationFacade(configuration("v1"), scope) {
             status()
-            assertEquals(1, jdbc.queryCount, "status must finish before the next block statement")
+            assertEquals(2, jdbc.queryCount, "status must finish before the next block statement")
 
             current()
-            assertEquals(4, jdbc.queryCount, "current must finish before the block returns")
+            assertEquals(5, jdbc.queryCount, "current must finish before the block returns")
             blockResult
         }
 
         assertSame(blockResult, result)
-        assertEquals(4, jdbc.queryCount)
+        assertEquals(5, jdbc.queryCount)
         assertEquals(null, scope.firstFailure)
     }
 

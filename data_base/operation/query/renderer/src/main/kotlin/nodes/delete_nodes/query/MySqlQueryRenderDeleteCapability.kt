@@ -32,8 +32,8 @@ class MySqlQueryRenderDeleteCapability : IQueryRenderDeleteCapability, IParamete
         }
 
         return  " ${ctx.dialect._prefixDelete} $targetsStr" +
-                " ${ctx.registry.render(queryBuilderTable , ctx.dialect  , QueryTableData(_withPrefix = true)) } " +
-                " ${ctx.registry.render(queryBuilderWhere , ctx.dialect  , QueryWhereData()) } ";
+                " ${ctx.registry.render(queryBuilderTable , ctx.dialect  , QueryTableData(_withAlias = false)) } " +
+                " ${ctx.registry.render(queryBuilderWhere , ctx.dialect  , QueryWhereData(_withAlias = false)) } ";
     }
 
 }

@@ -6,6 +6,7 @@ import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusRow
 import model.migration_status.MigrationStatusSnapshot
+import model.version_history.MigrationHistoryVersion
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -35,18 +36,42 @@ class MigrationStatusReaderTest {
             appliedVersionTagName = null,
             appliedVersionTagType = null,
         )
-        val invocation = invoke(listOf(row))
+        val invocation = invoke(
+            rows = listOf(row),
+            versionRows = listOf(mapOf("id" to 41, "tagId" to 7, "status" to 3)),
+        )
 
         val snapshot = assertIs<ExecuteResult.Success<MigrationStatusSnapshot>>(invocation.result).result
         assertEquals(
             toModel(row),
             assertIs<MigrationStatusSnapshot>(snapshot).rows.single(),
         )
-        assertEquals(1, invocation.jdbc.queryCount)
-        val sql = invocation.jdbc.sql.single().lowercase()
+        assertEquals(2, invocation.jdbc.queryCount)
+        assertEquals(
+            listOf(MigrationHistoryVersion(41, 7, 3)),
+            assertIs<MigrationStatusSnapshot>(snapshot).historyVersions,
+        )
+        val sql = invocation.jdbc.sql.first().lowercase()
         assertTrue(sql.contains("system_migration_tag_query"), sql)
-        assertTrue(sql.contains("system_migration_version_query"), sql)
         assertTrue(sql.contains("system_migration_query"), sql)
+        val versionSql = invocation.jdbc.sql[1].lowercase()
+        assertTrue(versionSql.contains("system_migration_version"), versionSql)
+        assertTrue(versionSql.contains("status"), versionSql)
+    }
+
+    @Test
+    fun `reads persisted version status through the supplied scope`() {
+        val invocation = invoke(
+            rows = listOf(statusRow(tagId = 7, tagName = "release-1", tagVersionId = 41)),
+            versionRows = listOf(mapOf("id" to 41, "tagId" to 7, "status" to 3)),
+        )
+
+        val snapshot = assertIs<MigrationStatusSnapshot>(
+            assertIs<ExecuteResult.Success<MigrationStatusSnapshot>>(invocation.result).result,
+        )
+        assertEquals(listOf(MigrationHistoryVersion(41, 7, 3)), snapshot.historyVersions)
+        assertEquals(2, invocation.jdbc.queryCount)
+        assertEquals(2, invocation.jdbc.sql.size)
     }
 
     @Test
@@ -87,6 +112,19 @@ class MigrationStatusReaderTest {
     }
 
     @Test
+    fun `snapshot defensively copies and protects persisted version status rows`() {
+        val version = MigrationHistoryVersion(7, 3, 3)
+        val source = mutableListOf(version)
+        val snapshot = MigrationStatusSnapshot.withHistoryVersions(emptyList(), source)
+        source.clear()
+
+        assertEquals(listOf(version), snapshot.historyVersions)
+        assertFailsWith<UnsupportedOperationException> {
+            (snapshot.historyVersions as MutableList).clear()
+        }
+    }
+
+    @Test
     fun `query failure is propagated without replacing its cause`() {
         val original = SQLException("status query failed")
         val invocation = invoke(emptyList(), queryFailure = original)
@@ -94,6 +132,16 @@ class MigrationStatusReaderTest {
         assertSame(original, assertIs<ExecuteResult.Failure>(invocation.result).exception)
         assertSame(original, invocation.scope.firstFailure)
         assertEquals(1, invocation.jdbc.queryCount)
+    }
+
+    @Test
+    fun `version status query failure is propagated without replacing its cause`() {
+        val original = SQLException("version status query failed")
+        val invocation = invoke(emptyList(), versionQueryFailure = original)
+
+        assertSame(original, assertIs<ExecuteResult.Failure>(invocation.result).exception)
+        assertSame(original, invocation.scope.firstFailure)
+        assertEquals(2, invocation.jdbc.queryCount)
     }
 
     @Test
@@ -130,8 +178,13 @@ class MigrationStatusReaderTest {
         assertEquals(0, invocation.jdbc.transactionControlCalls)
     }
 
-    private fun invoke(rows: List<Map<String, Any?>>, queryFailure: Throwable? = null): Invocation {
-        val jdbc = FakeJdbc(rows, queryFailure)
+    private fun invoke(
+        rows: List<Map<String, Any?>>,
+        versionRows: List<Map<String, Any?>> = emptyList(),
+        queryFailure: Throwable? = null,
+        versionQueryFailure: Throwable? = null,
+    ): Invocation {
+        val jdbc = FakeJdbc(rows, versionRows, queryFailure, versionQueryFailure)
         val scope = newScope(jdbc.connection)
         return Invocation(reader.read(scope), scope, jdbc)
     }
@@ -184,7 +237,9 @@ class MigrationStatusReaderTest {
 
     private inner class FakeJdbc(
         private val rows: List<Map<String, Any?>>,
+        private val versionRows: List<Map<String, Any?>> = emptyList(),
         private val queryFailure: Throwable? = null,
+        private val versionQueryFailure: Throwable? = null,
     ) {
         var queryCount: Int = 0
             private set
@@ -216,8 +271,9 @@ class MigrationStatusReaderTest {
                 when (method.name) {
                     "executeQuery" -> {
                         queryCount++
-                        queryFailure?.let { throw it }
-                        resultSet(statementSql)
+                        val failure = if (queryCount == 1) queryFailure else versionQueryFailure
+                        failure?.let { throw it }
+                        resultSet(statementSql, if (queryCount == 1) rows else versionRows)
                     }
                     "close" -> null
                     "isClosed" -> false
@@ -226,16 +282,16 @@ class MigrationStatusReaderTest {
             }
         }
 
-        private fun resultSet(statementSql: String): ResultSet {
+        private fun resultSet(statementSql: String, resultRows: List<Map<String, Any?>>): ResultSet {
             var index = -1
             var wasNull = false
             return proxy(ResultSet::class.java) { method, args ->
                 when (method.name) {
                     "getMetaData" -> gog.my_project.data_base_migration.executor.support
                         .systemMigrationResultSetMetadata(statementSql)
-                    "next" -> ++index < rows.size
+                    "next" -> ++index < resultRows.size
                     "getInt", "getString" -> {
-                        val value = rows[index][args.first().toString()]
+                        val value = resultRows[index][args.first().toString()]
                         wasNull = value == null
                         if (method.name == "getInt") (value as? Number)?.toInt() ?: 0 else value?.toString()
                     }

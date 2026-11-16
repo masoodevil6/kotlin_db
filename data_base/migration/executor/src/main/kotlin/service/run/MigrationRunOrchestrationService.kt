@@ -15,6 +15,7 @@ import gog.my_project.data_base_migration.core.events.MigrationEvent
 import gog.my_project.data_base_migration.core.events.MigrationEventType
 import gog.my_project.data_base_operation.config.data_base.SystemLock
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryValidator
 import model.prepared.PreparedMigrationVersion
 
 /** Connects history validation, Version selection, traversal, and the existing per-Version transactions. */
@@ -22,6 +23,7 @@ internal class MigrationRunOrchestrationService(
     private val configuration: MigrationConfiguration,
 ) {
     private val currentVersionService = MigrationCurrentVersionService(configuration)
+    private val historyValidator = MigrationVersionHistoryValidator()
     private val selectionService = MigrationVersionSelectionService(configuration)
     private val traversalService = MigrationVersionTraversalService()
     private val transactionService = MigrationVersionTransactionService(configuration)
@@ -43,7 +45,13 @@ internal class MigrationRunOrchestrationService(
         target: MigrationVersionTag?,
         direction: MigrationVersionSelectionDirection,
     ): ExecuteResult<Boolean> {
-        scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
+        scope.rejectOperation()?.let { failure ->
+            if (failure is Error) {
+                scope.recordFatal(failure)
+                throw failure
+            }
+            return ExecuteResult.Failure(failure)
+        }
 
         val command = when (direction) {
             MigrationVersionSelectionDirection.UP -> MigrationCommand.MIGRATE
@@ -61,7 +69,7 @@ internal class MigrationRunOrchestrationService(
         val result = try {
             scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
                 runLocked(lockedScope, target, direction)
-            }
+            }.throwIfFatalFailure(scope)
         } catch (failure: Throwable) {
             scope.publishDatabaseEvent(
                 MigrationEvent(
@@ -101,15 +109,22 @@ internal class MigrationRunOrchestrationService(
         direction: MigrationVersionSelectionDirection,
     ): ExecuteResult<Boolean> {
         return try {
-            val current = when (val currentResult = currentVersionService.currentVersion(scope)) {
+            val historyState = when (
+                val historyResult = currentVersionService.validatedHistoryState(scope).throwIfFatalFailure(scope)
+            ) {
                 is ExecuteResult.Failure -> {
-                    scope.recordResult(currentResult)
-                    return currentResult
+                    scope.recordResult(historyResult)
+                    return historyResult
                 }
-                is ExecuteResult.Success -> currentResult.result
+                is ExecuteResult.Success -> requireNotNull(historyResult.result) {
+                    "Validated Migration history returned no state"
+                }
             }
+            val current = historyState.currentVersion
 
-            val selection = when (val selectionResult = selectionService.select(current, target, direction)) {
+            val selection = when (
+                val selectionResult = selectionService.select(current, target, direction).throwIfFatalFailure(scope)
+            ) {
                 is ExecuteResult.Failure -> {
                     scope.recordResult(selectionResult)
                     return selectionResult
@@ -127,7 +142,38 @@ internal class MigrationRunOrchestrationService(
                 prepared to requireVersionTag(prepared)
             }
 
-            for ((prepared, versionTag) in taggedVersions) {
+            when (plan.direction) {
+                MigrationVersionTraversalDirection.UP -> historyValidator.validatePendingUpMigrations(
+                    historyState.snapshot,
+                    plan.versions,
+                )
+                MigrationVersionTraversalDirection.DOWN -> historyValidator.validateSelectedDownVersions(
+                    historyState,
+                    plan.versions,
+                )
+            }
+
+            val preparedMigrationsByVersion = ArrayList<List<PreparedMigration>>(plan.versions.size)
+            for (prepared in plan.versions) {
+                when (
+                    val preparationResult = transactionService.prepareMigrations(scope, prepared)
+                        .throwIfFatalFailure(scope)
+                ) {
+                    is ExecuteResult.Failure -> {
+                        scope.recordResult(preparationResult)
+                        return preparationResult
+                    }
+                    is ExecuteResult.Success -> preparedMigrationsByVersion += requireNotNull(preparationResult.result) {
+                        "Migration preparation returned no list for Version '${prepared.version.name}'"
+                    }
+                }
+            }
+            val executablePlan = plan.withPreparedMigrations(preparedMigrationsByVersion)
+
+            for ((index, taggedVersion) in taggedVersions.withIndex()) {
+                val versionTag = taggedVersion.second
+                val prepared = executablePlan.versions[index]
+                val preparedMigrations = requireNotNull(executablePlan.preparedMigrationsByVersion)[index]
                 scope.publishDatabaseEvent(
                     MigrationEvent(
                         type = MigrationEventType.MIGRATION_VERSION_STARTED,
@@ -139,20 +185,30 @@ internal class MigrationRunOrchestrationService(
                     ),
                 )
                 val result = when (plan.direction) {
-                    MigrationVersionTraversalDirection.UP -> transactionService.transactionUp(scope, versionTag)
-                    MigrationVersionTraversalDirection.DOWN -> transactionService.transactionDown(scope, versionTag)
-                }
+                    MigrationVersionTraversalDirection.UP -> transactionService.transactionUp(
+                        scope,
+                        versionTag,
+                        prepared,
+                        preparedMigrations,
+                    )
+                    MigrationVersionTraversalDirection.DOWN -> transactionService.transactionDown(
+                        scope,
+                        versionTag,
+                        prepared,
+                        preparedMigrations,
+                    )
+                }.throwIfFatalFailure(scope)
                 when (result) {
                     is ExecuteResult.Failure -> {
                         scope.recordResult(result)
                         return result
                     }
                     is ExecuteResult.Success -> if (result.result != true) {
-                        return scope.failed(
+                        return scope.failed<Boolean>(
                             IllegalStateException(
                                 "Migration Version '${prepared.version.name}' did not complete successfully",
                             ),
-                        )
+                        ).throwIfFatalFailure(scope)
                     } else {
                         scope.publishDatabaseEvent(
                             MigrationEvent(
@@ -176,8 +232,19 @@ internal class MigrationRunOrchestrationService(
             scope.recordFatal(error)
             throw error
         } catch (failure: Throwable) {
-            scope.failed(failure)
+            scope.failed<Boolean>(failure).throwIfFatalFailure(scope)
         }
+    }
+
+    private fun <T> ExecuteResult<T>.throwIfFatalFailure(
+        scope: OperationExecutionScope,
+    ): ExecuteResult<T> {
+        val failure = (this as? ExecuteResult.Failure)?.exception
+        if (failure is Error) {
+            scope.recordFatal(failure)
+            throw failure
+        }
+        return this
     }
 
     private fun requireVersionTag(prepared: PreparedMigrationVersion): MigrationVersionTag {

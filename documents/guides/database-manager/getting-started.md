@@ -19,7 +19,7 @@ try {
     val main = manager[MainDatabase]
     val analytics = manager[AnalyticsDatabase("eu-west")]
 
-    // هر Handle قابلیت‌های Query و Transaction همان registration را دارد.
+    // Query و Transaction از Manager می‌آیند؛ برای Migration به Aggregate migration وابسته شوید.
     println(manager.registeredKeys())
 } finally {
     manager.shutdown()
@@ -28,4 +28,12 @@ try {
 
 Context دیتابیس هنگام دریافت Handle ساخته نمی‌شود؛ نخستین عملیات آن را به‌صورت lazy مقداردهی می‌کند. `shutdown()` پذیرش عملیات جدید را متوقف می‌کند و پس از پایان عملیات پذیرفته‌شده منابع را می‌بندد.
 
-نمونهٔ کامل Query و Transaction در `data_base:manager:example` قرار دارد. اجرای آن opt-in است و Queryهای نمونه فرض می‌کنند جدول‌های مقصد از قبل وجود دارند. در این نسخه، Manager عملیات Migration یا DDL را اجرا نمی‌کند؛ برای وضعیت Migration به [راهنمای مربوطه](migrations.md) مراجعه کنید.
+برای API Migration عمومی، dependency زیر را اضافه کنید و `migrationConfiguration` را به همان registration متصل کنید:
+
+```kotlin
+dependencies {
+    implementation(project(":data_base:migration"))
+}
+```
+
+نمونهٔ کامل Query و Transaction در `data_base:manager:example` قرار دارد. اجرای آن opt-in است و Queryهای نمونه فرض می‌کنند جدول‌های مقصد از قبل وجود دارند. برای ثبت Configuration در هر Registration و اجرای Migration از Handle به [راهنمای Migration](migrations.md) مراجعه کنید.

@@ -14,6 +14,7 @@ import model.migration_status.MigrationStatusRow
 import model.migration_status.MigrationStatusSnapshot
 import model.migration_status.MigrationVersionStatus
 import model.prepared.PreparedMigrationVersion
+import model.version_history.MigrationHistoryVersion
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -54,6 +55,48 @@ class MigrationStatusAnalyzerTest {
         assertEquals(MigrationItemStatus.APPLIED, report.versions.single().migrations.single().status)
         assertEquals(listOf(100), report.versions.single().versionIds)
         assertEquals(listOf(200), report.versions.single().migrations.single().historyRecordIds)
+    }
+
+    @Test
+    fun `every persisted version status other than completed is visible and invalid`() {
+        val config = configuration(version("v1", "first_migration"))
+        val rows = listOf(
+            versionRow(10, "v1", 100),
+            migrationRow(20, "first_migration", 300, 100, 100, "v1", resolvedVersionTagId = 10),
+        )
+
+        listOf(0, 1, 2, 4, 5, 6, 99).forEach { versionStatus ->
+            val snapshot = MigrationStatusSnapshot.withHistoryVersions(
+                rows,
+                listOf(MigrationHistoryVersion(100, 10, versionStatus)),
+            )
+
+            val report = analyzer.analyze(config, snapshot)
+
+            assertEquals(MigrationVersionStatus.INVALID, report.versions.single().status)
+            val issue = report.issues.single {
+                it.code == MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY && 100 in it.versionIds
+            }
+            assertTrue(issue.message.contains("status $versionStatus"))
+        }
+    }
+
+    @Test
+    fun `version row missing from status-aware read is visible as incomplete`() {
+        val report = analyzer.analyze(
+            configuration(version("v1", "first_migration")),
+            MigrationStatusSnapshot(
+                listOf(
+                    versionRow(10, "v1", 100),
+                    migrationRow(20, "first_migration", 200, 100, 100, "v1", resolvedVersionTagId = 10),
+                ),
+            ),
+        )
+
+        assertEquals(MigrationVersionStatus.INVALID, report.versions.single().status)
+        val issue = report.issues.single { it.code == MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY }
+        assertEquals(listOf(100), issue.versionIds)
+        assertTrue(issue.message.contains("status null"))
     }
 
     @Test
@@ -411,7 +454,11 @@ class MigrationStatusAnalyzerTest {
         sourceVersions.clear()
         sourceRows.clear()
 
-        val report = analyzer.analyze(config, snapshot)
+        val analysisSnapshot = MigrationStatusSnapshot.withHistoryVersions(
+            snapshot.rows,
+            listOf(MigrationHistoryVersion(99, 1, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED)),
+        )
+        val report = analyzer.analyze(config, analysisSnapshot)
 
         assertEquals(listOf("v1"), config.registrations.map { it.name })
         assertEquals(1, snapshot.rows.size)
@@ -441,7 +488,18 @@ class MigrationStatusAnalyzerTest {
 
     private fun registered(id: String) = RegisteredMigration(MigrationIdentity.fromValue(id), NoopMigration::class)
 
-    private fun snapshot(vararg rows: MigrationStatusRow) = MigrationStatusSnapshot(rows.toList())
+    private fun snapshot(vararg rows: MigrationStatusRow) = MigrationStatusSnapshot.withHistoryVersions(
+        rows.toList(),
+        rows.mapNotNull { row ->
+            row.tagVersionId?.let { versionId ->
+                MigrationHistoryVersion(
+                    versionId,
+                    row.tagId,
+                    MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED,
+                )
+            }
+        },
+    )
 
     private fun versionRow(tagId: Int, name: String, versionId: Int, type: Int = VERSION_TYPE) = MigrationStatusRow(
         tagId = tagId,

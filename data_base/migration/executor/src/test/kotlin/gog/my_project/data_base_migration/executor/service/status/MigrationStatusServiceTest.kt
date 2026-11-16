@@ -47,7 +47,10 @@ class MigrationStatusServiceTest {
     @Test
     fun `reads and analyzes complete status through the supplied scope without running migrations`() {
         CallbackProbeMigration.callbackCount.set(0)
-        val jdbc = FakeJdbc(appliedV1Rows())
+        val jdbc = FakeJdbc(
+            appliedV1Rows(),
+            versionRows = listOf(mapOf("id" to 10, "tagId" to 1, "status" to 3)),
+        )
         val scope = newScope(jdbc.connection)
 
         val result = MigrationStatusService(configuration).status(scope)
@@ -56,10 +59,26 @@ class MigrationStatusServiceTest {
         assertEquals(listOf("v1"), report.versions.map { it.name })
         assertEquals(listOf(MigrationVersionStatus.APPLIED), report.versions.map { it.status })
         assertEquals("status_probe", report.versions.single().migrations.single().id)
-        assertEquals(1, jdbc.queryCount)
+        assertEquals(2, jdbc.queryCount)
         assertEquals(0, jdbc.transactionControlCalls)
         assertEquals(0, jdbc.connectionCloseCount)
         assertEquals(0, CallbackProbeMigration.callbackCount.get())
+    }
+
+    @Test
+    fun `non-completed persisted version is reported invalid`() {
+        val jdbc = FakeJdbc(
+            appliedV1Rows(),
+            versionRows = listOf(mapOf("id" to 10, "tagId" to 1, "status" to 0)),
+        )
+        val result = MigrationStatusService(configuration).status(newScope(jdbc.connection))
+
+        val report = assertIs<MigrationStatusReport>(assertIs<ExecuteResult.Success<MigrationStatusReport>>(result).result)
+        assertEquals(MigrationVersionStatus.INVALID, report.versions.single().status)
+        assertEquals(
+            listOf(10),
+            report.issues.single { it.code == MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY }.versionIds,
+        )
     }
 
     @Test
@@ -72,7 +91,7 @@ class MigrationStatusServiceTest {
         val report = assertIs<MigrationStatusReport>(assertIs<ExecuteResult.Success<MigrationStatusReport>>(result).result)
         assertEquals(listOf("v1"), report.versions.map { it.name })
         assertEquals(listOf(MigrationVersionStatus.PENDING), report.versions.map { it.status })
-        assertEquals(1, jdbc.queryCount)
+        assertEquals(2, jdbc.queryCount)
     }
 
     @Test
@@ -112,7 +131,7 @@ class MigrationStatusServiceTest {
 
         assertSame(original, assertIs<ExecuteResult.Failure>(result).exception)
         assertSame(original, scope.firstFailure)
-        assertEquals(1, jdbc.queryCount)
+        assertEquals(2, jdbc.queryCount)
     }
 
     @Test
@@ -129,7 +148,7 @@ class MigrationStatusServiceTest {
         assertSame(fatal, thrown)
         assertSame(fatal, scope.fatalError)
         assertSame(fatal, scope.firstFailure)
-        assertEquals(1, jdbc.queryCount)
+        assertEquals(2, jdbc.queryCount)
     }
 
     private fun newScope(connection: Connection) =
@@ -164,6 +183,7 @@ class MigrationStatusServiceTest {
 
     private inner class FakeJdbc(
         private val rows: List<Map<String, Any?>>,
+        private val versionRows: List<Map<String, Any?>> = emptyList(),
         private val queryFailure: Throwable? = null,
     ) {
         var queryCount = 0
@@ -179,8 +199,12 @@ class MigrationStatusServiceTest {
                     when (statementMethod.name) {
                         "executeQuery" -> {
                             queryCount++
-                            queryFailure?.let { throw it }
-                            resultSet(args.firstOrNull()?.toString().orEmpty())
+                            val failure = if (queryCount == 1) queryFailure else null
+                            failure?.let { throw it }
+                            resultSet(
+                                args.firstOrNull()?.toString().orEmpty(),
+                                if (queryCount == 1) rows else versionRows,
+                            )
                         }
                         "close" -> null
                         "isClosed" -> false
@@ -200,16 +224,16 @@ class MigrationStatusServiceTest {
             }
         }
 
-        private fun resultSet(statementSql: String): ResultSet {
+        private fun resultSet(statementSql: String, resultRows: List<Map<String, Any?>>): ResultSet {
             var index = -1
             var wasNull = false
             return proxy(ResultSet::class.java) { method, args ->
                 when (method.name) {
                     "getMetaData" -> gog.my_project.data_base_migration.executor.support
                         .systemMigrationResultSetMetadata(statementSql)
-                    "next" -> ++index < rows.size
+                    "next" -> ++index < resultRows.size
                     "getInt", "getString" -> {
-                        val value = rows[index][args.first().toString()]
+                        val value = resultRows[index][args.first().toString()]
                         wasNull = value == null
                         if (method.name == "getInt") (value as? Number)?.toInt() ?: 0 else value?.toString()
                     }

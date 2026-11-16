@@ -12,6 +12,7 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
     data class RelationFilters(
         val id: Int? = null,
         val tagId: Int? = null,
+        val status: Int? = null,
     )
 
     @QBQuerySelect(name = "id", alias = "id")
@@ -19,6 +20,9 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
 
     @QBQuerySelect(name = "tag_id", alias = "tagId")
     var tagId: Int = 0
+
+    @QBQuerySelect(name = "status", alias = "status")
+    var status: Int = 0
 
     override fun createCte(params: RelationFilters): Cte = buildCte {
         select {
@@ -36,10 +40,17 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
                 }
                 alias(SystemMigrationVersionQuery::tagId)
             }
+            addColumn {
+                column {
+                    tableSelector(SystemMigrationVersionModel::class)
+                    columnSelector(SystemMigrationVersionModel::status)
+                }
+                alias(SystemMigrationVersionQuery::status)
+            }
         }
         from { model(SystemMigrationVersionModel::class) }
 
-        if (params.id != null || params.tagId != null) {
+        if (params.id != null || params.tagId != null || params.status != null) {
             where {
                 conditions {
                     params.id?.let { value ->
@@ -66,6 +77,20 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
                             operationEqual()
                             sideValueParam {
                                 paramName("system_migration_version_tag_id")
+                                paramValue(value)
+                            }
+                        }
+                    }
+                    params.status?.let { value ->
+                        addCondition {
+                            logicalAnd()
+                            sideSelector {
+                                tableSelector(SystemMigrationVersionModel::class)
+                                columnSelector(SystemMigrationVersionModel::status)
+                            }
+                            operationEqual()
+                            sideValueParam {
+                                paramName("system_migration_version_status")
                                 paramValue(value)
                             }
                         }

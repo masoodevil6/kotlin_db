@@ -1,7 +1,7 @@
 package model.migration_status
 
 /** One materialized row from the combined System Migration status CTE. */
-data class MigrationStatusRow(
+internal data class MigrationStatusRow(
     val tagId: Int,
     val tagName: String,
     val tagType: Int,

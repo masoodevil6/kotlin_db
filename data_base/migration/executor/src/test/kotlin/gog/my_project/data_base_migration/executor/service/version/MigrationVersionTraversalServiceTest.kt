@@ -113,7 +113,7 @@ class MigrationVersionTraversalServiceTest {
         val base = snapshot(1)
         val invalid = MigrationVersionHistorySnapshot(
             tags = base.tags + MigrationHistoryTag(99, "removed_version", MigrationTagType.VERSION.code),
-            versions = base.versions + MigrationHistoryVersion(999, 99),
+            versions = base.versions + MigrationHistoryVersion(999, 99, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
             migrations = base.migrations,
         )
 
@@ -125,11 +125,33 @@ class MigrationVersionTraversalServiceTest {
         val base = snapshot(1)
         val invalid = MigrationVersionHistorySnapshot(
             base.tags,
-            base.versions + MigrationHistoryVersion(101, VERSION_TAG_ID_1),
+            base.versions + MigrationHistoryVersion(101, VERSION_TAG_ID_1, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
             base.migrations,
         )
 
         assertInvalid(invalid, "same Version Tag")
+    }
+
+    @Test
+    fun rejectsEveryPersistedVersionStatusOtherThanCompleted() {
+        val base = snapshot(1)
+        val migrations = MigrationVersionPreparationService()
+            .prepare(configuration.registrations.single { it.name == "v1" })
+            .migrations
+
+        listOf(0, 1, 2, 4, 5, 6, 99).forEach { status ->
+            val invalid = MigrationVersionHistorySnapshot(
+                base.tags,
+                base.versions.map { it.copy(status = status) },
+                base.migrations,
+            )
+
+            assertInvalid(invalid, "non-completed status $status")
+            val rollbackFailure = assertFailsWith<IllegalStateException> {
+                historyValidator.validateVersion(invalid, VERSION_ID_1, migrations)
+            }
+            assertTrue(rollbackFailure.message.orEmpty().contains("non-completed status $status"))
+        }
     }
 
     @Test
@@ -167,8 +189,8 @@ class MigrationVersionTraversalServiceTest {
         val invalid = MigrationVersionHistorySnapshot(
             base.tags,
             listOf(
-                MigrationHistoryVersion(100, VERSION_TAG_ID_2),
-                MigrationHistoryVersion(200, VERSION_TAG_ID_1),
+                MigrationHistoryVersion(100, VERSION_TAG_ID_2, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+                MigrationHistoryVersion(200, VERSION_TAG_ID_1, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
             ),
             base.migrations.map { row ->
                 row.copy(versionId = if (row.versionId == VERSION_ID_1) 200 else 100)
@@ -216,6 +238,87 @@ class MigrationVersionTraversalServiceTest {
     }
 
     @Test
+    fun pendingUpPreflightAcceptsMissingTagsAndExistingUnreferencedTagsAcrossVersions() {
+        val base = snapshot(appliedVersionCount = 0)
+        val withUnreferencedTag = MigrationVersionHistorySnapshot(
+            base.tags + MigrationHistoryTag(999, "m3", MigrationTagType.ITEM.code),
+            base.versions,
+            base.migrations,
+        )
+        val preparation = MigrationVersionPreparationService()
+        val selected = listOf(
+            preparation.prepare(configuration.registrations.single { it.name == "v1" }),
+            preparation.prepare(configuration.registrations.single { it.name == "v2" }),
+        )
+
+        historyValidator.validatePendingUpMigrations(withUnreferencedTag, selected)
+
+        assertEquals(0, MigrationProbe.constructorCalls)
+        assertEquals(0, MigrationProbe.upCalls)
+        assertEquals(0, MigrationProbe.downCalls)
+    }
+
+    @Test
+    fun pendingUpPreflightRejectsASelectedMigrationWithPriorHistory() {
+        val base = snapshot(appliedVersionCount = 1)
+        val selected = PreparedMigrationVersion(
+            MigrationVersion("v2", emptyList()),
+            listOf(registered("m1", FirstMigration::class)),
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            historyValidator.validatePendingUpMigrations(base, listOf(selected))
+        }
+
+        assertTrue(failure.message.orEmpty().contains("already has persisted history"))
+        assertEquals(0, MigrationProbe.constructorCalls)
+        assertEquals(0, MigrationProbe.upCalls)
+        assertEquals(0, MigrationProbe.downCalls)
+    }
+
+    @Test
+    fun pendingUpPreflightRejectsMigrationIdentityRepeatedAcrossSelectedVersions() {
+        val repeatedMigration = registered("m3", ThirdMigration::class)
+        val selected = listOf(
+            PreparedMigrationVersion(MigrationVersion("v2", emptyList()), listOf(repeatedMigration)),
+            PreparedMigrationVersion(MigrationVersion("v3", emptyList()), listOf(repeatedMigration)),
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            historyValidator.validatePendingUpMigrations(snapshot(0), selected)
+        }
+
+        assertTrue(failure.message.orEmpty().contains("registered more than once"))
+        assertEquals(0, MigrationProbe.constructorCalls)
+        assertEquals(0, MigrationProbe.upCalls)
+        assertEquals(0, MigrationProbe.downCalls)
+    }
+
+    @Test
+    fun selectedDownPreflightUsesValidatedSnapshotRowsForAllVersions() {
+        val state = historyValidator.validateConfiguration(configuration, snapshot(appliedVersionCount = 3))
+        val preparation = MigrationVersionPreparationService()
+        val selected = listOf(
+            preparation.prepare(configuration.registrations.single { it.name == "v3" }),
+            preparation.prepare(configuration.registrations.single { it.name == "v2" }),
+        )
+
+        historyValidator.validateSelectedDownVersions(state, selected)
+
+        val mismatched = PreparedMigrationVersion(
+            configuration.registrations.single { it.name == "v3" },
+            listOf(registered("m3", ThirdMigration::class)),
+        )
+        val failure = assertFailsWith<IllegalStateException> {
+            historyValidator.validateSelectedDownVersions(state, listOf(mismatched))
+        }
+        assertTrue(failure.message.orEmpty().contains("registrations differ"))
+        assertEquals(0, MigrationProbe.constructorCalls)
+        assertEquals(0, MigrationProbe.upCalls)
+        assertEquals(0, MigrationProbe.downCalls)
+    }
+
+    @Test
     fun rejectsMigrationsRecordedUnderWrongVersionAndUnknownTagReferences() {
         val base = snapshot(2)
         val wrongVersion = MigrationVersionHistorySnapshot(
@@ -245,7 +348,13 @@ class MigrationVersionTraversalServiceTest {
                 mapOf("id" to ITEM_TAG_IDS.getValue("m1"), "tagName" to "m1", "tagType" to MigrationTagType.ITEM.code),
                 mapOf("id" to ITEM_TAG_IDS.getValue("m2"), "tagName" to "m2", "tagType" to MigrationTagType.ITEM.code),
             ),
-            versions = listOf(mapOf("id" to VERSION_ID_1, "tagId" to VERSION_TAG_ID_1)),
+            versions = listOf(
+                mapOf(
+                    "id" to VERSION_ID_1,
+                    "tagId" to VERSION_TAG_ID_1,
+                    "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED,
+                ),
+            ),
             applied = listOf(
                 mapOf("id" to 1001, "tagId" to ITEM_TAG_IDS.getValue("m1"), "versionId" to VERSION_ID_1),
                 mapOf("id" to 1002, "tagId" to ITEM_TAG_IDS.getValue("m2"), "versionId" to VERSION_ID_1),
@@ -264,6 +373,7 @@ class MigrationVersionTraversalServiceTest {
         }
         val state = historyValidator.validateConfiguration(configuration, history)
         assertEquals(listOf("v1"), state.appliedVersions.map { it.version.name })
+        assertSame(history, state.snapshot)
         assertEquals(3, jdbc.queryCount)
         assertEquals(0, jdbc.transactionControlCalls)
         assertEquals(0, jdbc.connectionCloseCount)
@@ -277,7 +387,13 @@ class MigrationVersionTraversalServiceTest {
             mapOf("id" to ITEM_TAG_IDS.getValue("m1"), "tagName" to "m1", "tagType" to MigrationTagType.ITEM.code),
             mapOf("id" to ITEM_TAG_IDS.getValue("m2"), "tagName" to "m2", "tagType" to MigrationTagType.ITEM.code),
         )
-        val versions = listOf(mapOf("id" to VERSION_ID_1, "tagId" to VERSION_TAG_ID_1))
+        val versions = listOf(
+            mapOf(
+                "id" to VERSION_ID_1,
+                "tagId" to VERSION_TAG_ID_1,
+                "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED,
+            ),
+        )
         val applied = listOf(
             mapOf("id" to 1001, "tagId" to ITEM_TAG_IDS.getValue("m1"), "versionId" to VERSION_ID_1),
             mapOf("id" to 1002, "tagId" to ITEM_TAG_IDS.getValue("m2"), "versionId" to VERSION_ID_1),
@@ -304,6 +420,13 @@ class MigrationVersionTraversalServiceTest {
                 withNull(versions, "tagId"),
                 applied,
                 "Migration Version query returned a null tagId",
+            ),
+            NullHistoryColumn(
+                "Version.status",
+                tags,
+                withNull(versions, "status"),
+                applied,
+                "Migration Version query returned a null status",
             ),
             NullHistoryColumn(
                 "AppliedMigration.id",
@@ -414,7 +537,11 @@ class MigrationVersionTraversalServiceTest {
             }
         }
         val versions = allVersions.take(appliedVersionCount).mapIndexed { index, (_, tagId) ->
-            MigrationHistoryVersion(VERSION_IDS[index], tagId)
+            MigrationHistoryVersion(
+                VERSION_IDS[index],
+                tagId,
+                MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED,
+            )
         }
         var historyId = 1000
         val applied = allMigrations.take(appliedVersionCount).flatMapIndexed { index, names ->

@@ -40,12 +40,12 @@ class DatabaseHandleMigrationTest {
                 val statusResult = status()
                 val report = assertIs<ExecuteResult.Success<MigrationStatusReport>>(statusResult).result
                 assertEquals(listOf("MainVersion"), report?.versions?.map { it.name })
-                assertEquals(1, driver.connections.single().queryCount)
+                assertEquals(2, driver.connections.single().queryCount)
                 assertFalse(driver.connections.single().closed)
 
                 val currentResult = current()
                 assertIs<ExecuteResult.Success<MigrationVersion?>>(currentResult)
-                assertEquals(4, driver.connections.single().queryCount)
+                assertEquals(5, driver.connections.single().queryCount)
                 assertFalse(driver.connections.single().closed)
 
                 "registered configuration"
@@ -115,7 +115,8 @@ class DatabaseHandleMigrationTest {
             assertEquals(listOf("AnalyticsVersion"), analytics?.versions?.map { it.name })
             assertEquals(2, driver.openCount)
             assertEquals(2, driver.connections.size)
-            assertTrue(driver.connections.all { it.closeCount == 1 && it.queryCount == 1 })
+            assertTrue(driver.connections.all { it.closeCount == 1 })
+            assertTrue(driver.connections.all { it.queryCount == 2 })
         } finally {
             try {
                 manager.close()
@@ -259,12 +260,12 @@ class DatabaseHandleMigrationTest {
                 val statusResult = status()
                 val report = assertIs<ExecuteResult.Success<MigrationStatusReport>>(statusResult).result
                 assertEquals(listOf("MainVersion"), report?.versions?.map { it.name })
-                assertEquals(1, driver.connections.single().queryCount)
+                assertEquals(2, driver.connections.single().queryCount)
                 assertFalse(driver.connections.single().closed)
 
                 val currentResult = current()
                 assertIs<ExecuteResult.Success<MigrationVersion?>>(currentResult)
-                assertEquals(4, driver.connections.single().queryCount)
+                assertEquals(5, driver.connections.single().queryCount)
                 assertFalse(driver.connections.single().closed)
 
                 blockValue
@@ -296,7 +297,8 @@ class DatabaseHandleMigrationTest {
         assertEquals(listOf("AnalyticsVersion"), secondStatus?.versions?.map { it.name })
         assertEquals(2, driver.openCount)
         assertEquals(2, driver.connections.size)
-        assertTrue(driver.connections.all { it.closeCount == 1 && it.queryCount == 1 })
+        assertTrue(driver.connections.all { it.closeCount == 1 })
+        assertTrue(driver.connections.all { it.queryCount == 2 })
     }
 
     @Test

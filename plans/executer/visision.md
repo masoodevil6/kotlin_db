@@ -11,1575 +11,460 @@ history()	نمایش سوابق اجرای ثبت‌شده، به ترتیب ز�
 pending()	نمایش Migrationهای تعریف‌شده‌ای که هنوز اجرا نشده‌اند
 refresh()	بازسازی دیتابیس از طریق Rollback کامل و سپس Migrate مجدد، فقط در صورت پشتیبانی و تأیید صریح
 
+نقشه کامل طراحی سیستم Migration
+مرحله ۱: زیرساخت اجرای Migration با Operation
+تکمیل شده
+هدف این مرحله این بود که اجرای Migration کاملاً تحت مدیریت Operation باشد.
+
+موارد اصلی:
+1. Migration از طریق OperationExecutionScope به دیتابیس دسترسی داشته باشد.
+2. اجرای SQL از همان Scope و Connection متعلق به Operation انجام شود.
+3. Migration مستقیماً Connection نسازد و Lifecycle آن را مدیریت نکند.
+4. مدیریت Connection و Scope بر عهده Operation باشد.
+5. امکان اجرای SQL و مدیریت Failure بدون وابستگی به APIهای قدیمی حفظ شود.
+6. APIهای سازگاری قبلی بدون تغییر ناخواسته باقی بمانند.
+   در این مرحله زیرساخت withOperationScope و اتصال مسیر Migration به Operation ایجاد شد.
+
+اصل معماری: Migration مصرف‌کننده Operation است، نه مالک Connection.
+
+مرحله ۲: مدل نتیجه و مدیریت Failure
+تکمیل شده
+هدف این بود که شکست در لایه‌های مختلف گم نشود.
+
+موارد اصلی:
+- تفکیک Success و Failure.
+- مشخص بودن مرحله‌ای که Failure در آن رخ داده است.
+- حفظ Reference خطای اصلی.
+- ثبت خطاهای بعدی به‌صورت Suppressed در صورت لزوم.
+- رفتار مشخص برای Error و پرتاب مجدد همان Reference.
+- جلوگیری از تبدیل اشتباه Fatal Error به Failure عادی.
+  در این مرحله مدل نتیجه و مدیریت Fatal Error توسعه پیدا کرد.
+
+مرحله ۳: تعریف Status برای Version
+زیرساخت پیاده‌سازی شده
+برای هر Version یک Status داریم تا وضعیت اجرای آن در دیتابیس قابل تشخیص باشد.
+
+یکی از Statusهای اصلی:
+const val STATUS_MIGRATE_COMPLETED = 3
+
+
+قاعده مهمی که اکنون مشخص کردی این است:
+
+هر Status دیگری به‌جز ۳ به معنی وجود وضعیت غیرعادی یا اجرای ناقص در سیستم است.
+
+پس سیستم نباید فقط Version مربوط به درخواست فعلی را بررسی کند.
+
+باید تمام Versionهای ثبت‌شده در History را بررسی کند.
+
+قاعده:
+\[
+Healthy = \forall v \in Versions,\; v.status = 3
+\]
+
+و در صورت وجود حتی یک Version با Status دیگر:
+\[
+\exists v \in Versions:\; v.status \neq 3
+\]
+
+سیستم باید عملیات Migration را متوقف کند.
+
+این موضوع یک قانون سراسری برای اجرای Migration است، نه صرفاً یک کنترل برای Version انتخاب‌شده.
+
+مرحله ۴: خواندن و اعتبارسنجی History
+پیاده‌سازی شده
+سیستم باید بتواند وضعیت واقعی دیتابیس را از جدول‌های Migration بخواند.
+
+اطلاعات موردنیاز:
+- system_migration_tag
+- system_migration_version
+- system_migration
+  جریان فعلی:
+1. خواندن Tagها.
+2. خواندن Versionها و Status آن‌ها.
+3. خواندن Migration History.
+4. ساخت Snapshot.
+5. اعتبارسنجی روابط بین اطلاعات.
+6. استخراج وضعیت Version فعلی.
+   این Snapshot باید در ادامه همان اجرای Orchestration استفاده شود تا خواندن غیرضروری History تکرار نشود.
+
+نکته: خواندن سه جدول در سه SELECT ترتیبی انجام می‌شود؛ بنابراین Snapshot فعلی تضمین اتمیک بودن در سطح دیتابیس ندارد.
+
+مرحله ۵: کنترل سلامت سیستم در ابتدای اجرا
+قاعده مشخص است؛ انطباق کامل مسیر نیازمند بررسی است
+این مرحله با توضیح اخیر تو اهمیت ویژه‌ای پیدا کرده است.
+
+ترتیب مورد انتظار:
+1. ورود به مسیر رسمی Migration.
+2. گرفتن SystemLock.MIGRATION.
+3. خواندن History.
+4. بررسی Status تمام Versionهای ثبت‌شده.
+5. اگر حتی یک Status غیر از 3 وجود داشت، توقف عملیات.
+6. فقط در صورت سالم بودن تمام Versionها، ادامه مراحل.
+   در این مرحله:
+- هیچ Migration اجرا نمی‌شود.
+- هیچ Version جدیدی انتخاب و اجرا نمی‌شود.
+- هیچ Marker جدیدی ثبت نمی‌شود.
+- هیچ Tag یا History جدیدی نوشته نمی‌شود.
+  این بررسی باید پیش از Selection و Preflight اجرایی انجام شود.
+
+البته خواندن History و اعتبارسنجی ساختاری آن طبیعتاً قبل از این تصمیم لازم است.
+
+مرحله ۶: جلوگیری از اجرای هم‌زمان Migrationها
+زیرساخت پیاده‌سازی شده؛ تست واقعی باقی است
+این بخش دو نوع ترتیب را پوشش می‌دهد.
+الف) ترتیب داخل یک اجرای Migration
+Migrationها باید دقیقاً طبق ترتیب Registration اجرا شوند.
+
+برای UP:
+Version 1
+Migration A
+Migration B
+Migration C
+
+Version 2
+Migration D
+Migration E
+
+
+برای DOWN ترتیب Migrationهای هر Version معکوس می‌شود.
+
+Versionها نیز طبق جهت Traversal حرکت می‌کنند.
+ب) جلوگیری از اجرای هم‌زمان دو جریان
+برای این کار از:
+SystemLock.MIGRATION
+
+
+استفاده می‌کنیم.
+
+قفل باید کل عملیات Orchestration را پوشش دهد:
+Acquire Migration Lock
+|
+v
+Read History
+|
+v
+Validate
+|
+v
+Select Versions
+|
+v
+Preflight
+|
+v
+Prepare Migrations
+|
+v
+Execute Versions
+|
+v
+Release Migration Lock
+
+
+در نتیجه، دو اجرای رسمی Migration روی یک Database Identity نباید هم‌زمان وارد بخش اجرایی شوند.
+
+زیرساخت Lock قبلاً پیاده‌سازی شده است، اما تست هم‌زمانی واقعی MariaDB هنوز لازم است.
+
+مرحله ۷: انتخاب Versionها و ساخت Traversal Plan
+تکمیل شده
+پس از بررسی سلامت سیستم، باید مشخص شود چه Versionهایی باید اجرا شوند.
+
+فرمان‌های فعلی:
+init
+current
+status
+migrate
+migrate(version)
+rollback
+rollback(version)
+
+
+قواعد:
+- migrate() اجرای Versionهای لازم تا آخرین Version ثبت‌شده در Configuration را انجام می‌دهد.
+- migrate(version) تا خود Version هدف، به‌صورت inclusive، پیش می‌رود.
+- rollback() مسیر برگشت را طی می‌کند.
+- rollback(version) تا Version هدف برمی‌گردد و خود Version هدف را نگه می‌دارد.
+  Traversal Plan ترتیب دقیق Versionها و Migrationهای هرکدام را مشخص می‌کند.
+
+مرحله ۸: Preflight کامل تمام Versionهای انتخاب‌شده
+تکمیل شده
+این مرحله برای جلوگیری از اجرای نیمه‌کاره Plan به دلیل خطای قابل تشخیص پیش از اجرا طراحی شد.
+
+هدف این است که قبل از اولین Marker یا اجرای Schema، تمام Versionهای انتخاب‌شده بررسی شوند.
+
+Preflight شامل:
+- اعتبارسنجی Versionها.
+- بررسی Version Tagها.
+- بررسی Migration Tagها.
+- بررسی History قبلی.
+- تشخیص Migration تکراری.
+- بررسی سازگاری Registrationها با History.
+- بررسی شرایط UP و DOWN.
+  برای UP و DOWN قواعد متفاوتی داریم.
+
+در UP نبودن ITEM Tag مجاز است، اما History قبلی یا تعارض‌های تعریف‌شده باید رد شوند.
+
+در DOWN باید Version و History ثبت‌شده با Migrationهای مورد انتظار تطابق داشته باشند.
+
+محدودیت مهم: Preflight هیچ Write، Marker یا اجرای Migration انجام نمی‌دهد.
+
+مرحله ۹: آماده‌سازی تمام Migrationها پیش از اجرا
+تکمیل شده
+در این مرحله قبل از ورود به حلقه اجرای Versionها، تمام Instanceهای Migration ساخته و اعتبارسنجی می‌شوند.
+
+چرا؟
+
+فرض کن سه Version داریم و Constructor مربوط به Migration آخر شکست بخورد.
+
+نباید دو Version اول قبلاً اجرا شده باشند و تازه در Version سوم متوجه مشکل شویم.
+
+پس ترتیب:
+Preflight تمام Versionها
+|
+v
+Prepare تمام Migrationها
+|
+v
+اگر همه آماده بودند:
+|
+v
+شروع Execution
+
+
+همچنین همان Instance آماده‌شده در اجرای UP یا DOWN استفاده می‌شود و دوباره ساخته نمی‌شود.
+
+ترتیب Declaration برای UP و ترتیب معکوس برای DOWN حفظ شده است.
+
+مرحله ۱۰: اجرای Version و ثبت وضعیت آن
+مسیر اصلی پیاده‌سازی شده
+حالا وارد اجرای واقعی می‌شویم.
+مسیر UP
+Create/Resolve Version Tag
+|
+v
+Insert Version Row
+status = 0
+|
+v
+Execute Migration 1
+|
+v
+Register Migration History
+|
+v
+Execute Migration 2
+|
+v
+Register Migration History
+|
+v
+All migrations completed
+|
+v
+Update Version status = 3
+
+
+Status صفر نقش Marker شروع اجرای UP را دارد.
+مسیر DOWN
+Version exists
+|
+v
+Update Version status = 4
+|
+v
+Execute migrations in reverse order
+|
+v
+Remove Migration History
+|
+v
+Remove unused Item Tags
+|
+v
+Delete Version Row
+
+
+در مسیر DOWN، Version بعد از تکمیل Rollback حذف می‌شود.
+
+نکته مهم: در معماری فعلی Migration از Transaction استفاده نمی‌کند. این تصمیم قبلی است و قرار نیست صرفاً برای حل Failure آن را برگردانیم.
+
+مرحله ۱۱: ثبت Failure با Connection جدید
+باقی‌مانده برای پیاده‌سازی و ممیزی
+این همان سناریویی است که قبلاً درباره‌اش صحبت کرده بودیم.
+
+اگر در هر مرحله از اجرای Version شکست رخ دهد، باید بتوانیم نوع شکست را در Status همان Version ثبت کنیم.
+
+اما Connection اصلی ممکن است به دلیل Failure دیگر قابل استفاده نباشد.
+
+بنابراین مسیر موردنظر:
+Migration Failure
+|
+v
+Stop normal execution
+|
+v
+Create independent Operation
+|
+v
+Open new Connection
+|
+v
+Update Version Failure Status
+|
+v
+Close new Connection
+
+
+این Connection جدید نیز باید تحت مدیریت یک Operation مستقل باشد.
+
+فعلاً درباره نحوه Recovery، Retry یا اصلاح دیتابیس تصمیم نمی‌گیریم.
+
+مرحله ۱۲: سیاست برخورد با سیستم شکست‌خورده
+قاعده اولیه مشخص شده؛ ادامه آن عمداً باز است
+تنها تصمیم قطعی فعلی:
+
+اگر سیستم در ابتدای اجرای Migration، Versionای با Status غیر از 3 پیدا کند، عملیات را متوقف می‌کند.
+
+هنوز تصمیمی درباره موارد زیر نداریم:
+- Retry کردن Migration شکست‌خورده.
+- ادامه اجرای Migration از نقطه شکست.
+- اصلاح دستی دیتابیس.
+- بازگرداندن تغییرات ناقص.
+- نحوه پاک‌سازی وضعیت شکست.
+- نحوه تأیید سلامت مجدد سیستم.
+  این‌ها تصمیم‌های Recovery هستند و فعلاً خارج از محدوده تصمیم‌گیری ما هستند.
+
+مرحله ۱۳: تست‌های Integration واقعی
+باقی‌مانده
+تست Unit برای اثبات کامل رفتار سیستم کافی نیست.
+
+سناریوهای مهم MariaDB:
+سناریو	انتظار
+دو اجرای Migration هم‌زمان	فقط یک اجرا وارد بخش محافظت‌شده شود
+Lock Timeout	اجرای دوم متوقف شود
+Failure هنگام UP	اجرای عادی متوقف شود
+ثبت Failure با Connection جدید	Status در صورت موفقیت ثبت شود
+شکست Connection اصلی	Connection مستقل بتواند Failure را ثبت کند
+وجود Version با Status غیر از ۳	اجرای Migration جدید متوقف شود
+شکست ثبت Failure	خطای اصلی و خطای ثبت Failure قابل تشخیص باشند
+قطع ناگهانی Connection	وضعیت باقی‌مانده در اجرای بعدی تشخیص داده شود
+
+این تست‌ها باید روی MariaDB واقعی اجرا شوند، نه صرفاً Mock.
+
+مرحله ۱۴: Schema Upgrade و سازگاری دیتابیس‌های قدیمی
+باقی‌مانده
+یک مسئله جداگانه هم داریم:
+
+CREATE TABLE IF NOT EXISTS ساختار جدول موجود را به‌روزرسانی نمی‌کند.
+
+اگر در آینده ستون جدیدی به جدول Migration اضافه کنیم، دیتابیس قدیمی خودبه‌خود آن را دریافت نمی‌کند.
+
+پس باید مسیر Schema Upgrade مشخص شود و با:
+SystemLock.SCHEMA_UPDATE
+
+
+هماهنگ باشد.
+
+مرحله ۱۵: مستندات و تثبیت قراردادها
+باقی‌مانده
+در انتها باید قراردادهای سیستم روشن و مستند شوند:
+- Statusهای Version و معنی آن‌ها.
+- ترتیب اجرای Migrationها.
+- قانون سلامت سراسری سیستم.
+- نحوه استفاده از SystemLock.MIGRATION.
+- رفتار Failure Recording.
+- محدودیت‌های Recovery.
+- قرارداد Constructorهای Migration.
+- تفاوت مسیر رسمی Orchestration با APIهای Low-Level.
+- تضمین‌ها و محدودیت‌های Database Identity و Lock.
+
+جمع‌بندی وضعیت کل پروژه
+نقشه پیشرفت Migration
+زیرساخت Operation و مدل Failure
+تکمیل
+
+Status و History
+پیاده‌سازی شده
+
+Preflight و Preparation
+تکمیل و تست شده
+
+ترتیب اجرای Migration و Lock
+پیاده‌سازی شده
+
+بررسی سراسری Status در ابتدای اجرا
+نیازمند تطبیق با قرارداد نهایی
+
+Failure Recording با Connection جدید
+باقی‌مانده
+
+Recovery Policy
+فعلاً بدون تصمیم
+
+MariaDB Integration و Concurrency Tests
+باقی‌مانده
+
+Schema Upgrade
+باقی‌مانده
+
+مستندات نهایی
+باقی‌مانده
 
 ---
+SELECT GET_LOCK(?, ?)
+و:
+SELECT RELEASE_LOCK(?) AS released
+Operation
+├── Query
+├── Schema
+└── System
+├── AcquireLock
+└── ReleaseLock
+----
+```
+enum class ConnectionDecision {
+    REUSE,
+    NEW
+}
 
-راستش ازش ناامید شدم
-هم سازه رو بهم زد
----
-بیا به جای دست و پا زدن از اول شروع کنیم
-همیچین پوشه بندی نیاز داریم
+data class StageResult<T>(
+    val value: T,
+    val nextConnection: ConnectionDecision
+)
+
+[db].connection { ctx ->
+    // Stage 0
+}
+.then<ResultStepOne>{ result, ctx ->
+    // Stage 1
+}
+.then<ResultStepTwo>{ result, ctx ->
+    // Stage 2
+}
 ```
-system_migration
-│
-├── schema
-│   ├── SystemMigrationTable.kt
-│   └── SystemMigrationTagTable.kt
-│   └── SystemMigrationVersionTable.kt
-│
-├── model
-│   ├── SystemMigrationModel.kt
-│   └── SystemMigrationTagModel.kt
-│   └── SystemMigrationVersionModel.kt
-│
-├── cte
-│   ├── SystemMigrationQuery.kt
-│   └── SystemMigrationTagQuery.kt
-│   └── SystemMigrationVersionQuery.kt
-│
-└── query
-    ├── SystemMigrationInsertQuery.kt
-    ├── SystemMigrationDeleteQuery.kt
-    ├── SystemMigrationTagInsertQuery.kt
-    └── SystemMigrationTagDeleteQuery.kt
-    ├── SystemMigrationVersionInsertQuery.kt
-    └── SystemMigrationVersionDeleteQuery.kt
-```
-ماژول
-```
-data_base:migration:core
-```
-در ادرس
-```
-D:\projects\kotlin\query_builder\master\my_project\data_base\migration\core\src\main\kotlin\system_migration
-```
-ساخته شوند
-ولی میخوام ادرس package شخصی سازی بشه
-```
-package gog.my_project.data_base_migration.core.system_migration.{folder}.{file}
-```
-سازه ها:
-جدول 1
-```
-System_migration_tag
----
-id autoIncrement primaryKey
-tagName varchar
-tagType int
-created_at
-```
-برای tag_type
-باید در مدل
-```
-TAG_TYPE_VERSION = 0
-TAG_TYPE_MIGRATION = 1
-```
-رو تعریف کنی
-همچنین
-```
-UniqueIndex(id , tagType )
 ```
 
+[db].connection { ctx ->
+    val result = executeStepOne(ctx)
 
-جدول 2)
-```
-System_migration_version
----
-id autoIncrement primaryKey
-tag_id int --> connect -> System_migration_tag.id [varsionName]
-created_at
-```
-
-
-جدول 3)
-```
-System_migration
----
-id autoIncrement primaryKey
-tag_id int --> connect -> System_migration_tag.id [migrationId]
-version_id --> connect -> System_migration_version.id [migrationId]
-created_at
-```
-
-نمونه schema
-```
-package gog.my_project.example.migrations
-
-import gog.my_project.data_base_migration.core.migrate.Migration
-import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
-import gog.my_project.data_base.core.annotations.migrations.MigrationId
-import gog.my_project.data_base_migration.api.builder.migration
-import gog.my_project.data_base_schema.Schema
-import gog.my_project.data_base_schema.SchemaDataType
-import gog.my_project.example.DataBaseMigrationTags
-
-//@MigrationId(DataBaseMigrationTags.Items.MANAGER_EVENTS)
-class CreateManagerEvents : Migration(
-    DataBaseMigrationTags.Items.MANAGER_EVENTS
-) {
-
-    override fun up(): MigrationDefinition = migration {
-        operation(
-            Schema.createTable {
-                table { tableName("manager_events") }
-                ifNotExists()
-                addColumn {
-                    name("id")
-                    dataType(SchemaDataType.IntType)
-                    notNull()
-                    autoIncrement()
-                    primaryKey()
-                }
-                addColumn {
-                    name("event_name")
-                    dataType(SchemaDataType.VarcharType(160))
-                    notNull()
-                }
-            }
+    ctx.next(
+        StageResult(
+            value = result,
+            nextConnection = ConnectionDecision.REUSE
         )
-    }
-
-    override fun down(): MigrationDefinition = migration {
-        operation(Schema.dropTable { tableName("manager_events") })
-    }
-}
-```
-البته بخش up رو نیاز داریم و
-```
-Schema.createUniqueIndex {
-            tableName(table)
-            name(index)
-            column(column)
-        }
-```
-نمونه مدل
-```
-package gog.my_project.data_base_query.example.v3.queries.models
-
-import gog.my_project.data_base.core.annotations.models.QBColumn
-import gog.my_project.data_base.core.annotations.models.QBTable
-import gog.my_project.data_base.core.managers.models.IModelBase
-
-@QBTable(name = "user_users", alias = "uu")
-class UserModelV3 : IModelBase {
-    @QBColumn(name = "id", alias = "user_id", primaryKey = true)
-    val id: Int = 0
-
-    @QBColumn(name = "name", alias = "user_name")
-    val name: String? = null
-
-    @QBColumn(name = "family", alias = "user_family")
-    val family: String? = null
-
-    @QBColumn(name = "age", alias = "user_age")
-    val age: Int? = null
-}
-```
-نمونه cte
-```
-package gog.my_project.data_base_query.example.v3.queries.relations
-
-import gog.my_project.data_base.core.annotations.models.QBQuery
-import gog.my_project.data_base.core.annotations.models.QBQuerySelect
-import gog.my_project.data_base_manager.execute.tools.ExecuteResult
-import gog.my_project.data_base_query.api.interfaces.relations.Cte
-import gog.my_project.data_base_query.ast.enums.DataType
-import gog.my_project.data_base_query.cte.declaration.CteDeclaration
-import gog.my_project.data_base_query.example.v2.queries.models.UserModelV2
-import gog.my_project.data_base_query.example.v3.queries.models.UserModelV3
-import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
-import gog.my_project.data_base_query.executor.result.error
-import gog.my_project.data_base_query.executor.result.success
-
-
-@QBQuery(name = "user_display_query_v3", alias = "v3_user_display")
-class UserDisplayQueryV3 : CteDeclaration<UserDisplayQueryV3.RelationFilters, UserDisplayQueryV3>() {
-
-
-    data class RelationFilters(
-        val userId: Int? = null,
-        val minAge: Int? = null,
     )
-
-
-    private var mappedId: Int? = null
-
-    @QBQuerySelect(name = "id", alias = "id")
-    var id: Int
-        get() = mappedId
-            ?: throw IllegalStateException("Output property 'id' has not been mapped")
-        set(value) {
-            mappedId = value
-        }
-    @QBQuerySelect(name = "full_name", alias = "fullName")
-    var fullName: String? = null
-    @QBQuerySelect(name = "age", alias = "age")
-    var age: Int? = null
-
-
-    override fun createCte(params: RelationFilters): Cte = buildCte {
-        select {
-            addColumn {
-                column {
-                    tableSelector(UserModelV3::class)
-                    columnSelector(UserModelV3::id)
-                }
-                alias(UserDisplayQueryV3::id)
-            }
-            addColumn {
-                methodConcat {
-                    column {
-                        tableSelector(UserModelV3::class)
-                        columnSelector(UserModelV3::name)
-                    }
-                    string("-")
-                    column {
-                        tableSelector(UserModelV3::class)
-                        columnSelector(UserModelV3::family)
-                    }
-                }
-                alias(UserDisplayQueryV3::fullName)
-                execute(DataType.STRING)
-            }
-            addColumn {
-                column {
-                    tableSelector(UserModelV3::class)
-                    columnSelector(UserModelV3::age)
-                }
-                alias(UserDisplayQueryV3::age)
-            }
-        }
-        from {
-            model(UserModelV3::class)
-        }
-        if (params.userId != null || params.minAge != null) {
-            where {
-                conditions {
-                    params.userId?.let { userId ->
-                        addCondition {
-                            logicalAnd()
-                            sideSelector {
-                                tableSelector(UserModelV3::class)
-                                columnSelector(UserModelV3::id)
-                            }
-                            operationEqual()
-                            sideValueParam {
-                                paramName("relation_user_id")
-                                paramValue(userId)
-                            }
-                        }
-                    }
-                    params.minAge?.let { minAge ->
-                        addCondition {
-                            logicalAnd()
-                            sideSelector {
-                                tableSelector(UserModelV3::class)
-                                columnSelector(UserModelV3::age)
-                            }
-                            operationGreaterThanOrEqual()
-                            sideValueParam {
-                                paramName("relation_min_age")
-                                paramValue(minAge)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+}.then { result, ctx ->
+    executeStepTwo(result, ctx)
 }
-```
-نمونه کوئری delete و insert
-```
-package gog.my_project.data_base_query.example.v2.queries.insert
-
-import gog.my_project.data_base_query.example.v2.queries.models.UserModelV2
-import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
-import gog.my_project.data_base_query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
-import gog.my_project.data_base_query.example.v2.queries.IExampleV2
-import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
-import gog.my_project.data_base_query.executor.result.error
-import gog.my_project.data_base_query.executor.result.success
-
-class A1ExampleInsertV2 : IExampleV2<IQueryRenderInsertApi> {
-    override fun query(): IQueryRenderInsertApi = QueryRenderInsertBuilder()
-        .table {
-            table(UserModelV2::class)
-        }
-        .addValue {
-            column(UserModelV2::class, UserModelV2::name)
-            setValue {
-                paramName("name")
-                paramValue("Ali")
-            }
-        }
-        .addValue {
-            column(UserModelV2::class, UserModelV2::family)
-            setValue {
-                paramName("family")
-                paramValue("Sadegi")
-            }
-        }
-        .addValue {
-            column(UserModelV2::class, UserModelV2::age)
-            setValue {
-                paramName("age")
-                paramValue(50)
-            }
-        }
-
-    override fun execute(queryManager: IQueryBuilderExecutor) {
-        queryManager
-            .queryBuilder(query())
-            .sql { builtQuery -> println("\n=============================================\nV2-Insert query: ${builtQuery.query}; params: ${builtQuery.params}") }
-            .execute()
-            .success { generatedKey ->
-                println("V2-Insert: $generatedKey")
-                generatedKey
-            }
-            .error { failure -> println("V2-Insert error: $failure") }
-    }
-}
-```
-```
-package gog.my_project.data_base_query.example.v2.queries.delete
-
-import gog.my_project.data_base_query.example.v2.queries.models.UserModelV2
-import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
-import gog.my_project.data_base_query.builder.ast.delete_builder.query_render_delete.QueryRenderDeleteBuilder
-import gog.my_project.data_base_query.example.v2.queries.IExampleV2
-import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
-import gog.my_project.data_base_query.executor.result.error
-import gog.my_project.data_base_query.executor.result.success
-
-class A1ExampleDeleteV2 : IExampleV2<IQueryRenderDeleteApi> {
-    override fun query(): IQueryRenderDeleteApi = QueryRenderDeleteBuilder()
-        //.addTarget("uu")
-        .table {
-            table(UserModelV2::class)
-        }
-        .where {
-            conditions {
-                addCondition {
-                    logicalAnd()
-                    sideSelector {
-                        //tableSelector("uu")
-                        //columnSelector(UserModelV2::class, UserModelV2::id)
-                        tableSelector(UserModelV2::class)
-                        columnSelector(UserModelV2::id)
-                    }
-                    operationEqual()
-                    sideValueParam {
-                        paramName("id1")
-                        paramValue(5)
-                    }
-                }
-            }
-        }
-
-    override fun execute(queryManager: IQueryBuilderExecutor) {
-
-        /*val affectedRows = queryManager
-            .queryBuilder { operation ->
-                operation.queryDelete {
-                    QueryRenderDeleteBuilder()
-                        //.addTarget("uu")
-                        .table {
-                            table(UserModelV2::class)
-                        }
-                        .where {
-                            conditions {
-                                addCondition {
-                                    logicalAnd()
-                                    sideSelector {
-                                        //tableSelector("uu")
-                                        //columnSelector(UserModelV2::class, UserModelV2::id)
-                                        tableSelector(UserModelV2::class)
-                                        columnSelector(UserModelV2::id)
-                                    }
-                                    operationEqual()
-                                    sideValueParam {
-                                        paramName("id1")
-                                        paramValue(5)
-                                    }
-                                }
-                            }
-                        }
-                        .where {
-                            conditions {
-                                addCondition {
-                                    logicalAnd()
-                                    sideSelector {
-                                        tableSelector(UserModelV2::class)
-                                        columnSelector(UserModelV2::id)
-                                    }
-                                    operationEqual()
-                                    sideValueParam {
-                                        paramName("id1")
-                                        paramValue(5)
-                                    }
-                                }
-                            }
-                        }
-                }
-            }
-            .sql { builtQuery -> println("\n=============================================\nV2-Delete query: ${builtQuery.query}; params: ${builtQuery.params}") }
-            .execute()
-            .success { affectedRows ->
-                println("V2-Delete: $affectedRows row(s) deleted")
-                affectedRows
-            }
-            .error { failure -> println("V2-Delete error: $failure") }
-            .toValue()*/
-
-        queryManager
-            .queryBuilder(query())
-            .sql { builtQuery -> println("\n=============================================\nV2-Delete query: ${builtQuery.query}; params: ${builtQuery.params}") }
-            .execute()
-            .success { affectedRows ->
-                println("V2-Delete: $affectedRows row(s) deleted")
-                affectedRows
-            }
-            .error { failure -> println("V2-Delete error: $failure") }
-    }
-}
-```
-
-
----
-
-
-
-# Migration System
-## Version-Based Migration Architecture
-
-**Document Type:** Architecture Vision & Development Specification  
-**Project:** Kotlin Database Library  
-**Status:** Proposed Architecture  
-**Scope:** Migration Registration, Versioning, Execution, History Tracking, and Rollback
-
----
-
-# 1. Overview
-
-هدف این طراحی، ایجاد یک سیستم Migration مرحله‌ای است که در آن توسعه‌دهنده کنترل مشخصی روی نحوه انتشار تغییرات Schema داشته باشد.
-
-در این معماری، به‌جای اینکه سیستم به‌صورت خودکار برای Migrationها Batch تولید کند، توسعه‌دهنده با استفاده از مفهوم `MigrationVersion` مشخص می‌کند کدام Migrationها باید به‌عنوان یک مرحله مستقل اجرا شوند.
-
-هر Version یک واحد اجرایی و اتمیک محسوب می‌شود.
-
-تمام Migrationهای متعلق به یک Version در یک Transaction مشترک اجرا خواهند شد.
-
-اگر تمام Migrationهای یک Version با موفقیت اجرا شوند، Transaction آن Commit می‌شود و سیستم به Version بعدی می‌رود.
-
-اگر هر Migration در یک Version شکست بخورد:
-
-- Transaction همان Version Rollback می‌شود.
-- تغییرات و سوابق ایجادشده در همان مرحله بازگردانده می‌شوند.
-- Versionهای قبلی که با موفقیت Commit شده‌اند باقی می‌مانند.
-- فرایند Migration متوقف می‌شود.
-
-این ساختار به توسعه‌دهنده اجازه می‌دهد تغییرات Schema را به مراحل مشخص تقسیم کند، هر مرحله را مستقل بررسی کند و در صورت بروز مشکل، از ادامه اجرای مراحل جلوگیری کند.
-
----
-
-# 2. Design Goals
-
-اهداف اصلی معماری:
-
-1. حذف تولید خودکار Batch توسط سیستم.
-2. واگذاری مرحله‌بندی Migrationها به توسعه‌دهنده.
-3. تعریف یک واحد اجرایی مستقل به نام `MigrationVersion`.
-4. اجرای هر Version در یک Transaction مستقل.
-5. حفظ اتمیک بودن تمام Migrationهای متعلق به یک Version.
-6. توقف فرایند در صورت شکست هر Version.
-7. امکان Rollback مرحله‌ای و قابل پیش‌بینی.
-8. نگهداری تاریخچه Versionها و Migrationها در دیتابیس.
-9. استفاده مجدد از QueryExecutor و SchemaExecutor موجود.
-10. حفظ مرزبندی مسئولیت‌ها در معماری فعلی کتابخانه.
-
-## Non-Goals
-
-موارد زیر هدف این مرحله از طراحی نیستند:
-
-- اجرای موازی Migrationها.
-- اجرای مستقل هر Migration در Transaction جداگانه.
-- ایجاد Transaction مستقل برای هر MigrationGroup.
-- تولید خودکار Batch.
-- اضافه‌کردن وضعیت‌های `PENDING` یا `RUNNING` به تاریخچه.
-- ایجاد مکانیزم توزیع‌شده برای قفل‌گذاری Migration.
-- تغییر معماری Operation.
-- ساخت یک سیستم مستقل برای مدیریت نسخه نرم‌افزار.
-
----
-
-# 3. Core Concepts
-
-معماری بر اساس سه مفهوم اصلی ساخته می‌شود.
-
-## 3.1 Migration
-
-یک Migration نماینده یک تغییر مشخص در Schema دیتابیس است.
-
-هر Migration دو عملیات تعریف می‌کند:
-
-- `up()`: اعمال تغییر.
-- `down()`: بازگرداندن تغییر.
-
-نمونه:
-
-```kotlin
-@MigrationId("create_customers")
-class CreateCustomersMigration : Migration {
-
-    override fun up() = migration {
-        operation(
-            Schema.createTable {
-                table {
-                    tableName("customers")
-                }
-
-                addColumn {
-                    name("id")
-                    dataType(SchemaDataType.IntType)
-                    primaryKey()
-                    autoIncrement()
-                }
-            }
+پس 
+ ctx.next(
+        StageResult(
+            value = result,
+            nextConnection = ConnectionDecision.REUSE
         )
-    }
-
-    override fun down() = migration {
-        operation(
-            Schema.dropTable {
-                tableName("customers")
-            }
-        )
-    }
-}
+    )
+ctx.next(
+    value = result,
+    connection = ConnectionDecision.REUSE
+)
 ```
-
-هر Migration یک `MigrationDefinition` شامل دقیقاً یک `SchemaOperation` تولید می‌کند.
-
-Migration خودش مسئول اجرای SchemaOperation نیست.
-
-اجرای عملیات از طریق SchemaExecutor انجام می‌شود.
-
-## 3.2 MigrationGroup
-
-MigrationGroup برای سازمان‌دهی چند Migration تحت یک نام مشترک استفاده می‌شود.
-
-نمونه:
-
-```kotlin
-migrationGroup("customers") {
-    migration<CreateCustomersMigration>()
-    migration<AddCustomerEmailMigration>()
-}
-```
-
-مسئولیت Group صرفاً سازمان‌دهی Registrationها است.
-
-MigrationGroup:
-
-- واحد Transaction نیست.
-- واحد Version نیست.
-- Batch تولید نمی‌کند.
-- ترتیب اجرای مستقل از Version ندارد.
-- مرز Rollback ایجاد نمی‌کند.
-
-تمام Migrationهای یک Group در Transaction مربوط به Version والد اجرا می‌شوند.
-
-## 3.3 MigrationVersion
-
-MigrationVersion مهم‌ترین مفهوم جدید این معماری است.
-
-هر Version مجموعه‌ای از Migrationها و Groupهای ثبت‌شده است که باید به‌عنوان یک مرحله مستقل اجرا شود.
-
-نمونه:
-
-```kotlin
-migrationVersion("V1") {
-    migration<CreateCustomersMigration>()
-
-    migrationGroup("customers") {
-        migration<AddCustomerEmailMigration>()
-    }
-}
-```
-
-ویژگی‌های MigrationVersion:
-
-- شناسه مشخص و یکتا دارد.
-- شامل یک یا چند Registration است.
-- ترتیب Migrationهای داخل آن حفظ می‌شود.
-- یک Transaction مستقل برای اجرای آن ایجاد می‌شود.
-- در صورت موفقیت، در تاریخچه دیتابیس ثبت می‌شود.
-- در صورت شکست، تمام تغییرات همان Version Rollback می‌شوند.
-
-**MigrationVersion واحد اجرای اتمیک Migration System است.**
-
----
-
-# 4. Public API Design
-
-API عمومی باید ساده، خوانا و قابل پیش‌بینی باشد.
-
-ساختار پیشنهادی:
-
-```kotlin
-migrationConfig {
-
-    migrationVersion("V1") {
-
-        migration<CreateCustomersMigration>()
-
-        migration<AddCustomerEmailMigration>()
-
-        migrationGroup("orders") {
-            migration<CreateOrdersMigration>()
-            migration<AddOrderItemsMigration>()
-        }
-    }
-
-    migrationVersion("V2") {
-
-        migration<AddCustomerPhoneMigration>()
-
-        migrationGroup("products") {
-            migration<CreateProductsMigration>()
-            migration<AddProductPriceMigration>()
-        }
-    }
-
-    migrationVersion("V3") {
-        migration<AddOrderStatusMigration>()
-    }
-}
-```
-
-## 4.1 API Structure
-
-ساختار مفهومی Builderها:
-
-```text
-MigrationConfigurationBuilder
-    |
-    +-- migrationVersion(name)
-            |
-            +-- MigrationVersionBuilder
-                    |
-                    +-- migration<T>()
-                    |
-                    +-- migrationGroup(name)
-                            |
-                            +-- MigrationGroupBuilder
-                                    |
-                                    +-- migration<T>()
-```
-
-## 4.2 Registration Rules
-
-قوانین Registration:
-
-1. نام Version نباید خالی باشد.
-2. نام Version باید در کل Configuration یکتا باشد.
-3. شناسه Migration باید در کل Configuration یکتا باشد.
-4. یک Migration نباید در چند Version ثبت شود.
-5. ترتیب ثبت Versionها باید حفظ شود.
-6. ترتیب ثبت Migrationها در هر Version باید حفظ شود.
-7. ترتیب Registrationها، شامل Migration مستقل و Group، باید حفظ شود.
-8. Configuration پس از Build باید Snapshot مستقل و غیرقابل تغییر از Registrationها داشته باشد.
-9. Version خالی نباید بدون تصمیم صریح طراحی وارد چرخه اجرا شود؛ رفتار آن باید در Validation مشخص شود.
-
-## 4.3 Version Identity
-
-شناسه Version یک String است.
-
-نمونه:
-
-```text
-V1
-V2
-V3
-2026_01
-initial_schema
-```
-
-سیستم نباید برای تعیین ترتیب Versionها از مقایسه متنی نام آن‌ها استفاده کند.
-
-ترتیب اجرای Versionها بر اساس ترتیب ثبت آن‌ها در Configuration است.
-
-بنابراین:
-
-```kotlin
-migrationConfig {
-    migrationVersion("V1") { /* ... */ }
-    migrationVersion("V2") { /* ... */ }
-    migrationVersion("V10") { /* ... */ }
-}
-```
-
-ترتیب اجرا دقیقاً V1، سپس V2 و سپس V10 خواهد بود.
-
----
-
-# 5. Database History Model
-
-در معماری فعلی، تاریخچه Migration در یک جدول ذخیره می‌شود:
-
-```text
-system_migration
-```
-
-این جدول دارای ستون `batch` است.
-
-در معماری جدید، Batch حذف می‌شود و Version به‌صورت یک موجودیت مستقل ذخیره خواهد شد.
-
-## 5.1 New Table: system_migration_version
-
-جدول جدید:
-
-```text
-system_migration_version
-```
-
-ساختار پیشنهادی:
-
-| Column | Description |
-|---|---|
-| id | شناسه داخلی و Auto Increment |
-| version | شناسه Version |
-
-قیدها:
-
-- `id` کلید اصلی است.
-- `version` باید Unique باشد.
-- `version` نباید Null باشد.
-
-## 5.2 Updated Table: system_migration
-
-ساختار جدید:
-
-| Column | Description |
-|---|---|
-| id | شناسه داخلی و Auto Increment |
-| migration | شناسه Migration |
-| version_id | ارجاع به Version |
-
-قیدها:
-
-- `id` کلید اصلی است.
-- `migration` باید Unique باشد.
-- `version_id` نباید Null باشد.
-- `version_id` به `system_migration_version.id` ارجاع می‌دهد.
-
-رابطه:
-
-```text
-system_migration_version
-          |
-          | 1
-          |
-          | N
-          |
-system_migration
-```
-
-هر Version می‌تواند چند Migration داشته باشد.
-
-هر Migration دقیقاً به یک Version تعلق دارد.
-
-## 5.3 History Example
-
-فرض کنیم Configuration شامل سه Version باشد:
-
-```text
-V1:
-    create_customers
-    add_customer_email
-
-V2:
-    create_products
-    add_product_price
-
-V3:
-    create_orders
-```
-
-پس از اجرای موفق V1 و V2، تاریخچه می‌تواند به شکل زیر باشد:
-
-**system_migration_version**
-
-| id | version |
-|---:|---|
-| 1 | V1 |
-| 2 | V2 |
-
-**system_migration**
-
-| id | migration | version_id |
-|---:|---|---:|
-| 1 | create_customers | 1 |
-| 2 | add_customer_email | 1 |
-| 3 | create_products | 2 |
-| 4 | add_product_price | 2 |
-
-در این وضعیت V3 هنوز اجرا نشده است.
-
-هیچ Batch خودکاری وجود ندارد.
-
-`version_id` مشخص می‌کند هر Migration متعلق به کدام مرحله است.
-
----
-
-# 6. Forward Migration Workflow
-
-Forward Migration باید بر اساس Versionها اجرا شود.
-
-هر Version یک Transaction مستقل دارد.
-
-## 6.1 Execution Algorithm
-
-فرض کنیم Configuration شامل V1، V2 و V3 باشد.
-
-سیستم ابتدا تاریخچه دیتابیس را می‌خواند و وضعیت Versionهای اجراشده را با Configuration مقایسه می‌کند.
-
-سپس Versionهای اجرا‌نشده را به ترتیب Configuration اجرا می‌کند.
-
-برای هر Version:
-
-1. شروع Transaction جدید.
-2. ایجاد رکورد Version در `system_migration_version`.
-3. اجرای Migrationهای متعلق به Version به ترتیب ثبت.
-4. پس از موفقیت هر Migration، ثبت سابقه آن در `system_migration`.
-5. پس از موفقیت تمام Migrationهای Version، Commit.
-6. شروع Transaction مستقل برای Version بعدی.
-
-ثبت رکورد Version در ابتدای Transaction ضروری است؛ چون Migrationها برای ثبت `version_id` به شناسه آن نیاز دارند.
-
-با این حال، رکورد Version تا زمان Commit در همان Transaction باقی می‌ماند و در صورت شکست، همراه سایر تغییرات Rollback می‌شود.
-
-## 6.2 Execution Example
-
-```text
-Forward Migration
-       |
-       v
-    V1 Begin
-       |
-       +--> Migration A
-       |
-       +--> Migration B
-       |
-       +--> Commit V1
-       |
-       v
-    V2 Begin
-       |
-       +--> Migration C
-       |
-       +--> Migration D
-       |
-       +--> Commit V2
-       |
-       v
-    V3 Begin
-       |
-       +--> Migration E
-       |
-       +--> Migration F
-       |
-       +--> Failure
-       |
-       +--> Rollback V3
-       |
-       v
-    STOP
-```
-
-نتیجه:
-
-- V1 باقی می‌ماند.
-- V2 باقی می‌ماند.
-- V3 در تاریخچه ثبت‌شده باقی نمی‌ماند.
-- هیچ Version بعدی اجرا نمی‌شود.
-
-## 6.3 Failure Handling
-
-اگر هر مرحله شکست بخورد:
-
-- اجرای Migrationهای بعدی همان Version متوقف می‌شود.
-- Transaction جاری Rollback می‌شود.
-- ثبت Version و Migrationهای آن مرحله نیز Rollback می‌شوند.
-- خطای اصلی به مصرف‌کننده گزارش می‌شود.
-- اجرای Versionهای بعدی انجام نمی‌شود.
-
-سیستم نباید پس از شکست یک Version به‌صورت خودکار از آن عبور کند.
-
----
-
-# 7. Rollback Workflow
-
-Rollback نیز باید بر اساس Version انجام شود.
-
-واحد Rollback یک Version کامل است، نه یک Migration مستقل.
-
-## 7.1 Rollback Order
-
-اگر ترتیب Forward به این صورت باشد:
-
-```text
-V1 -> V2 -> V3
-```
-
-ترتیب Rollback باید معکوس باشد:
-
-```text
-V3 -> V2 -> V1
-```
-
-داخل هر Version نیز Migrationها باید به ترتیب معکوس اجرای Forward بازگردانده شوند.
-
-## 7.2 Rollback Algorithm
-
-برای Rollback هر Version:
-
-1. انتخاب آخرین Version اعمال‌شده.
-2. شروع Transaction مستقل.
-3. خواندن Migrationهای متعلق به Version.
-4. اجرای `down()` آن‌ها به ترتیب معکوس.
-5. پس از موفقیت هر `down()`، حذف رکورد آن Migration از `system_migration`.
-6. پس از موفقیت تمام Rollbackها، حذف رکورد Version از `system_migration_version`.
-7. Commit Transaction.
-8. در صورت درخواست Rollback مراحل بیشتر، رفتن به Version قبلی.
-
-## 7.3 Rollback Example
-
-```text
-Rollback
-    |
-    v
- V3 Begin
-    |
-    +--> Migration E down()
-    |
-    +--> Migration D down()
-    |
-    +--> Delete migration records
-    |
-    +--> Delete V3 record
-    |
-    +--> Commit V3
-    |
-    v
- V2 Begin
-    |
-    +--> Migration C down()
-    |
-    +--> Migration B down()
-    |
-    +--> Failure
-    |
-    +--> Rollback V2
-    |
-    v
- STOP
-```
-
-در این مثال:
-
-- V3 با موفقیت Rollback شده و از تاریخچه حذف می‌شود.
-- V2 به دلیل شکست Rollback نمی‌شود و سابقه آن باقی می‌ماند.
-- V1 بدون تغییر باقی می‌ماند.
-- فرایند متوقف می‌شود.
-
-## 7.4 Rollback Atomicity
-
-تمام `down()`های یک Version و حذف سوابق آن باید در همان Transaction اجرا شوند.
-
-اگر یکی از `down()`ها شکست بخورد:
-
-- تمام تغییرات همان Version Rollback می‌شوند.
-- رکوردهای تاریخچه آن Version باقی می‌مانند.
-- Versionهای قبلی دست‌نخورده باقی می‌مانند.
-
----
-
-# 8. Transaction Ownership
-
-این بخش یکی از مهم‌ترین اصول معماری است.
-
-Migration System نباید مالک Connection یا Transaction lifecycle باشد.
-
-مرزبندی فعلی پروژه حفظ می‌شود:
-
-| Component | Responsibility |
-|---|---|
-| Operation | Connection lifecycle, Scope, Transaction |
-| QueryExecutor | Query execution |
-| SchemaExecutor | Schema and DDL execution |
-| Migration | Migration workflow and orchestration |
-| MigrationVersion | Logical execution boundary |
-
-## 8.1 Forward Transaction
-
-برای هر Version، Migration از API فعلی Operation برای ایجاد Transaction مستقل استفاده می‌کند.
-
-تمام عملیات همان Version باید از Context و Executorهای متعلق به همان Transaction استفاده کنند.
-
-## 8.2 Query Execution
-
-تمام Queryهای تاریخچه باید از:
-
-```kotlin
-tx.queryExecutor
-```
-
-استفاده کنند.
-
-از ساخت QueryExecutor مستقل یا Connection جدید خودداری شود.
-
-## 8.3 Schema Execution
-
-تمام SchemaOperationها باید از مسیر SchemaExecutor موجود و Scope همان Transaction اجرا شوند.
-
-## 8.4 No Independent Lifecycle
-
-موارد زیر ممنوع هستند:
-
-- ساخت Connection مستقل در Migration.
-- ایجاد Transaction مستقل داخل Migration.
-- اجرای Insert/Delete تاریخچه خارج از Transaction جاری.
-- استفاده از Executor مستقل که Scope فعلی را نادیده بگیرد.
-
----
-
-# 9. System Migration Components
-
-ساختار فعلی System Migration باید با Versioning توسعه پیدا کند.
-
-ساختار مفهومی:
-
-```text
-system_migration
-│
-├── schema
-│   ├── SystemMigrationTable.kt
-│   └── SystemMigrationVersionTable.kt
-│
-├── model
-│   ├── SystemMigrationModel.kt
-│   └── SystemMigrationVersionModel.kt
-│
-├── cte
-│   ├── SystemMigrationQuery.kt
-│   └── SystemMigrationVersionQuery.kt
-│
-└── query
-    ├── SystemMigrationInsertQuery.kt
-    ├── SystemMigrationDeleteQuery.kt
-    ├── SystemMigrationVersionInsertQuery.kt
-    └── SystemMigrationVersionDeleteQuery.kt
-```
-
-این ساختار صرفاً سازمان‌دهی مفهومی است و نام‌گذاری نهایی باید با قراردادهای موجود پروژه هماهنگ باشد.
-
-## 9.1 SystemMigrationTable
-
-مسئول تعریف جدول `system_migration` است.
-
-ستون `batch` حذف و ستون `version_id` جایگزین می‌شود.
-
-## 9.2 SystemMigrationVersionTable
-
-مسئول تعریف جدول `system_migration_version` است.
-
-این جدول شناسه Versionهای اعمال‌شده را نگهداری می‌کند.
-
-## 9.3 SystemMigrationQuery
-
-مسئول خواندن تاریخچه Migrationها است.
-
-در صورت نیاز به اطلاعات Version، Query باید امکان دسترسی به رابطه Version و Migration را فراهم کند.
-
-## 9.4 SystemMigrationVersionQuery
-
-مسئول خواندن تاریخچه Versionها است.
-
-این Query برای تشخیص Versionهای اجراشده و تعیین آخرین مرحله موفق استفاده می‌شود.
-
-## 9.5 Insert/Delete Queries
-
-برای هر دو جدول، Queryهای Insert و Delete مرکزی وجود خواهند داشت.
-
-| Table | Insert | Delete |
-|---|---|---|
-| system_migration | ثبت Migration | حذف سابقه Migration |
-| system_migration_version | ثبت Version | حذف سابقه Version |
-
-این Queryها فقط Query می‌سازند و نباید مسئول اجرای آن‌ها باشند.
-
-اجرای Query از طریق Executorهای موجود انجام می‌شود.
-
----
-
-# 10. Version Consistency and Immutability
-
-یکی از مهم‌ترین قواعد این معماری، ثابت ماندن Versionهای منتشرشده است.
-
-فرض کنیم V1 قبلاً با موفقیت روی دیتابیس اجرا شده است.
-
-بعداً توسعه‌دهنده یک Migration جدید به V1 اضافه کند.
-
-این کار نباید به‌عنوان ادامه طبیعی V1 پذیرفته شود.
-
-Version موفق باید از نظر مجموعه Migrationهای متعلق به خود Immutable باشد.
-
-## 10.1 Required Rules
-
-- Version اجراشده نباید با Migration جدید توسعه پیدا کند.
-- Migrationهای آن نباید حذف شوند.
-- شناسه Migrationهای آن نباید تغییر کنند.
-- ترتیب Migrationهای آن نباید تغییر کند.
-- Migration جدید باید در Version جدید قرار بگیرد.
-
-## 10.2 Configuration Comparison
-
-سیستم باید Configuration فعلی را با تاریخچه دیتابیس مقایسه کند.
-
-حداقل این وضعیت‌ها باید قابل تشخیص باشند:
-
-| Situation | Expected Behavior |
-|---|---|
-| Version جدید و اجرا‌نشده | قابل اجرا |
-| Version اجراشده و بدون تغییر | معتبر |
-| Version اجراشده با Migration جدید | خطای ناسازگاری |
-| Migration اجراشده حذف‌شده از Configuration | خطای ناسازگاری |
-| Migration اجراشده به Version دیگری منتقل‌شده | خطای ناسازگاری |
-| ترتیب Versionهای قبلی تغییر کرده | خطای ناسازگاری |
-
-سیستم نباید اختلاف Configuration و تاریخچه را با اجرای خودکار UPDATE یا بازنویسی تاریخچه اصلاح کند.
-
----
-
-# 11. Ordering Rules
-
-ترتیب اجرای Versionها از ترتیب ثبت در Configuration تعیین می‌شود.
-
-ترتیب Migrationها نیز از ترتیب ثبت آن‌ها در Version مشخص می‌شود.
-
-ترتیب اجرای Migrationها:
-
-1. ترتیب Registrationهای مستقیم و Groupها در Version.
-2. ترتیب Migrationها داخل هر Group.
-3. حفظ ترتیب در تمام مراحل Build و Execution.
-
-برای Rollback، همین ترتیب باید معکوس شود.
-
-## 11.1 Persisted Order
-
-شناسه‌های داخلی Version می‌توانند ترتیب اعمال‌شده را منعکس کنند، مشروط بر اینکه ایجاد Versionها در یک جریان ترتیبی و در Transactionهای موفق انجام شود.
-
-برای تشخیص وضعیت Configuration، سیستم نباید صرفاً به مقایسه رشته Versionها تکیه کند.
-
-در صورت نیاز به ترتیب مستقل و قابل‌تغییر، می‌توان در آینده فیلد ترتیبی صریح اضافه کرد؛ فعلاً نیازی به آن نیست.
-
----
-
-# 12. Migration Configuration State Validation
-
-پیش از شروع اجرای Migration، سیستم باید وضعیت کلی را بررسی کند.
-
-موارد مهم:
-
-- شناسه‌های Version تکراری نباشند.
-- شناسه‌های Migration در کل Configuration یکتا باشند.
-- Migration ثبت‌شده در چند Version وجود نداشته باشد.
-- Versionهای اجراشده با Configuration فعلی سازگار باشند.
-- ترتیب Versionهای قبلی تغییر نکرده باشد.
-- تاریخچه ناقص یا ناسازگار شناسایی شود.
-
-اگر تاریخچه دیتابیس نشان دهد Migrationهایی ثبت شده‌اند که Version معتبر ندارند، سیستم باید آن وضعیت را ناسازگار تشخیص دهد.
-
-سیستم نباید برای چنین مواردی حدس بزند یا تاریخچه را خودکار اصلاح کند.
-
----
-
-# 13. Failure Scenarios
-
-## Scenario A: Failure During Forward Migration
-
-```text
-V1 -> Success
-V2 -> Success
-V3 -> Failure
-```
-
-Expected:
-
-- V1 باقی می‌ماند.
-- V2 باقی می‌ماند.
-- V3 Rollback می‌شود.
-- فرایند متوقف می‌شود.
-
-## Scenario B: Failure During Rollback
-
-```text
-Rollback V3 -> Success
-Rollback V2 -> Failure
-```
-
-Expected:
-
-- V3 حذف شده است.
-- V2 باقی می‌ماند.
-- V1 باقی می‌ماند.
-- فرایند متوقف می‌شود.
-
-## Scenario C: Failure During History Insert
-
-اگر اجرای Schema موفق باشد ولی Insert تاریخچه شکست بخورد:
-
-- Transaction همان Version باید Rollback شود.
-- تغییر Schema و سایر تغییرات همان Version باید به وضعیت قبل بازگردند.
-- Version نباید به‌عنوان موفق ثبت شود.
-
-## Scenario D: Failure During History Delete
-
-اگر اجرای `down()` موفق باشد ولی حذف رکورد تاریخچه شکست بخورد:
-
-- Transaction همان Version باید Rollback شود.
-- تغییرات `down()` باید بازگردانده شوند.
-- تاریخچه Version باید باقی بماند.
-
-## Scenario E: Configuration Changed After Release
-
-اگر Version اجراشده تغییر کرده باشد:
-
-- سیستم باید ناسازگاری را تشخیص دهد.
-- Migration جدید را به Version قبلی اضافه نکند.
-- اجرای خودکار و اصلاح تاریخچه انجام ندهد.
-
----
-
-# 14. Database Transactional DDL Compatibility
-
-این معماری بر Transaction مستقل برای هر Version تکیه دارد.
-
-اما باید یک محدودیت مهم در نظر گرفته شود:
-
-تمام دیتابیس‌ها و Dialectها رفتار یکسانی در برابر DDL داخل Transaction ندارند.
-
-برخی عملیات DDL ممکن است:
-
-- به‌صورت کامل Transactional باشند.
-- باعث Implicit Commit شوند.
-- در صورت شکست قابل Rollback نباشند.
-- محدودیت‌های خاصی در اجرای DDL داخل Transaction داشته باشند.
-
-بنابراین قبل از ادعای Atomicity کامل، باید قابلیت Transactional DDL برای دیتابیس‌های پشتیبانی‌شده بررسی شود.
-
-### Required Behavior
-
-- Migration System باید از رفتار واقعی Dialectها آگاه باشد.
-- نباید تضمین Rollback کامل برای عملیاتی بدهد که دیتابیس آن را پشتیبانی نمی‌کند.
-- اگر یک Dialect محدودیت دارد، این محدودیت باید مستند و قابل تشخیص باشد.
-- DDL Failure Policy و رفتار موجود Operation باید حفظ شوند.
-
-همچنین Migrationها نباید خارج از Transaction جاری Side Effect غیرقابل بازگشت ایجاد کنند.
-
----
-
-# 15. Development Architecture and Module Boundaries
-
-مرزبندی فعلی ماژول‌ها باید حفظ شود.
-
-```text
-Migration API
-    |
-    v
-Migration Registration
-    |
-    v
-Migration Executor
-    |
-    +------> Operation
-    |
-    +------> QueryExecutor
-    |
-    +------> SchemaExecutor
-```
-
-## Migration Core
-
-مسئول:
-
-- Migration contract
-- MigrationDefinition
-- MigrationIdentity
-- System Migration schema
-- System Migration models
-- System Migration query declarations
-
-Core نباید به Executor وابسته شود.
-
-## Migration API
-
-مسئول:
-
-- Migration registration contracts
-- Migration configuration
-- Public builders
-- MigrationVersion registration
-- MigrationGroup registration
-
-## Migration Executor
-
-مسئول:
-
-- اجرای Configuration
-- انتخاب Versionهای موردنیاز
-- اجرای Forward workflow
-- اجرای Rollback workflow
-- هماهنگی Transactionها
-- هماهنگی Reader و Recorder
-- توقف و گزارش Failure
-
-## Operation
-
-مالک Connection و Transaction lifecycle باقی می‌ماند.
-
-هیچ تغییری در معماری تثبیت‌شده Operation صرفاً برای پیاده‌سازی Versioning مجاز نیست، مگر نیاز واقعی و مشخصی اثبات شود.
-
----
-
-# 16. Testing Strategy
-
-تست‌ها باید بدون نیاز به دیتابیس واقعی، رفتار Migration System را بررسی کنند.
-
-## 16.1 Registration Tests
-
-- ثبت Version مستقل.
-- ثبت چند Version.
-- ثبت Migration مستقل داخل Version.
-- ثبت Group داخل Version.
-- حفظ ترتیب Registrationها.
-- رد Version تکراری.
-- رد Migration تکراری.
-- رد Migration ثبت‌شده در چند Version.
-- رد Version خالی، مطابق قرارداد نهایی.
-
-## 16.2 Forward Workflow Tests
-
-- اجرای موفق یک Version.
-- اجرای چند Version به ترتیب.
-- ایجاد Transaction مستقل برای هر Version.
-- استفاده از Transaction مشترک برای تمام Migrationهای یک Version.
-- Commit موفق Version.
-- Rollback کامل Version ناموفق.
-- باقی ماندن Versionهای موفق قبلی.
-- توقف فرایند پس از Failure.
-
-## 16.3 Rollback Workflow Tests
-
-- انتخاب آخرین Version.
-- اجرای Versionها به ترتیب معکوس.
-- اجرای Migrationها به ترتیب معکوس.
-- حذف رکورد Migration پس از موفقیت `down()`.
-- حذف رکورد Version پس از موفقیت تمام Migrationها.
-- Rollback کامل Version ناموفق.
-- باقی ماندن تاریخچه Version ناموفق.
-- توقف فرایند پس از Failure.
-
-## 16.4 History Tests
-
-- خواندن Versionها.
-- خواندن Migrationهای متعلق به هر Version.
-- تطبیق تاریخچه با Configuration.
-- تشخیص Version ناسازگار.
-- تشخیص Migration حذف‌شده از Configuration.
-- تشخیص Migration منتقل‌شده به Version دیگر.
-- تشخیص تاریخچه ناقص.
-
-## 16.5 Transaction Scope Tests
-
-با Fake Executor و Fake Transaction بررسی شود:
-
-- تمام Queryهای تاریخچه از `tx.queryExecutor` استفاده می‌کنند.
-- تمام SchemaOperationها از Scope همان Transaction استفاده می‌کنند.
-- هیچ Connection مستقل ایجاد نمی‌شود.
-- شکست Insert باعث Rollback Transaction می‌شود.
-- شکست Delete باعث Rollback Transaction می‌شود.
-
-تست‌های واقعی دیتابیس باید جداگانه و بر اساس Dialectهای پشتیبانی‌شده انجام شوند.
-
----
-
-# 17. Development Roadmap
-
-پیاده‌سازی باید مرحله‌ای باشد تا معماری موجود بدون نیاز به بازنویسی گسترده توسعه پیدا کند.
-
-## Phase 1: Version Registration
-
-- اضافه‌کردن `MigrationVersion` به Registration API.
-- اضافه‌کردن `MigrationVersionBuilder`.
-- پشتیبانی از Migration و MigrationGroup داخل Version.
-- حفظ ترتیب Registrationها.
-- اعتبارسنجی Version و Migration Identity.
-- تست Registration.
-
-**Acceptance Criteria:** Configuration بتواند چند Version مستقل را با ترتیب مشخص نگهداری کند.
-
-## Phase 2: Database Schema
-
-- اضافه‌کردن `SystemMigrationVersionTable`.
-- اضافه‌کردن `SystemMigrationVersionModel`.
-- تغییر `SystemMigrationTable`.
-- حذف ستون `batch`.
-- اضافه‌کردن ستون `version_id`.
-- تعریف Foreign Key و Unique Constraints.
-- بررسی سازگاری Schema با Dialectهای پشتیبانی‌شده.
-
-**Acceptance Criteria:** ساختار تاریخچه بتواند رابطه یک‌به‌چند Version و Migration را نگهداری کند.
-
-## Phase 3: System Migration Queries
-
-- اضافه‌کردن Version Insert Query.
-- اضافه‌کردن Version Delete Query.
-- اضافه‌کردن Version Reader Query.
-- اصلاح Migration Insert Query برای استفاده از `version_id`.
-- اصلاح Migration Delete Query در صورت نیاز.
-- تست SQL و پارامترها.
-
-**Acceptance Criteria:** تمام عملیات تاریخچه از Queryهای مرکزی استفاده کنند.
-
-## Phase 4: History Reader and Recorder
-
-- توسعه Reader برای خواندن Versionها و Migrationهای آن‌ها.
-- توسعه Recorder برای ثبت Version.
-- توسعه Recorder برای ثبت Migration با `version_id`.
-- حذف رکوردهای Migration هنگام Rollback.
-- حذف رکورد Version پس از Rollback کامل آن.
-- حفظ اجرای تمام Queryها در Transaction جاری.
-
-**Acceptance Criteria:** تاریخچه Version و Migration به‌درستی خوانده، ثبت و حذف شود.
-
-## Phase 5: Forward Migrator
-
-- مقایسه Configuration با تاریخچه.
-- تشخیص Versionهای اجرا‌نشده.
-- اجرای هر Version در Transaction مستقل.
-- اجرای تمام Migrationهای Version در Transaction مشترک.
-- ثبت تاریخچه در همان Transaction.
-- توقف فرایند در صورت شکست.
-
-**Acceptance Criteria:** اجرای موفق و شکست هر Version مطابق قرارداد Transaction رفتار کند.
-
-## Phase 6: Rollback Migrator
-
-- انتخاب Versionهای قابل Rollback.
-- اجرای Versionها به ترتیب معکوس.
-- اجرای Migrationها به ترتیب معکوس.
-- اجرای `down()` در Transaction مستقل هر Version.
-- حذف تاریخچه در همان Transaction.
-- توقف فرایند در صورت شکست.
-
-**Acceptance Criteria:** Rollback مرحله‌ای و قابل پیش‌بینی باشد.
-
-## Phase 7: Consistency and Compatibility
-
-- بررسی تغییر Versionهای منتشرشده.
-- تشخیص تغییر ترتیب Versionها.
-- تشخیص تغییر Migrationهای قبلی.
-- بررسی محدودیت Transactional DDL.
-- مستندسازی رفتار Dialectها.
-- تکمیل تست‌های Regression.
-
-**Acceptance Criteria:** سیستم در برابر Configuration ناسازگار رفتار صریح و امن داشته باشد.
-
----
-
-# 18. Important Architectural Decisions
-
-تصمیم‌های اصلی این معماری:
-
-| Decision | Description |
-|---|---|
-| Version-based execution | Version واحد اجرای مرحله‌ای است |
-| Independent transactions | هر Version یک Transaction مستقل دارد |
-| Atomic version | تمام Migrationهای یک Version در یک Transaction هستند |
-| Explicit registration | توسعه‌دهنده Versionها را تعریف می‌کند |
-| Group is organizational | Group واحد اجرایی مستقل نیست |
-| No automatic batch | Batch از مدل حذف می‌شود |
-| Reverse rollback | Rollback در ترتیب معکوس انجام می‌شود |
-| History consistency | تاریخچه باید با Configuration سازگار باشد |
-| Stop on failure | شکست یک Version اجرای مراحل بعدی را متوقف می‌کند |
-| Existing Operation ownership | Operation مالک Transaction باقی می‌ماند |
-
----
-
-# 19. Final Vision
-
-هدف این معماری این نیست که صرفاً Migrationها را به چند گروه تقسیم کند.
-
-هدف این است که توسعه‌دهنده بتواند تغییرات Schema را به مراحل مشخص انتشار تقسیم کند و سیستم مسئولیت اجرای امن و قابل پیش‌بینی آن مراحل را بر عهده بگیرد.
-
-در این مدل:
-
-- Migration تعریف‌کننده یک تغییر Schema است.
-- MigrationGroup ابزار سازمان‌دهی Migrationها است.
-- MigrationVersion واحد انتشار و اجرای اتمیک است.
-- Operation مسئول مدیریت Transaction است.
-- QueryExecutor و SchemaExecutor عملیات واقعی را اجرا می‌کنند.
-- Migration Executor ترتیب و جریان اجرای مراحل را مدیریت می‌کند.
-- System Migration History وضعیت واقعی مراحل اعمال‌شده را نگهداری می‌کند.
-
-جریان نهایی:
-
-```text
-Migration Configuration
-        |
-        v
-Migration Versions
-        |
-        v
-Version Selection
-        |
-        v
-Independent Transaction
-        |
-        v
-Execute Migration Operations
-        |
-        v
-Record Migration History
-        |
-        v
-Commit Version
-        |
-        v
-Next Version
-```
-
-در صورت شکست:
-
-```text
-Version Failure
-        |
-        v
-Rollback Current Transaction
-        |
-        v
-Preserve Previous Versions
-        |
-        v
-Stop Migration Process
-```
-
-**اصل نهایی طراحی:**
-
-هر Version یک مرحله مستقل از تغییرات Schema است که باید به‌صورت کامل اجرا و ثبت شود یا به‌طور کامل به وضعیت قبل بازگردد؛ در حالی که Versionهای قبلی موفق دست‌نخورده باقی می‌مانند.
-
-این مرز مشخص، اساس کنترل، بازیابی و توسعه قابل اعتماد Schema در Migration System خواهد بود.

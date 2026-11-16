@@ -2,6 +2,7 @@ package gog.my_project.data_base_migration.executor.service.status
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationStatusQuery
+import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryReader
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
@@ -11,6 +12,8 @@ import model.migration_status.MigrationStatusSnapshot
 
 /** Reads the combined System Migration status CTE through the caller-owned Operation scope. */
 internal class MigrationStatusReader {
+    private val versionHistoryReader = MigrationVersionHistoryReader()
+
     fun read(scope: OperationExecutionScope): ExecuteResult<MigrationStatusSnapshot> {
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
@@ -23,12 +26,21 @@ internal class MigrationStatusReader {
 
             when (result) {
                 is ExecuteResult.Failure -> result
-                is ExecuteResult.Success -> ExecuteResult.Success(
-                    MigrationStatusSnapshot(
-                        requireNotNull(result.result) { "System Migration status query returned no rows" }
-                            .map(::toStatusRow),
-                    ),
-                )
+                is ExecuteResult.Success -> {
+                    val rows = requireNotNull(result.result) { "System Migration status query returned no rows" }
+                        .map(::toStatusRow)
+                    when (val versionReadResult = versionHistoryReader.readVersions(scope)) {
+                        is ExecuteResult.Failure -> versionReadResult
+                        is ExecuteResult.Success -> ExecuteResult.Success(
+                            MigrationStatusSnapshot.withHistoryVersions(
+                                rows,
+                                requireNotNull(versionReadResult.result) {
+                                    "Migration Version history reader returned no rows"
+                                },
+                            ),
+                        )
+                    }
+                }
             }
         } catch (error: Error) {
             scope.recordFatal(error)

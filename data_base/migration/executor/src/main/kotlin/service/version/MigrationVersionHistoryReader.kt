@@ -49,12 +49,15 @@ internal class MigrationVersionHistoryReader {
         }
     }
 
-    private fun readVersions(scope: OperationExecutionScope): ExecuteResult<List<MigrationHistoryVersion>> {
+    fun readVersions(scope: OperationExecutionScope): ExecuteResult<List<MigrationHistoryVersion>> {
+        scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
+
         val cte = SystemMigrationVersionQuery().createCte(SystemMigrationVersionQuery.RelationFilters())
         return read(scope, cte.definition.ast) { row ->
             MigrationHistoryVersion(
                 id = row.requiredInt("id", "Migration Version query returned a null id"),
                 tagId = row.requiredInt("tagId", "Migration Version query returned a null tagId"),
+                status = row.requiredInt("status", "Migration Version query returned a null status"),
             )
         }
     }

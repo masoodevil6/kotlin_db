@@ -21,4 +21,4 @@ val keys: Set<DatabaseKey> = manager.registeredKeys()
 
 گرفتن Handle یا فراخوانی `registeredKeys()` به‌تنهایی Context یا اتصال JDBC ایجاد نمی‌کند. Context هر registration هنگام نخستین عملیات مقداردهی می‌شود. lookup کلید ثبت‌نشده خطای مشخص می‌دهد و پس از شروع shutdown، عملیات جدید پذیرفته نمی‌شود.
 
-هر Handle در حال حاضر دسترسی Query و Transaction دارد. اجرای Migration از این catalog و Handle موقتاً حذف شده است؛ جزئیات در [Migration و DatabaseManager](migrations.md) آمده است.
+Handle مسیر Query و Transaction همان Registration را ارائه می‌کند. با dependency به Aggregate `:data_base:migration`، extension رسمی Migration نیز در همان Handle قابل استفاده است و Configuration به Registration متصل می‌شود؛ جزئیات در [Migration و DatabaseManager](migrations.md) آمده است.

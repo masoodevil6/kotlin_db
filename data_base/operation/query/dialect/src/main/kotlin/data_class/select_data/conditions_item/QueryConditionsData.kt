@@ -5,5 +5,6 @@ import gog.my_project.data_base_query.dialect.data_class.QueryDataClass
 data class QueryConditionsData(
     val _dummy: Int = 0,
     var _hasLogical: Boolean = false,
+    val _withAlias: Boolean = true ,
 ): QueryDataClass()
 

@@ -21,7 +21,7 @@ class MySqlQueryWhereCapability :
             ctx.registry.render(
                 conditionGroup ,
                 ctx.dialect ,
-                QueryConditionsGroupsData(_hasLogical = false)
+                QueryConditionsGroupsData(_hasLogical = false , _withAlias = dataClass?._withAlias ?: true)
             );
         if (conditionStr != null) {
             return  " ${ctx.dialect._prefixWhere} $conditionStr " ;

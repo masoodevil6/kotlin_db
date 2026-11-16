@@ -28,7 +28,7 @@ class MySqlQueryConditionGroupCapability :
 
                 var conditionString : String? = null;
                 if (condition is IQueryConditionsAst){
-                    val conditionsData = QueryConditionsData();
+                    val conditionsData = QueryConditionsData(_withAlias = dataClass?._withAlias ?: true);
                     conditionsData._hasLogical = false;
                     if (index > 0 ){
                         conditionsData._hasLogical = true;
@@ -37,7 +37,7 @@ class MySqlQueryConditionGroupCapability :
                     conditionString = ctx.registry.render(condition , ctx.dialect , conditionsData)
                 }
                 else if (condition is IQueryConditionsGroupsAst){
-                    val conditionsData = QueryConditionsGroupsData();
+                    val conditionsData = QueryConditionsGroupsData(_withAlias = dataClass?._withAlias ?: true);
                     conditionsData._hasLogical = false;
                     if (index > 0 ){
                         conditionsData._hasLogical = true;

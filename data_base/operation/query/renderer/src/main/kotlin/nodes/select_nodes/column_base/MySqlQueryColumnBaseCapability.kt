@@ -22,7 +22,7 @@ class MySqlQueryColumnBaseCapability :
         var columnStr = ""
 
         if (column != null) {
-            if (!tableAlias.isNullOrEmpty()) {
+            if (dataClass?._withAlias == true && !tableAlias.isNullOrEmpty()) {
                 columnStr = " $tableAlias."
             }
             columnStr += "$column "

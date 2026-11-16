@@ -35,8 +35,8 @@ class MigrationVersionHistoryReaderTest {
                 row("id" to 23, "tagName" to "version-with-row", "tagType" to 0),
             ),
             versions = listOf(
-                row("id" to 31, "tagId" to 900),
-                row("id" to 32, "tagId" to 23),
+                row("id" to 31, "tagId" to 900, "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+                row("id" to 32, "tagId" to 23, "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
             ),
             migrations = listOf(
                 row("id" to 81, "tagId" to 22, "versionId" to 902, "createdAt" to null),
@@ -56,7 +56,13 @@ class MigrationVersionHistoryReaderTest {
             ),
             snapshot.tags,
         )
-        assertEquals(listOf(MigrationHistoryVersion(31, 900), MigrationHistoryVersion(32, 23)), snapshot.versions)
+        assertEquals(
+            listOf(
+                MigrationHistoryVersion(31, 900, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+                MigrationHistoryVersion(32, 23, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+            ),
+            snapshot.versions,
+        )
         assertEquals(
             listOf(
                 MigrationHistoryEntry(81, 22, 902, null),
@@ -83,8 +89,8 @@ class MigrationVersionHistoryReaderTest {
                 row("id" to 3, "tagName" to "first", "tagType" to 1),
             ),
             versions = listOf(
-                row("id" to 41, "tagId" to 29),
-                row("id" to 8, "tagId" to 3),
+                row("id" to 41, "tagId" to 29, "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+                row("id" to 8, "tagId" to 3, "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
             ),
             migrations = listOf(
                 row("id" to 50, "tagId" to 29, "versionId" to 41, "createdAt" to "same"),
@@ -106,7 +112,10 @@ class MigrationVersionHistoryReaderTest {
     fun `preserves sparse persisted ids and raw foreign key values`() {
         val jdbc = FakeJdbc(
             tags = listOf(row("id" to 2, "tagName" to "tag", "tagType" to 0)),
-            versions = listOf(row("id" to 7, "tagId" to 2), row("id" to 35, "tagId" to 2)),
+            versions = listOf(
+                row("id" to 7, "tagId" to 2, "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+                row("id" to 35, "tagId" to 2, "status" to MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+            ),
             migrations = listOf(
                 row("id" to 5, "tagId" to 12, "versionId" to 7, "createdAt" to null),
                 row("id" to 66, "tagId" to 13, "versionId" to 35, "createdAt" to null),

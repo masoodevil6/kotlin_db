@@ -18,8 +18,8 @@ class MigrationVersionHistorySnapshotTest {
                 MigrationHistoryTag(2, "tag-2", 0),
             ),
             versions = listOf(
-                MigrationHistoryVersion(30, 8),
-                MigrationHistoryVersion(4, 2),
+                MigrationHistoryVersion(30, 8, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
+                MigrationHistoryVersion(4, 2, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED),
             ),
             migrations = listOf(
                 MigrationHistoryEntry(30, 8, 30, "2026-01-01T00:00:00Z"),
@@ -41,7 +41,7 @@ class MigrationVersionHistorySnapshotTest {
     @Test
     fun `defensively copies all input lists and exposes unmodifiable lists`() {
         val tag = MigrationHistoryTag(1, "tag", 0)
-        val version = MigrationHistoryVersion(1, 1)
+        val version = MigrationHistoryVersion(1, 1, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED)
         val entry = MigrationHistoryEntry(1, 1, 1, null)
         val tags = mutableListOf(tag)
         val versions = mutableListOf(version)
@@ -71,7 +71,7 @@ class MigrationVersionHistorySnapshotTest {
         val duplicate = MigrationHistoryEntry(14, 5, 9, null)
         val snapshot = MigrationVersionHistorySnapshot(
             tags = listOf(MigrationHistoryTag(5, "item", 1)),
-            versions = listOf(MigrationHistoryVersion(9, 2)),
+            versions = listOf(MigrationHistoryVersion(9, 2, MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED)),
             migrations = listOf(MigrationHistoryEntry(80, 5, 9), duplicate, duplicate),
         )
 

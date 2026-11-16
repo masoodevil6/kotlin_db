@@ -6,14 +6,11 @@ import gog.my_project.data_base.core.events.DatabaseWatchSubscription
 import gog.my_project.data_base_manager.facade.DatabaseHandleApi
 import gog.my_project.data_base_manager.facade.DatabaseManager
 import gog.my_project.data_base_manager.facade.DatabaseManagerApi
-import gog.my_project.data_base_manager.facade.withOperationScope
 import gog.my_project.data_base_manager.facade.watch
 import gog.my_project.data_base_migration.api.builder.migrationConfig
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
 import gog.my_project.data_base_migration.core.events.MigrationEvent
-import gog.my_project.data_base_migration.executor.controller.MigrationController
-import gog.my_project.data_base_migration.facade.MigrationFacade
 import gog.my_project.data_base_migration.facade.migration
 import gog.my_project.data_base_migration.facade.migrationConfiguration
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
@@ -71,86 +68,53 @@ fun main() {
 
     var failure: Throwable? = null
     var mainWatch: DatabaseWatchSubscription? = null
-    var analyticsWatch: DatabaseWatchSubscription? = null
+    //var analyticsWatch: DatabaseWatchSubscription? = null
     try {
         val main = manager[mainDatabase]
         val analytics = manager[analyticsDatabase]
 
         mainWatch = main.watch { event -> reportDatabaseEvent("MAIN", event) }
-        analyticsWatch = analytics.watch { event -> reportDatabaseEvent("ANALYTICS", event) }
-
-
-        main.migration {
-            init();
-
-            requireMigrationSuccess("Main migrate", migrate())
-            reportMigrationState("Main", status(), current())
-
-            requireMigrationSuccess("Main repeated migrate", migrate())
-            reportMigrationState("Main after repeated migrate", status(), current())
-        }
-
-        analytics.migration {
-            init();
-
-            requireMigrationSuccess("Analytics migrate", migrate())
-            reportMigrationState("Analytics", status(), current())
-
-            requireMigrationSuccess("Analytics repeated migrate", migrate())
-            reportMigrationState("Analytics after repeated migrate", status(), current())
-        }
-
-        insertAndReadExamples(main, analytics)
+        //analyticsWatch = analytics.watch { event -> reportDatabaseEvent("ANALYTICS", event) }
 
         if (rollbackEnabled) {
             println("Rollback opt-in is enabled.")
+            // Rollback removes the application tables, so exercise them before rolling back.
+            insertAndReadExamples(main, analytics)
+        }
 
-            println("Starting Main rollback...")
+        requireValue("Main migration block", main.migration {
+            requireMigrationSuccess("Main init", init())
 
-            requireValue(
-                "Main rollback block",
-                main.migration {
-                    requireMigrationSuccess("Main rollback", rollback())
-                    reportMigrationState(
-                        "Main after rollback",
-                        status(),
-                        current(),
-                    )
+            if (rollbackEnabled) {
+                println("Starting Main rollback...")
+                requireMigrationSuccess("Main rollback", rollback())
+                reportMigrationState("Main after rollback", status(), current())
+            } else {
+                requireMigrationSuccess("Main migrate", migrate())
+                reportMigrationState("Main", status(), current())
 
-                    println("Starting Main re-migration...")
+                requireMigrationSuccess("Main repeated migrate", migrate())
+                reportMigrationState("Main after repeated migrate", status(), current())
+            }
+        })
 
-                    requireMigrationSuccess("Main re-migrate", migrate())
-                    reportMigrationState(
-                        "Main after re-migration",
-                        status(),
-                        current(),
-                    )
-                },
-            )
+        requireValue("Analytics migration block", analytics.migration {
+            requireMigrationSuccess("Analytics init", init())
 
-            println("Starting Analytics rollback...")
+            if (rollbackEnabled) {
+                println("Starting Analytics rollback...")
+                requireMigrationSuccess("Analytics rollback", rollback())
+                reportMigrationState("Analytics after rollback", status(), current())
+            } else {
+                requireMigrationSuccess("Analytics migrate", migrate())
+                reportMigrationState("Analytics", status(), current())
 
-            requireValue(
-                "Analytics rollback block",
-                analytics.migration {
-                    requireMigrationSuccess("Analytics rollback", rollback())
-                    reportMigrationState(
-                        "Analytics after rollback",
-                        status(),
-                        current(),
-                    )
+                requireMigrationSuccess("Analytics repeated migrate", migrate())
+                reportMigrationState("Analytics after repeated migrate", status(), current())
+            }
+        })
 
-                    println("Starting Analytics re-migration...")
-
-                    requireMigrationSuccess("Analytics re-migrate", migrate())
-                    reportMigrationState(
-                        "Analytics after re-migration",
-                        status(),
-                        current(),
-                    )
-                },
-            )
-
+        if (!rollbackEnabled) {
             insertAndReadExamples(main, analytics)
         }
 
@@ -158,7 +122,7 @@ fun main() {
     } catch (error: Throwable) {
         failure = error
     } finally {
-        failure = closeWatchSubscription(analyticsWatch, failure)
+        //failure = closeWatchSubscription(analyticsWatch, failure)
         failure = closeWatchSubscription(mainWatch, failure)
         try {
             manager.shutdown()
@@ -224,6 +188,7 @@ private fun closeWatchSubscription(
 private fun mainDatabaseMigrations(): MigrationConfiguration = migrationConfig {
     migrationVersion(DataBaseMigrationTags.Versions.Init) {
         migration<CreateManagerCustomers>()
+        migration<CreateManagerEvents>()
     }
 }
 
@@ -235,55 +200,7 @@ private fun analyticsDatabaseMigrations(): MigrationConfiguration = migrationCon
     }
 }
 
-private fun runMigrations(
-    label: String,
-    handle: DatabaseHandleApi,
-    controller: MigrationController,
-) {
-    runCommand("$label system migration initialization", handle) { controller.init(it) }
-    runMigrationBlock("$label migration commands", handle) {
-        requireMigrationSuccess("$label migrate", migrate())
-        reportMigrationState(label, status(), current())
-
-        // A second call demonstrates that persisted history makes the configured migration a no-op.
-        requireMigrationSuccess("$label repeated migrate", migrate())
-        reportMigrationState("$label after repeated migrate", status(), current())
-    }
-}
-
-private fun rollbackAndRemigrate(
-    label: String,
-    handle: DatabaseHandleApi,
-) {
-    runMigrationBlock("$label rollback and re-migration", handle) {
-        requireMigrationSuccess("$label rollback", rollback())
-        reportMigrationState("$label after rollback", status(), current())
-        requireMigrationSuccess("$label re-migrate", migrate())
-        reportMigrationState("$label after re-migrate", status(), current())
-    }
-}
-
-private fun runMigrationBlock(
-    label: String,
-    handle: DatabaseHandleApi,
-    block: MigrationFacade.() -> Unit,
-) {
-    requireValue(label, handle.migration(block))
-}
-
 private fun requireMigrationSuccess(label: String, result: ExecuteResult<Boolean>) {
-    val completed = requireValue(label, result)
-    check(completed) { "$label returned an unsuccessful result" }
-    println("$label: completed")
-}
-
-private fun runCommand(
-    label: String,
-    handle: DatabaseHandleApi,
-    command: (gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope) ->
-        ExecuteResult<Boolean>,
-) {
-    val result = handle.withOperationScope(command)
     val completed = requireValue(label, result)
     check(completed) { "$label returned an unsuccessful result" }
     println("$label: completed")

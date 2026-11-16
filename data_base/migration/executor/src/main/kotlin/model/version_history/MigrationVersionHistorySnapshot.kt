@@ -31,7 +31,13 @@ internal data class MigrationHistoryTag(
 internal data class MigrationHistoryVersion(
     val id: Int,
     val tagId: Int,
-)
+    val status: Int,
+) {
+    companion object {
+        /** Persisted code for a Version whose migration and history writes completed. */
+        const val STATUS_MIGRATE_COMPLETED = 3
+    }
+}
 
 internal data class MigrationHistoryEntry(
     val id: Int,

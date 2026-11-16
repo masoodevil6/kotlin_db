@@ -3,6 +3,7 @@ package gog.my_project.data_base_migration.executor.service.version_selection
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryReader
+import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryState
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryValidator
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
@@ -15,7 +16,16 @@ internal class MigrationCurrentVersionService(
     private val historyValidator = MigrationVersionHistoryValidator()
 
     /** Returns the latest applied Version in Configuration order, or `Success(null)` when none exist. */
-    fun currentVersion(scope: OperationExecutionScope): ExecuteResult<PreparedMigrationVersion?> {
+    fun currentVersion(scope: OperationExecutionScope): ExecuteResult<PreparedMigrationVersion?> =
+        when (val result = validatedHistoryState(scope)) {
+            is ExecuteResult.Failure -> result
+            is ExecuteResult.Success -> ExecuteResult.Success(result.result?.currentVersion)
+        }
+
+    /** Reads and validates History once, retaining the Snapshot and its derived current Version. */
+    internal fun validatedHistoryState(
+        scope: OperationExecutionScope,
+    ): ExecuteResult<MigrationVersionHistoryState> {
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
         return try {
@@ -26,7 +36,7 @@ internal class MigrationCurrentVersionService(
                         "Migration history reader returned no snapshot"
                     }
                     val history = historyValidator.validateConfiguration(configuration, snapshot)
-                    ExecuteResult.Success(history.appliedVersions.lastOrNull())
+                    ExecuteResult.Success(history)
                 }
             }
         } catch (error: Error) {

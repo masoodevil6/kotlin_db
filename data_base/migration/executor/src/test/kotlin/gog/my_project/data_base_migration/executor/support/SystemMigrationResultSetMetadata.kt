@@ -24,7 +24,7 @@ internal fun systemMigrationResultSetMetadata(sql: String): ResultSetMetaData {
             "appliedVersionTagType",
         )
         "system_migration_version_query" in normalizedSql ||
-            "system_migration_version" in normalizedSql -> listOf("id", "tagId")
+            "system_migration_version" in normalizedSql -> listOf("id", "tagId", "status")
         "system_migration_tag_query" in normalizedSql ||
             "system_migration_tag" in normalizedSql -> listOf("id", "tagName", "tagType")
         "system_migration" in normalizedSql &&

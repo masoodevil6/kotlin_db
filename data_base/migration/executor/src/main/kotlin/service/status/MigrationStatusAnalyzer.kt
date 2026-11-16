@@ -11,6 +11,7 @@ import model.migration_status.MigrationStatusRow
 import model.migration_status.MigrationStatusSnapshot
 import model.migration_status.MigrationVersionStatus
 import model.prepared.PreparedMigrationVersion
+import model.version_history.MigrationHistoryVersion
 import service.version.MigrationVersionPreparationService
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
@@ -109,10 +110,14 @@ internal class MigrationStatusAnalyzer(
             tagVariants.getOrPut(row.tagId, ::linkedSetOf).add(TagFact(row.tagId, row.tagName, row.tagType))
 
             row.tagVersionId?.let { versionId ->
+                val status = snapshot.historyVersions.singleOrNull { it.id == versionId && it.tagId == row.tagId }?.status
                 versionVariants.getOrPut(versionId, ::linkedSetOf)
-                    .add(VersionFact(versionId, row.tagId, row.tagName, row.tagType))
+                    .add(VersionFact(versionId, row.tagId, row.tagName, row.tagType, status))
             }
             row.appliedVersionId?.let { versionId ->
+                val status = snapshot.historyVersions.singleOrNull {
+                    it.id == versionId && it.tagId == row.appliedVersionTagId
+                }?.status
                 versionVariants.getOrPut(versionId, ::linkedSetOf)
                     .add(
                         VersionFact(
@@ -120,6 +125,7 @@ internal class MigrationStatusAnalyzer(
                             row.appliedVersionTagId,
                             row.appliedVersionTagName,
                             row.appliedVersionTagType,
+                            status,
                         ),
                     )
             }
@@ -154,6 +160,19 @@ internal class MigrationStatusAnalyzer(
                     versionIds = listOfNotNull(row.appliedVersionId),
                     versionReferenceIds = listOfNotNull(row.appliedVersionReferenceId),
                 )
+            }
+        }
+
+        snapshot.historyVersions.forEach { version ->
+            val versionTags = tagVariants[version.tagId].orEmpty()
+            if (versionTags.isEmpty()) {
+                versionVariants.getOrPut(version.id, ::linkedSetOf)
+                    .add(VersionFact(version.id, version.tagId, null, null, version.status))
+            } else {
+                versionTags.forEach { tag ->
+                    versionVariants.getOrPut(version.id, ::linkedSetOf)
+                        .add(VersionFact(version.id, version.tagId, tag.name, tag.typeCode, version.status))
+                }
             }
         }
 
@@ -220,6 +239,7 @@ internal class MigrationStatusAnalyzer(
             tags = tagVariants.values.flatMap { it },
             versions = versionVariants.values.flatMap { it },
             histories = historyVariants.values.flatMap { it },
+            persistedVersionRows = snapshot.historyVersions,
         )
     }
 
@@ -331,6 +351,16 @@ internal class MigrationStatusAnalyzer(
             val relatedMigrationIds = associatedTagNames.filter(migrationOwners::containsKey)
             val affectedVersionNames =
                 (relatedVersionNames + relatedMigrationIds.mapNotNull(migrationOwners::get)).distinct()
+            if (version.status != MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED) {
+                issues.add(
+                    MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY,
+                    "Persisted Migration Version ${version.id} has non-completed status ${version.status}",
+                    affectedVersionNames = affectedVersionNames,
+                    affectedMigrationIds = relatedMigrationIds,
+                    tagIds = listOfNotNull(version.tagId),
+                    versionIds = listOf(version.id),
+                )
+            }
             if (version.id <= 0) {
                 issues.add(
                     MigrationStatusReport.Issue.Code.INVALID_PERSISTED_ID,
@@ -372,14 +402,15 @@ internal class MigrationStatusAnalyzer(
             }
         }
 
-        facts.versions.filter { it.tagId != null }.groupBy { it.tagId }.forEach { (tagId, records) ->
-            val versionIds = records.map(VersionFact::id).distinct()
-            if (versionIds.size > 1) {
-                val tagName = records.firstNotNullOfOrNull { record ->
-                    record.tagName.takeIf { record.tagTypeCode == MigrationTagType.VERSION.code }
+        facts.persistedVersionRows.groupBy(MigrationHistoryVersion::tagId).forEach { (tagId, records) ->
+            if (records.size > 1) {
+                val versionIds = records.map(MigrationHistoryVersion::id).distinct()
+                val associatedTags = facts.tags.filter { it.id == tagId }
+                val tagName = associatedTags.firstNotNullOfOrNull { tag ->
+                    tag.name.takeIf { tag.typeCode == MigrationTagType.VERSION.code }
                 }
-                val migrationName = records.firstNotNullOfOrNull { record ->
-                    record.tagName.takeIf { record.tagTypeCode == MigrationTagType.ITEM.code }
+                val migrationName = associatedTags.firstNotNullOfOrNull { tag ->
+                    tag.name.takeIf { tag.typeCode == MigrationTagType.ITEM.code }
                 }
                 issues.add(
                     MigrationStatusReport.Issue.Code.DUPLICATE_VERSION_RECORD,
@@ -821,6 +852,7 @@ internal class MigrationStatusAnalyzer(
         val tagId: Int?,
         val tagName: String?,
         val tagTypeCode: Int?,
+        val status: Int?,
     )
 
     private data class HistoryFact(
@@ -839,6 +871,7 @@ internal class MigrationStatusAnalyzer(
         val tags: List<TagFact>,
         val versions: List<VersionFact>,
         val histories: List<HistoryFact>,
+        val persistedVersionRows: List<MigrationHistoryVersion>,
     )
 
     private class IssueCollector {
