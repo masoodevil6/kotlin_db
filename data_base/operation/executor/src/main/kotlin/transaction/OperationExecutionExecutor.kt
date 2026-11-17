@@ -60,19 +60,57 @@ class OperationExecutionExecutor private constructor(
     fun <T> connection(
         coordinator: OperationExecutionCoordinator,
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = executeConnection<Unit, T>(coordinator, null) { scope, _ -> block(scope) }
+
+    /**
+     * Internal pre-acquisition path reserved for Pipeline execution. Admission and Failure Owner
+     * installation happen before [prepare], while this executor retains all resource ownership.
+     */
+    internal fun <P, T> connectionWithPreparation(
+        coordinator: OperationExecutionCoordinator,
+        prepare: () -> P,
+        block: (scope: OperationExecutionScope, prepared: P) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = executeConnection(
+        coordinator,
+        prepareBeforeAcquire = { PreparedExecutionValue(prepare()) },
+    ) { scope, prepared ->
+        block(scope, requireNotNull(prepared).value)
+    }
+
+    private data class PreparedExecutionValue<T>(val value: T)
+
+    private fun <P, T> executeConnection(
+        coordinator: OperationExecutionCoordinator,
+        prepareBeforeAcquire: (() -> PreparedExecutionValue<P>)?,
+        block: (scope: OperationExecutionScope, prepared: PreparedExecutionValue<P>?) -> ExecuteResult<T>,
     ): ExecuteResult<T> {
         val nestedFailure = OperationScopeGuard.enter()
         if (nestedFailure != null) return ExecuteResult.Failure(nestedFailure)
 
-        val startFailure = coordinator.tryStartScope(
-            IllegalStateException("Nested connection scopes are not supported"),
-        )
-        if (startFailure != null) {
-            OperationScopeGuard.exit()
-            return ExecuteResult.Failure(startFailure)
+        val pipelineFailureOwner = if (prepareBeforeAcquire != null) {
+            when (val start = coordinator.tryStartPipelineScope(
+                IllegalStateException("Nested connection scopes are not supported"),
+            )) {
+                is OperationExecutionCoordinator.PipelineScopeStart.Started -> start.failureOwner
+                is OperationExecutionCoordinator.PipelineScopeStart.Rejected -> {
+                    OperationScopeGuard.exit()
+                    return ExecuteResult.Failure(start.failure)
+                }
+            }
+        } else {
+            val startFailure = coordinator.tryStartScope(
+                IllegalStateException("Nested connection scopes are not supported"),
+            )
+            if (startFailure != null) {
+                OperationScopeGuard.exit()
+                return ExecuteResult.Failure(startFailure)
+            }
+            null
         }
 
         var scope: OperationExecutionScope? = null
+        var scopeActivated = false
+        var pipelineAdmissionFinalized = false
         var connection: Connection? = null
         var connectionClosed = false
 
@@ -84,6 +122,31 @@ class OperationExecutionExecutor private constructor(
         }
 
         try {
+            pipelineFailureOwner?.let { OperationScopeGuard.installPipelineFailureOwner(it) }
+            val prepared = if (prepareBeforeAcquire == null) {
+                null
+            } else {
+                try {
+                    prepareBeforeAcquire()
+                } catch (failure: Throwable) {
+                    val owner = requireNotNull(pipelineFailureOwner)
+                    owner.recordThrowable(failure)
+                    val failureToReturn = coordinator.finishPipelinePreparation(owner)
+                    pipelineAdmissionFinalized = true
+                    return pipelineFailureResult(failureToReturn)
+                }
+            }
+
+            if (pipelineFailureOwner != null) {
+                when (val claim = coordinator.claimPipelineAcquisition(pipelineFailureOwner)) {
+                    OperationExecutionCoordinator.PipelineAcquisitionClaim.Claimed -> Unit
+                    is OperationExecutionCoordinator.PipelineAcquisitionClaim.Rejected -> {
+                        pipelineAdmissionFinalized = true
+                        return pipelineFailureResult(claim.failure)
+                    }
+                }
+            }
+
             connection = try {
                 requireNotNull(connectionFactory()).also {
                     eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPENED))
@@ -95,14 +158,35 @@ class OperationExecutionExecutor private constructor(
             val ownedConnection = requireNotNull(connection)
 
             val activeScope = try {
-                OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity, eventListener).also {
+                val createdScope = if (pipelineFailureOwner == null) {
+                    OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity, eventListener)
+                } else {
+                    OperationExecutionScope(
+                        ownedConnection,
+                        databasePlatformConfig,
+                        databaseIdentity,
+                        eventListener,
+                        pipelineFailureOwner,
+                    )
+                }
+                createdScope.also {
                     scope = it
                     coordinator.prepareScope(it)
                     OperationScopeGuard.activate(it)
                     coordinator.activateOwned(it)
+                    scopeActivated = true
                 }
             } catch (failure: Throwable) {
                 val closeFailure = closeOnce(failure)
+                if (pipelineFailureOwner != null) {
+                    pipelineFailureOwner.recordThrowable(failure)
+                    if (closeFailure != null && closeFailure !== failure) {
+                        pipelineFailureOwner.recordThrowable(closeFailure)
+                    }
+                    val failureToReturn = coordinator.finishPipelinePreparation(pipelineFailureOwner)
+                    pipelineAdmissionFinalized = true
+                    return pipelineFailureResult(failureToReturn)
+                }
                 if (failure is Error) throw failure
                 if (closeFailure is Error) throw closeFailure
                 return ExecuteResult.Failure(failure)
@@ -110,12 +194,14 @@ class OperationExecutionExecutor private constructor(
 
             var callbackResult: ExecuteResult<T>? = null
             var callbackFailure: Throwable? = null
-            try {
-                callbackResult = block(activeScope)
-                activeScope.recordResult(callbackResult)
-            } catch (failure: Throwable) {
-                callbackFailure = failure
-                if (failure is Error) activeScope.recordFatal(failure) else activeScope.recordFailure(failure)
+            if (pipelineFailureOwner == null || activeScope.firstFailure == null) {
+                try {
+                    callbackResult = block(activeScope, prepared)
+                    activeScope.recordResult(callbackResult)
+                } catch (failure: Throwable) {
+                    callbackFailure = failure
+                    if (failure is Error) activeScope.recordFatal(failure) else activeScope.recordFailure(failure)
+                }
             }
 
             try {
@@ -173,6 +259,18 @@ class OperationExecutionExecutor private constructor(
             if (closeFailure != null) return ExecuteResult.Failure(closeFailure)
             return result
         } catch (failure: Throwable) {
+            if (pipelineFailureOwner != null && !scopeActivated && !pipelineAdmissionFinalized) {
+                pipelineFailureOwner.recordThrowable(failure)
+                if (connection != null && !connectionClosed) {
+                    val closeOutcome = closeOnce(failure)
+                    if (closeOutcome != null && closeOutcome !== failure) {
+                        pipelineFailureOwner.recordThrowable(closeOutcome)
+                    }
+                }
+                val failureToReturn = coordinator.finishPipelinePreparation(pipelineFailureOwner)
+                pipelineAdmissionFinalized = true
+                return pipelineFailureResult(failureToReturn)
+            }
             if (connection != null && !connectionClosed) {
                 val closeOutcome = closeOnce(failure)
                 if (failure is Error) throw failure
@@ -186,6 +284,13 @@ class OperationExecutionExecutor private constructor(
             coordinator.finishOwnedScope()
             OperationScopeGuard.exit()
         }
+    }
+
+    private fun <T> pipelineFailureResult(
+        failure: Throwable,
+    ): ExecuteResult<T> {
+        if (failure is Error) throw failure
+        return ExecuteResult.Failure(failure)
     }
 
     fun <T> transaction(
@@ -203,6 +308,18 @@ class OperationExecutionExecutor private constructor(
         eventListener,
     )
         .transaction(coordinator, block)
+
+    /** Internal pre-acquisition path reserved for Transaction Pipeline execution. */
+    internal fun <P, T> transactionWithPreparation(
+        coordinator: OperationExecutionCoordinator,
+        prepare: () -> P,
+        block: (scope: OperationExecutionScope, prepared: P) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = OperationTransactionExecutor(
+        connectionFactory,
+        databasePlatformConfig,
+        databaseIdentity,
+        eventListener,
+    ).transactionWithPreparation(coordinator, prepare, block)
 
     private fun closeConnection(connection: Connection, primary: Throwable?): Throwable? {
         val closeFailure = try {

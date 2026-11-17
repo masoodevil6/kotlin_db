@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class OperationExecutionCoordinator(
     private val rootOperationDescription: String = "root operation",
 ) {
-    private enum class State { IDLE, STARTING, ACTIVE, FINALIZING }
+    private enum class State { IDLE, STARTING, ACQUIRING, ACTIVE, FINALIZING }
 
     private val monitor = Any()
     private var state = State.IDLE
@@ -14,8 +14,20 @@ class OperationExecutionCoordinator(
     private var activeScope: OperationExecutionScope? = null
     private var preparedScope: OperationExecutionScope? = null
     private var lifecycleThread: Thread? = null
+    /** Non-null only while an admitted Pipeline is preparing or acquiring its root resources. */
+    private var pipelineFailureOwner: OperationFailureOwner? = null
     private var pendingFailure: Throwable? = null
     private var pendingFatal: Error? = null
+
+    internal sealed interface PipelineScopeStart {
+        class Started(val failureOwner: OperationFailureOwner) : PipelineScopeStart
+        class Rejected(val failure: Throwable) : PipelineScopeStart
+    }
+
+    internal sealed interface PipelineAcquisitionClaim {
+        object Claimed : PipelineAcquisitionClaim
+        class Rejected(val failure: Throwable) : PipelineAcquisitionClaim
+    }
 
     sealed interface OperationAdmission {
         class Allowed(val permit: RootOperationPermit) : OperationAdmission
@@ -29,7 +41,9 @@ class OperationExecutionCoordinator(
                 activeRootOperations++
                 OperationAdmission.Allowed(RootOperationPermit(this))
             }
-            State.STARTING -> OperationAdmission.Rejected(recordPendingFailureLocked(rejection))
+            State.STARTING, State.ACQUIRING -> OperationAdmission.Rejected(
+                recordPreActivationFailureLocked(rejection),
+            )
             State.ACTIVE -> OperationAdmission.Rejected(
                 requireNotNull(activeScope).recordFailure(rejection),
             )
@@ -49,13 +63,18 @@ class OperationExecutionCoordinator(
                     state = State.STARTING
                     lifecycleThread = Thread.currentThread()
                     preparedScope = null
+                    pipelineFailureOwner = null
                     pendingFailure = null
                     pendingFatal = null
                     null
                 }
             }
             State.STARTING -> {
-                recordPendingFailureLocked(nestedFailure)
+                recordPreActivationFailureLocked(nestedFailure)
+                nestedFailure
+            }
+            State.ACQUIRING -> {
+                recordPreActivationFailureLocked(nestedFailure)
                 nestedFailure
             }
             State.ACTIVE -> {
@@ -66,10 +85,84 @@ class OperationExecutionCoordinator(
         }
     }
 
+    /** Admits a Pipeline before its definition/state preparation and creates its sole Failure Owner. */
+    internal fun tryStartPipelineScope(nestedFailure: Throwable): PipelineScopeStart = synchronized(monitor) {
+        when (state) {
+            State.IDLE -> {
+                if (activeRootOperations != 0) {
+                    PipelineScopeStart.Rejected(
+                        IllegalStateException(
+                            "Cannot start a managed scope while a $rootOperationDescription is in progress",
+                        ),
+                    )
+                } else {
+                    state = State.STARTING
+                    lifecycleThread = Thread.currentThread()
+                    preparedScope = null
+                    pendingFailure = null
+                    pendingFatal = null
+                    val failureOwner = OperationFailureOwner()
+                    pipelineFailureOwner = failureOwner
+                    PipelineScopeStart.Started(failureOwner)
+                }
+            }
+            State.STARTING, State.ACQUIRING -> PipelineScopeStart.Rejected(
+                recordPreActivationFailureLocked(nestedFailure),
+            )
+            State.ACTIVE -> PipelineScopeStart.Rejected(requireNotNull(activeScope).recordFailure(nestedFailure))
+            State.FINALIZING -> PipelineScopeStart.Rejected(nestedFailure)
+        }
+    }
+
+    /**
+     * Atomically closes the preparation window to new failures and claims resource acquisition.
+     * A rejection observed before this transition prevents Connection/Transaction creation.
+     */
+    internal fun claimPipelineAcquisition(
+        failureOwner: OperationFailureOwner,
+    ): PipelineAcquisitionClaim = synchronized(monitor) {
+        check(state == State.STARTING) { "Pipeline acquisition can only be claimed while Starting" }
+        check(lifecycleThread === Thread.currentThread()) {
+            "Pipeline acquisition must be claimed by its Operation thread"
+        }
+        check(pipelineFailureOwner === failureOwner) { "Pipeline Failure Owner does not match the admitted execution" }
+
+        val failure = failureOwner.propagationFailure
+        if (failure != null) {
+            state = State.FINALIZING
+            PipelineAcquisitionClaim.Rejected(failure)
+        } else {
+            state = State.ACQUIRING
+            PipelineAcquisitionClaim.Claimed
+        }
+    }
+
+    /** Finalizes a Pipeline attempt that failed before Scope activation and returns its failure. */
+    internal fun finishPipelinePreparation(
+        failureOwner: OperationFailureOwner,
+    ): Throwable = synchronized(monitor) {
+        check(state == State.STARTING || state == State.ACQUIRING) {
+            "Pipeline preparation can only finish before Scope activation"
+        }
+        check(lifecycleThread === Thread.currentThread()) {
+            "Pipeline preparation must finish on its Operation thread"
+        }
+        check(pipelineFailureOwner === failureOwner) { "Pipeline Failure Owner does not match the admitted execution" }
+        state = State.FINALIZING
+        checkNotNull(failureOwner.propagationFailure) {
+            "A failed Pipeline preparation must have a recorded failure"
+        }
+    }
+
     /** Registers the scope internally before it is published to a callback. */
     internal fun prepareScope(scope: OperationExecutionScope) = synchronized(monitor) {
-        check(state == State.STARTING && lifecycleThread === Thread.currentThread()) {
+        check((state == State.STARTING || state == State.ACQUIRING) && lifecycleThread === Thread.currentThread()) {
             "Managed scope can only be prepared by its starting Operation thread"
+        }
+        pipelineFailureOwner?.let { failureOwner ->
+            check(scope.operationFailureOwner === failureOwner) {
+                "Pipeline Scope must retain the admitted execution's Failure Owner"
+            }
         }
         check(preparedScope == null) { "Managed scope is already prepared" }
         preparedScope = scope
@@ -83,7 +176,7 @@ class OperationExecutionCoordinator(
     fun activate(scope: OperationExecutionScope): Unit = synchronized(monitor) {
         val misuse = IllegalStateException("Managed scope activation is owned by Operation executors")
         when (state) {
-            State.STARTING -> recordPendingFailureLocked(misuse)
+            State.STARTING, State.ACQUIRING -> recordPreActivationFailureLocked(misuse)
             State.ACTIVE -> activeScope?.recordFailure(misuse)
             State.IDLE, State.FINALIZING -> Unit
         }
@@ -92,13 +185,27 @@ class OperationExecutionCoordinator(
 
     /** Publishes the acquired scope and transfers rejections observed during Starting. */
     internal fun activateOwned(scope: OperationExecutionScope) = synchronized(monitor) {
-        check(state == State.STARTING) { "Managed scope coordinator is not Starting" }
+        check(state == State.STARTING || state == State.ACQUIRING) {
+            "Managed scope coordinator is not Starting or Acquiring"
+        }
         check(lifecycleThread === Thread.currentThread()) { "Managed scope activation must run on its Operation thread" }
         check(preparedScope === scope) { "Only the prepared Operation scope can be activated" }
+        val failureOwner = pipelineFailureOwner
+        if (failureOwner != null) {
+            check(scope.operationFailureOwner === failureOwner) {
+                "Pipeline Scope must retain the admitted execution's Failure Owner"
+            }
+            check(pendingFailure == null && pendingFatal == null) {
+                "Pipeline failures must be recorded by its Failure Owner before Scope activation"
+            }
+        }
         activeScope = scope
         state = State.ACTIVE
-        pendingFailure?.let(scope::recordFailure)
-        pendingFatal?.let(scope::recordFatal)
+        if (failureOwner == null) {
+            pendingFailure?.let(scope::recordFailure)
+            pendingFatal?.let(scope::recordFatal)
+        }
+        pipelineFailureOwner = null
         pendingFailure = null
         pendingFatal = null
     }
@@ -126,7 +233,7 @@ class OperationExecutionCoordinator(
             if (failure is Error) scope.recordFatal(failure)
             scope.endForLifecycle()
             state = State.FINALIZING
-        } else if (state == State.STARTING && preparedScope === scope) {
+        } else if ((state == State.STARTING || state == State.ACQUIRING) && preparedScope === scope) {
             scope.recordFailure(failure)
             if (failure is Error) scope.recordFatal(failure)
         }
@@ -135,9 +242,13 @@ class OperationExecutionCoordinator(
     /** Routes a throwable from a rejected root callback into a scope that is still accepting failures. */
     fun recordRejectedCallbackThrowable(failure: Throwable) = synchronized(monitor) {
         when (state) {
-            State.STARTING -> {
-                recordPendingFailureLocked(failure)
-                if (failure is Error && pendingFatal == null) pendingFatal = failure
+            State.STARTING, State.ACQUIRING -> {
+                if (pipelineFailureOwner != null) {
+                    pipelineFailureOwner?.recordFailure(failure)
+                } else {
+                    recordPendingFailureLocked(failure)
+                    if (failure is Error && pendingFatal == null) pendingFatal = failure
+                }
             }
             State.ACTIVE -> {
                 val scope = requireNotNull(activeScope)
@@ -155,7 +266,12 @@ class OperationExecutionCoordinator(
             State.IDLE -> Unit
             State.STARTING -> {
                 val misuse = IllegalStateException("A Starting scope cannot be finished by a consumer")
-                recordPendingFailureLocked(misuse)
+                recordPreActivationFailureLocked(misuse)
+                throw misuse
+            }
+            State.ACQUIRING -> {
+                val misuse = IllegalStateException("An Acquiring scope cannot be finished by a consumer")
+                recordPreActivationFailureLocked(misuse)
                 throw misuse
             }
             State.ACTIVE -> {
@@ -183,9 +299,13 @@ class OperationExecutionCoordinator(
         activeScope = null
         preparedScope = null
         lifecycleThread = null
+        pipelineFailureOwner = null
         pendingFailure = null
         pendingFatal = null
     }
+
+    private fun recordPreActivationFailureLocked(failure: Throwable): Throwable =
+        pipelineFailureOwner?.recordFailure(failure) ?: recordPendingFailureLocked(failure)
 
     private fun recordPendingFailureLocked(failure: Throwable): Throwable {
         if (pendingFailure == null) pendingFailure = failure

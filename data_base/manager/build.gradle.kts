@@ -16,6 +16,7 @@ dependencies {
     api(project(":data_base:manager:connection"))
     api(project(":data_base:manager:execute"))
     api(project(":data_base:operation:query:executor"))
+    api(project(":data_base:operation:executor"))
     api(project(":data_base:migration:core"))
 
     testImplementation(kotlin("test"))

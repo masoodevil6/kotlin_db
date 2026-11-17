@@ -151,6 +151,7 @@ class OperationExecutionScope private constructor(
     override val databasePlatformConfig: DatabasePlatformConfig,
     val databaseIdentity: DatabaseIdentity?,
     internal val eventListener: OperationEventListener?,
+    operationFailureOwner: OperationFailureOwner,
     @Suppress("UNUSED_PARAMETER") constructorMarker: Unit,
 ) : OperationExecutionContext {
 
@@ -158,14 +159,14 @@ class OperationExecutionScope private constructor(
     constructor(
         connection: Connection,
         databasePlatformConfig: DatabasePlatformConfig,
-    ) : this(connection, databasePlatformConfig, null, null, Unit)
+    ) : this(connection, databasePlatformConfig, null, null, OperationFailureOwner(), Unit)
 
     /** Internal Operation construction path that carries the registration's destination identity. */
     internal constructor(
         connection: Connection,
         databasePlatformConfig: DatabasePlatformConfig,
         databaseIdentity: DatabaseIdentity?,
-    ) : this(connection, databasePlatformConfig, databaseIdentity, null, Unit)
+    ) : this(connection, databasePlatformConfig, databaseIdentity, null, OperationFailureOwner(), Unit)
 
     /** Internal managed path that propagates its Operation-owned event observer to child scopes. */
     internal constructor(
@@ -173,15 +174,42 @@ class OperationExecutionScope private constructor(
         databasePlatformConfig: DatabasePlatformConfig,
         databaseIdentity: DatabaseIdentity?,
         eventListener: OperationEventListener?,
-    ) : this(connection, databasePlatformConfig, databaseIdentity, eventListener, Unit)
+    ) : this(connection, databasePlatformConfig, databaseIdentity, eventListener, OperationFailureOwner(), Unit)
+
+    /** Managed Pipeline construction path that retains its pre-acquisition failure owner. */
+    internal constructor(
+        connection: Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+        databaseIdentity: DatabaseIdentity?,
+        eventListener: OperationEventListener?,
+        operationFailureOwner: OperationFailureOwner,
+    ) : this(
+        connection,
+        databasePlatformConfig,
+        databaseIdentity,
+        eventListener,
+        operationFailureOwner,
+        Unit,
+    )
 
     @Suppress("DEPRECATION")
-    constructor(connection: Connection) : this(connection, DefaultDatabaseConfig.config.platform, null, null, Unit)
+    constructor(connection: Connection) : this(
+        connection,
+        DefaultDatabaseConfig.config.platform,
+        null,
+        null,
+        OperationFailureOwner(),
+        Unit,
+    )
 
     private val ownerThread = Thread.currentThread()
     private val jdbcConnection = connection
     private val typedQueryExecutor = QueryExecute(jdbcConnection)
-    private val laterFailures = mutableListOf<Throwable>()
+    private val failureOwner = operationFailureOwner
+
+    /** Identity bridge used only by the owning coordinator during Scope activation. */
+    internal val operationFailureOwner: OperationFailureOwner
+        get() = failureOwner
 
     @Volatile
     private var active = true
@@ -192,13 +220,17 @@ class OperationExecutionScope private constructor(
     /** A session lock is a single, non-reentrant lease on this managed Connection Scope. */
     private var sessionAdvisoryLockInProgress = false
 
-    @Volatile
-    var firstFailure: Throwable? = null
-        private set
+    var firstFailure: Throwable?
+        get() = failureOwner.firstFailure
+        private set(value) {
+            if (value != null) failureOwner.recordFailure(value)
+        }
 
-    @Volatile
-    var fatalError: Error? = null
-        private set
+    var fatalError: Error?
+        get() = failureOwner.fatalError
+        private set(value) {
+            if (value != null) failureOwner.recordFatal(value)
+        }
 
     /** Transitional compatibility access used by existing Query, Schema, and Migration executors. */
     @Deprecated("Use OperationExecutionContext.executeRead/executeDdl; direct JDBC access is transitional")
@@ -488,23 +520,7 @@ class OperationExecutionScope private constructor(
     }
 
     private fun recordFailureLocked(failure: Throwable): Throwable {
-        val currentPrimary = firstFailure
-        if (currentPrimary == null) {
-            firstFailure = failure
-        } else if (currentPrimary !== failure && failure !is Error) {
-            if (fatalError != null) {
-                addSuppressedSafely(fatalError!!, failure)
-            } else if (laterFailures.none { it === failure }) {
-                laterFailures += failure
-            }
-        }
-
-        if (failure is Error) {
-            recordFatalLocked(failure)
-        } else {
-            fatalError?.let { addSuppressedSafely(it, failure) }
-        }
-        return firstFailure ?: failure
+        return failureOwner.recordFailure(failure)
     }
 
     fun recordFatal(error: Error) {
@@ -519,19 +535,7 @@ class OperationExecutionScope private constructor(
     }
 
     private fun recordFatalLocked(error: Error) {
-        val currentFatal = fatalError
-        if (currentFatal == null) {
-            fatalError = error
-            firstFailure?.let { prior ->
-                addSuppressedSafely(error, prior)
-                prior.suppressed.forEach { nested -> addSuppressedSafely(error, nested) }
-            }
-            laterFailures.forEach { later -> addSuppressedSafely(error, later) }
-            laterFailures.clear()
-        } else if (currentFatal !== error) {
-            addSuppressedSafely(currentFatal, error)
-        }
-        if (firstFailure == null) firstFailure = error
+        failureOwner.recordFatal(error)
     }
 
     /** Seals the callback phase. Lifecycle code may still use the private connection for cleanup. */
@@ -900,7 +904,7 @@ class OperationExecutionScope private constructor(
     }
 
     private fun hasRecordedFailure(failure: Throwable): Boolean =
-        firstFailure === failure || laterFailures.any { it === failure } || fatalError === failure
+        failureOwner.hasRecordedFailure(failure)
 
     private fun isValidSessionAdvisoryLockName(value: String): Boolean =
         value.isNotBlank() && value.length <= MAX_SESSION_ADVISORY_LOCK_NAME_LENGTH &&
@@ -1147,9 +1151,7 @@ class OperationExecutionScope private constructor(
         ExecuteResult.Failure(recordFailure(failure))
 
     private fun addSuppressedSafely(primary: Throwable, secondary: Throwable) {
-        if (primary !== secondary && primary.suppressed.none { it === secondary }) {
-            primary.addSuppressed(secondary)
-        }
+        addOperationSuppressedSafely(primary, secondary)
     }
 
 }
@@ -1239,6 +1241,7 @@ internal object OperationScopeGuard {
         var scope: OperationExecutionScope? = null
         var scopeKind: ScopeKind? = null
         var childParent: OperationExecutionScope? = null
+        var pipelineFailureOwner: OperationFailureOwner? = null
         var pendingFailure: Throwable? = null
     }
 
@@ -1259,6 +1262,7 @@ internal object OperationScopeGuard {
             val failure = IllegalStateException("Nested managed operation scopes are not supported")
             val activeScope = state.scope
             if (activeScope != null) return activeScope.recordFailure(failure)
+            state.pipelineFailureOwner?.let { return it.recordFailure(failure) }
             if (state.pendingFailure == null) state.pendingFailure = failure
             return state.pendingFailure ?: failure
         }
@@ -1266,13 +1270,31 @@ internal object OperationScopeGuard {
         return null
     }
 
+    /** Binds the admitted Pipeline's canonical Owner before any preparation callback can run. */
+    internal fun installPipelineFailureOwner(failureOwner: OperationFailureOwner) {
+        val state = checkNotNull(current.get()) { "Operation scope was not entered" }
+        check(state.scope == null) { "A Pipeline Failure Owner must be installed before Scope activation" }
+        check(state.pipelineFailureOwner == null) { "A Pipeline Failure Owner is already installed" }
+        state.pipelineFailureOwner = failureOwner
+        state.pendingFailure?.let(failureOwner::recordFailure)
+        state.pendingFailure = null
+    }
+
     /** Publishes the callback scope and transfers any rejection seen while its connection was starting. */
     internal fun activate(scope: OperationExecutionScope) {
         val state = checkNotNull(current.get()) { "Operation scope was not entered" }
         check(state.scope == null) { "Operation scope is already active" }
+        state.pipelineFailureOwner?.let { failureOwner ->
+            check(scope.operationFailureOwner === failureOwner) {
+                "Pipeline Scope must retain the admitted execution's Failure Owner"
+            }
+        }
         state.scope = scope
         state.scopeKind = ScopeKind.CONNECTION
-        state.pendingFailure?.let(scope::recordFailure)
+        val failureOwner = state.pipelineFailureOwner
+        if (failureOwner == null) state.pendingFailure?.let(scope::recordFailure)
+        else state.pendingFailure?.let(failureOwner::recordFailure)
+        state.pipelineFailureOwner = null
         state.pendingFailure = null
     }
 
@@ -1280,9 +1302,17 @@ internal object OperationScopeGuard {
     internal fun activateTransaction(scope: OperationExecutionScope) {
         val state = checkNotNull(current.get()) { "Operation scope was not entered" }
         check(state.scope == null) { "Operation scope is already active" }
+        state.pipelineFailureOwner?.let { failureOwner ->
+            check(scope.operationFailureOwner === failureOwner) {
+                "Pipeline Scope must retain the admitted execution's Failure Owner"
+            }
+        }
         state.scope = scope
         state.scopeKind = ScopeKind.TRANSACTION
-        state.pendingFailure?.let(scope::recordFailure)
+        val failureOwner = state.pipelineFailureOwner
+        if (failureOwner == null) state.pendingFailure?.let(scope::recordFailure)
+        else state.pendingFailure?.let(failureOwner::recordFailure)
+        state.pipelineFailureOwner = null
         state.pendingFailure = null
     }
 
@@ -1299,6 +1329,7 @@ internal object OperationScopeGuard {
             )
             val activeScope = state.scope
             if (activeScope != null) return activeScope.recordFailure(failure)
+            state.pipelineFailureOwner?.let { return it.recordFailure(failure) }
             if (state.pendingFailure == null) state.pendingFailure = failure
             return state.pendingFailure ?: failure
         }

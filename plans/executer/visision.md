@@ -421,7 +421,7 @@ Operation
 ├── AcquireLock
 └── ReleaseLock
 ----
-```
+``` kotlin
 enum class ConnectionDecision {
     REUSE,
     NEW
@@ -432,39 +432,215 @@ data class StageResult<T>(
     val nextConnection: ConnectionDecision
 )
 
-[db].connection { ctx ->
-    // Stage 0
+db.connection {
+    // خروجی Stage اول
 }
-.then<ResultStepOne>{ result, ctx ->
-    // Stage 1
+.then<T1> { result, ctx ->
+    // ورودی: نوع خروجی Stage اول
+    // خروجی: T1
 }
-.then<ResultStepTwo>{ result, ctx ->
-    // Stage 2
+.then<T2> { result, ctx ->
+    // ورودی: T1
+    // خروجی: T2
+}
+.then<T3> { result, ctx ->
+    // ورودی: T2
+    // خروجی: T3
 }
 ```
+
+```kotlin
+
+db.connection {
+    start { ctx ->
+        ctx.next(loadMigration())
+            .connection(ConnectionDecision.REUSE)
+    }
+        .then<ValidationResult> { result, ctx ->
+            ctx.next(validate(result))
+                .connection(ConnectionDecision.REUSE)
+        }
+}
+
+db.transaction {
+    start { ctx ->
+        ctx.next(loadData())
+    }
+        .then<ValidationResult> { result, ctx ->
+            ctx.next(validate(result))
+        }
+}
 ```
 
-[db].connection { ctx ->
-    val result = executeStepOne(ctx)
 
-    ctx.next(
-        StageResult(
-            value = result,
-            nextConnection = ConnectionDecision.REUSE
-        )
-    )
-}.then { result, ctx ->
-    executeStepTwo(result, ctx)
-}
-پس 
- ctx.next(
-        StageResult(
-            value = result,
-            nextConnection = ConnectionDecision.REUSE
-        )
-    )
-ctx.next(
-    value = result,
-    connection = ConnectionDecision.REUSE
+
+
+---
+
+```kotlin
+data class MigrationState(
+    var migration: Migration? = null,
+    var validation: ValidationResult? = null,
+    var execution: ExecutionResult? = null,
+    var error: Throwable? = null,
+    var executedSteps: MutableList<String> = mutableListOf()
 )
+```
+```kotlin
+val result: ExecuteResult<MigrationState> =
+    db.connection<MigrationState> {
+
+        start<Migration> { ctx ->
+
+            ctx.state.executedSteps.add("LOAD_MIGRATION")
+
+            val migration = loadMigration()
+
+            ctx.state.migration = migration
+
+            ctx.next(migration)
+                .connection(ConnectionDecision.REUSE)
+        }
+
+        .then<Migration, ValidationResult> { migration, ctx ->
+
+            ctx.state.executedSteps.add("VALIDATE")
+
+            val validation = validate(migration)
+
+            ctx.state.validation = validation
+
+            ctx.next(validation)
+                .connection(ConnectionDecision.REUSE)
+        }
+
+        .then<ValidationResult, ExecutionResult> { validation, ctx ->
+
+            ctx.state.executedSteps.add("EXECUTE")
+
+            if (!validation.isValid) {
+                // بدون next، Pipeline متوقف می‌شود.
+                // State فعلی نتیجه Pipeline خواهد بود.
+                Unit
+            } else {
+
+                val execution = executeMigration(
+                    ctx.state.migration!!,
+                    validation
+                )
+
+                ctx.state.execution = execution
+
+                ctx.next(execution)
+                    .connection(ConnectionDecision.REUSE)
+            }
+        }
+
+        .then<ExecutionResult, Unit> { execution, ctx ->
+
+            ctx.state.executedSteps.add("FINALIZE")
+
+            finalizeMigration(execution)
+
+            // توقف Pipeline بدون next
+            Unit
+        }
+    }
+```
+```kotlin
+db.connection<MigrationState> {
+
+    start<Migration> { ctx ->
+
+        val migration = loadMigration()
+        ctx.state.migration = migration
+
+        ctx.next(migration)
+            .connection(ConnectionDecision.REUSE)
+    }
+
+    .then<Migration, ValidationResult> { migration, ctx ->
+
+        val validation = validate(migration)
+        ctx.state.validation = validation
+
+        ctx.next(validation)
+            .connection(ConnectionDecision.NEW)
+    }
+
+    .then<ValidationResult, ExecutionResult> { validation, ctx ->
+
+        val execution = executeMigration(
+            ctx.state.migration!!,
+            validation
+        )
+
+        ctx.state.execution = execution
+
+        ctx.next(execution)
+            .connection(ConnectionDecision.REUSE)
+    }
+}
+```
+```kotlin
+val result: ExecuteResult<MigrationState> =
+    db.transaction<MigrationState> {
+
+        start<Migration> { ctx ->
+
+            val migration = loadMigration()
+
+            ctx.state.migration = migration
+
+            ctx.next(migration)
+        }
+
+        .then<Migration, ValidationResult> { migration, ctx ->
+
+            val validation = validate(migration)
+
+            ctx.state.validation = validation
+
+            ctx.next(validation)
+        }
+
+        .then<ValidationResult, ExecutionResult> { validation, ctx ->
+
+            if (!validation.isValid) {
+                return@then Unit
+            }
+
+            val execution = executeMigration(
+                ctx.state.migration!!,
+                validation
+            )
+
+            ctx.state.execution = execution
+
+            ctx.next(execution)
+        }
+
+        .then<ExecutionResult, Unit> { execution, ctx ->
+
+            finalizeMigration(execution)
+
+            Unit
+        }
+    }
+```
+```kotlin
+when (result) {
+    is ExecuteResult.Success -> {
+        val state = result.value
+
+        println(state.migration)
+        println(state.validation)
+        println(state.execution)
+        println(state.executedSteps)
+    }
+
+    is ExecuteResult.Failure -> {
+        println(result.error)
+    }
+}
 ```

@@ -27,7 +27,7 @@ internal class OperationPipelineStageExecutor(
                     @Suppress("UNCHECKED_CAST")
                     return ExecuteResult.Success(returnedValue as T)
                 }
-                is OperationPipelineStageContext.StageResult.Continue -> input = transition.value
+                is OperationPipelineStageContext.StageResult.Continue<*> -> input = transition.value
             }
         }
 

@@ -7,6 +7,8 @@ import gog.my_project.data_base.core.events.DatabaseWatchSubscription
 import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.then.ConnectionTypedOperationPipeline
+import gog.my_project.data_base_operation.then.TransactionTypedOperationPipeline
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import java.util.concurrent.CopyOnWriteArrayList
@@ -58,6 +60,20 @@ class DatabaseHandle private constructor(
         block: (OperationExecutionScope) -> ExecuteResult<T>,
     ): ExecuteResult<T> = withContext { context ->
         operationExecutor(context).connection(block)
+    }
+
+    /** Executes a Connection Pipeline inside this handle's existing Manager admission lease. */
+    internal fun <I, O> runConnectionPipeline(
+        pipeline: ConnectionTypedOperationPipeline<I, O>,
+    ): ExecuteResult<O> = withContext { context ->
+        pipeline.execute(operationExecutor(context))
+    }
+
+    /** Executes a Transaction Pipeline inside this handle's existing Manager admission lease. */
+    internal fun <I, O> runTransactionPipeline(
+        pipeline: TransactionTypedOperationPipeline<I, O>,
+    ): ExecuteResult<O> = withContext { context ->
+        pipeline.execute(operationExecutor(context))
     }
 
     /** Registers a listener on this Handle without opening a Connection. */

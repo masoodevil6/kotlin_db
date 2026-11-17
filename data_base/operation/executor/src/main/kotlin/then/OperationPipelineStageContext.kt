@@ -23,14 +23,20 @@ class OperationPipelineStageContext<T> internal constructor(
     @Volatile
     private var active = true
     private var nextAttempted = false
-    private var requestedValue: Any? = null
-    private var hasRequestedValue = false
+    private var requestedValue: RequestedValue<T>? = null
 
     /**
      * Requests a transition to the next configured Stage. The transition is control flow and is
      * independent of the Operation failure latch. Phase 1 supports only [ConnectionDecision.REUSE].
      */
     fun next(value: T, connection: ConnectionDecision = ConnectionDecision.REUSE): T {
+        beginNextAttempt()
+        completeNext(value, connection)
+        return value
+    }
+
+    /** Reserves this stage's single continuation attempt for the typed continuation facade. */
+    internal fun beginNextAttempt() {
         checkStageAccess()
         if (nextAttempted) {
             failProtocol("next() may be called only once for each Pipeline Stage")
@@ -39,14 +45,21 @@ class OperationPipelineStageContext<T> internal constructor(
         if (!hasNextStage) {
             failProtocol("next() cannot be called from the final Pipeline Stage")
         }
-        if (connection != ConnectionDecision.REUSE) {
-            failProtocol("ConnectionDecision.NEW is not supported in Pipeline Phase 1")
-        }
-
-        requestedValue = value
-        hasRequestedValue = true
-        return value
     }
+
+    /** Completes a reserved continuation without changing the Operation lifecycle. */
+    internal fun completeNext(value: T, connection: ConnectionDecision) {
+        checkStageAccess()
+        if (requestedValue != null) {
+            failProtocol("A Pipeline continuation can be resolved only once")
+        }
+        if (connection != ConnectionDecision.REUSE) {
+            failProtocol("ConnectionDecision.NEW is not supported in this Pipeline")
+        }
+        requestedValue = RequestedValue(value)
+    }
+
+    internal fun protocolViolation(message: String): Nothing = failProtocol(message)
 
     override val databasePlatformConfig
         get() = withStageAccess { delegate.databasePlatformConfig }
@@ -101,9 +114,13 @@ class OperationPipelineStageContext<T> internal constructor(
     override fun <R> failed(failure: Throwable): ExecuteResult<R> =
         withStageAccess { delegate.failed(failure) }
 
-    internal fun finishStage(): StageResult {
+    internal fun finishStage(): StageResult<T> {
         protocolFailure.get()?.let { throw it }
-        return if (hasRequestedValue) StageResult.Continue(requestedValue) else StageResult.Complete
+        if (nextAttempted && requestedValue == null) {
+            failProtocol("next() must be completed with its lifecycle decision before the Stage returns")
+        }
+        val continuation = requestedValue ?: return StageResult.Complete
+        return StageResult.Continue(continuation.value)
     }
 
     internal fun expire() {
@@ -132,8 +149,10 @@ class OperationPipelineStageContext<T> internal constructor(
         throw failure
     }
 
-    internal sealed interface StageResult {
-        data object Complete : StageResult
-        data class Continue(val value: Any?) : StageResult
+    private data class RequestedValue<T>(val value: T)
+
+    internal sealed interface StageResult<out T> {
+        data object Complete : StageResult<Nothing>
+        data class Continue<T>(val value: T) : StageResult<T>
     }
 }

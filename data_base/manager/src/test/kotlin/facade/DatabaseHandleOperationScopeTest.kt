@@ -8,6 +8,8 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.then.ConnectionDecision
+import gog.my_project.data_base_operation.then.PipelineCompletion
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -311,6 +313,72 @@ class DatabaseHandleOperationScopeTest {
         } finally {
             continueCallbacks.countDown()
             workers.shutdownNow()
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `connection pipeline uses one manager owned connection across stages`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val seenContexts = mutableListOf<Any>()
+
+        try {
+            val pipeline = handle.connectionPipeline<String> { context ->
+                seenContexts += context
+                context.next("connected").connection(ConnectionDecision.REUSE)
+            }.then<Int> { value, context ->
+                seenContexts += context
+                context.next(value.length).connection(ConnectionDecision.REUSE)
+            }.then<String> { length, context ->
+                seenContexts += context
+                "value:$length"
+            }
+
+            val result = pipeline.execute()
+
+            assertEquals(
+                PipelineCompletion.Current("value:9"),
+                assertIs<ExecuteResult.Success<PipelineCompletion<PipelineCompletion<String, Int>, String>>>(result).result,
+            )
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(3, seenContexts.size)
+            assertTrue(seenContexts.distinctBy(System::identityHashCode).size == 3)
+            assertEquals(0, provider.autoCommitChanges.get())
+            assertEquals(0, provider.commitCount.get())
+            assertEquals(0, provider.rollbackCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `transaction pipeline uses one manager owned transaction lifecycle`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+
+        try {
+            val pipeline = handle.transactionPipeline<String> { context ->
+                context.next("transaction")
+            }.then<Int> { value, context ->
+                context.next(value.length)
+            }.then<String> { length, _ -> "value:$length" }
+
+            val result = pipeline.execute()
+
+            assertEquals(
+                PipelineCompletion.Current("value:11"),
+                assertIs<ExecuteResult.Success<PipelineCompletion<PipelineCompletion<String, Int>, String>>>(result).result,
+            )
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(1, provider.autoCommitChanges.get())
+            assertEquals(1, provider.commitCount.get())
+            assertEquals(0, provider.rollbackCount.get())
+        } finally {
             manager.close()
         }
     }
