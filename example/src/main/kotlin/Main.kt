@@ -34,6 +34,9 @@ private const val SAMPLE_EVENT = "Example Event"
 
 
 /*
+    migrate()
+    .\gradlew.bat :example:run --project-prop "database.example.run=true"
+    rollback()
     .\gradlew.bat :example:run --project-prop "database.example.run=true"  --project-prop "database.example.rollback=true"
 */
 

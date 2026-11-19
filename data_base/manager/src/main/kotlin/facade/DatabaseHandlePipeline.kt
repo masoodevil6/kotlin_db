@@ -1,6 +1,7 @@
 package gog.my_project.data_base_manager.facade
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.then.OperationPipelineDefinition
 import gog.my_project.data_base_operation.then.ConnectionPipelineStageContext
 import gog.my_project.data_base_operation.then.ConnectionTypedOperationPipeline
 import gog.my_project.data_base_operation.then.PipelineCompletion
@@ -66,3 +67,29 @@ fun <O> DatabaseHandleApi.transactionPipeline(
     this,
     TransactionTypedOperationPipeline.start(stage),
 )
+
+/** Executes a typed Connection Definition using the managed Handle's Operation lifecycle. */
+fun <State : Any, Result> DatabaseHandleApi.executeConnectionDefinition(
+    definition: OperationPipelineDefinition<State, Result>,
+): ExecuteResult<Result> {
+    val managedHandle = this as? DatabaseHandle
+        ?: return ExecuteResult.Failure(
+            UnsupportedOperationException(
+                "This DatabaseHandleApi implementation does not expose managed Pipeline execution",
+            ),
+        )
+    return managedHandle.runConnectionDefinition(definition)
+}
+
+/** Executes a typed Transaction Definition using the managed Handle's Operation lifecycle. */
+fun <State : Any, Result> DatabaseHandleApi.executeTransactionDefinition(
+    definition: OperationPipelineDefinition<State, Result>,
+): ExecuteResult<Result> {
+    val managedHandle = this as? DatabaseHandle
+        ?: return ExecuteResult.Failure(
+            UnsupportedOperationException(
+                "This DatabaseHandleApi implementation does not expose managed Pipeline execution",
+            ),
+        )
+    return managedHandle.runTransactionDefinition(definition)
+}

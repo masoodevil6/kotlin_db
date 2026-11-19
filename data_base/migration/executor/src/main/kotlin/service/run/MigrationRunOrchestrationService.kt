@@ -13,7 +13,7 @@ import gog.my_project.data_base.core.events.DatabaseEventFailure
 import gog.my_project.data_base_migration.core.events.MigrationCommand
 import gog.my_project.data_base_migration.core.events.MigrationEvent
 import gog.my_project.data_base_migration.core.events.MigrationEventType
-import gog.my_project.data_base_operation.config.data_base.SystemLock
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCapability
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryValidator
 import model.prepared.PreparedMigrationVersion
@@ -67,8 +67,8 @@ internal class MigrationRunOrchestrationService(
         )
 
         val result = try {
-            scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
-                runLocked(lockedScope, target, direction)
+            scope.withMigrationFailureStatusCapability(MIGRATION_LOCK_TIMEOUT_SECONDS) { capability ->
+                runLocked(scope, target, direction, capability)
             }.throwIfFatalFailure(scope)
         } catch (failure: Throwable) {
             scope.publishDatabaseEvent(
@@ -107,6 +107,7 @@ internal class MigrationRunOrchestrationService(
         scope: OperationExecutionScope,
         target: MigrationVersionTag?,
         direction: MigrationVersionSelectionDirection,
+        failureStatusCapability: MigrationFailureStatusCapability,
     ): ExecuteResult<Boolean> {
         return try {
             val historyState = when (
@@ -190,12 +191,14 @@ internal class MigrationRunOrchestrationService(
                         versionTag,
                         prepared,
                         preparedMigrations,
+                        failureStatusCapability,
                     )
                     MigrationVersionTraversalDirection.DOWN -> transactionService.transactionDown(
                         scope,
                         versionTag,
                         prepared,
                         preparedMigrations,
+                        failureStatusCapability,
                     )
                 }.throwIfFatalFailure(scope)
                 when (result) {

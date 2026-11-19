@@ -5,9 +5,11 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.events.DatabaseEventListener
 import gog.my_project.data_base.core.events.DatabaseWatchSubscription
 import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionCoordinator
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_operation.then.ConnectionTypedOperationPipeline
+import gog.my_project.data_base_operation.then.OperationPipelineDefinition
 import gog.my_project.data_base_operation.then.TransactionTypedOperationPipeline
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
@@ -24,6 +26,7 @@ class DatabaseHandle private constructor(
     private val registrationAttributes: Map<DatabaseRegistrationAttribute<*>, Any>,
 ) : DatabaseHandleApi, DatabaseHandleAttributes {
     private val watchListeners = CopyOnWriteArrayList<DatabaseEventListener>()
+    private val definitionCoordinator = OperationExecutionCoordinator("database handle pipeline")
 
     /** Internal seam for direct handle lifecycle tests. */
     internal constructor(
@@ -74,6 +77,20 @@ class DatabaseHandle private constructor(
         pipeline: TransactionTypedOperationPipeline<I, O>,
     ): ExecuteResult<O> = withContext { context ->
         pipeline.execute(operationExecutor(context))
+    }
+
+    /** Executes a Connection Definition under this Handle's Manager lease and Operation lineage. */
+    internal fun <State : Any, Result> runConnectionDefinition(
+        definition: OperationPipelineDefinition<State, Result>,
+    ): ExecuteResult<Result> = withContext { context ->
+        operationExecutor(context).executeConnectionDefinition(definitionCoordinator, definition)
+    }
+
+    /** Executes a Transaction Definition under this Handle's Manager lease and Operation lineage. */
+    internal fun <State : Any, Result> runTransactionDefinition(
+        definition: OperationPipelineDefinition<State, Result>,
+    ): ExecuteResult<Result> = withContext { context ->
+        operationExecutor(context).executeTransactionDefinition(definitionCoordinator, definition)
     }
 
     /** Registers a listener on this Handle without opening a Connection. */

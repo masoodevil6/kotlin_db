@@ -78,14 +78,14 @@ Source فعلی این معانی را تعریف می‌کند:
 | مقدار | ثابت | استفادهٔ فعلی |
 |---:|---|---|
 | 0 | `STATUS_MIGRATE_STARTED` | مقدار پیش‌فرض ستون؛ با درج Version جدید ثبت می‌شود. |
-| 1 | `STATUS_MIGRATE_FAILED_UP` | تعریف شده، اما در مسیرهای Production بررسی‌شده نوشته نمی‌شود. |
-| 2 | `STATUS_MIGRATE_FAILED_RECORD` | تعریف شده، اما در مسیرهای Production بررسی‌شده نوشته نمی‌شود. |
+| 1 | `STATUS_MIGRATE_FAILED_UP` | در شکست واجدشرایط اجرای UP، پس از ثبت Failure عادی، با انتقال شرطی `0 → 1` تلاش می‌شود. |
+| 2 | `STATUS_MIGRATE_FAILED_RECORD` | در شکست واجدشرایط ثبت History/Tag در UP یا ثبت Status تکمیل، با انتقال شرطی `0 → 2` تلاش می‌شود. |
 | 3 | `STATUS_MIGRATE_COMPLETED` | پس از موفقیت کامل UP ثبت می‌شود و تنها Status عبوری از Global Failure Gate است. |
 | 4 | `STATUS_ROLLBACK_STARTED` | پیش از اجرای DOWN ثبت می‌شود. |
-| 5 | `STATUS_ROLLBACK_FAILED_DOWN` | تعریف شده، اما در مسیرهای Production بررسی‌شده نوشته نمی‌شود. |
-| 6 | `STATUS_ROLLBACK_FAILED_RECORD` | تعریف شده، اما در مسیرهای Production بررسی‌شده نوشته نمی‌شود. |
+| 5 | `STATUS_ROLLBACK_FAILED_DOWN` | در شکست واجدشرایط اجرای DOWN، پس از تأیید Status `4`، با انتقال شرطی `4 → 5` تلاش می‌شود. |
+| 6 | `STATUS_ROLLBACK_FAILED_RECORD` | در شکست واجدشرایط ثبت History/Tag یا حذف Version در DOWN، با انتقال شرطی `4 → 6` تلاش می‌شود. |
 
-وجود Constant به معنی فعال بودن ثبت Failure نیست. شکست UP می‌تواند Version row را با Status `0` باقی بگذارد؛ شکست DOWN پس از ثبت Marker می‌تواند Status `4` باقی بگذارد. هیچ Status شکست خودکاری در این مسیرها ثبت نمی‌شود.
+این ثبت‌ها فقط برای Failureهای واجدشرایط انجام می‌شوند و تضمین نمی‌کنند که Status حتماً تغییر کند. هر Write یک UPDATE شرطی و یک‌بارمصرف است؛ نتیجهٔ `NOT_APPLIED` یا `INDETERMINATE` موجب Retry یا Fallback نمی‌شود. در نتیجه، بسته به محل شکست و نتیجهٔ SQL، Status قبلی یا وضعیت نامشخص دیتابیس ممکن است باقی بماند.
 
 ## System Lock و Execution Scope
 
@@ -100,6 +100,24 @@ Orchestration چهار فرمان UP/DOWN از `SystemLock.MIGRATION` استفا
 ## Failure و Recovery
 
 Global Failure Gate اجرای رسمی بعدی را متوقف می‌کند، اما خودش Recovery انجام نمی‌دهد و به‌تنهایی میزان تغییر واقعی Schema را مشخص نمی‌کند. شکست پس از DDL ممکن است Schema و History را از هم جدا کند؛ پاسخ مبهم SQL نیز می‌تواند وضعیت پایدار سرور را نامعلوم بگذارد. اجرای دوباره، اصلاح Status یا اجرای دستی DDL را بر اساس حدس انجام ندهید. مسیر Recovery خودکار در API فعلی وجود ندارد.
+
+### مرز اعتماد Capability ثبت وضعیت شکست
+
+Operation یک Capability عمومی و محدود در اختیار کد Migration مورداعتماد می‌گذارد تا پس از ثبت Failure عادی، یکی از انتقال‌های شرطی جدول بالا را روی همان Scope و Connection ثبت کند. این API برای مصرف‌کنندگان داخلیِ مورداعتماد طراحی شده است؛ مرز امنیتی در برابر کد برنامه یا افزونهٔ غیرقابل‌اعتماد نیست.
+
+Operation این شرایط را هنگام استفاده اعمال می‌کند:
+
+- Scope باید فعال باشد و فراخوانی روی Thread مالک آن انجام شود.
+- Lease همان `SystemLock.MIGRATION` باید فعال باشد و Scope نباید Child Scope فعال داشته باشد.
+- پیش از Write باید Failure عادی در Operation ثبت شده باشد؛ Capability فقط یک تلاش را می‌پذیرد.
+- فقط چهار UPDATE شرطی ثابت `0 → 1`، `0 → 2`، `4 → 5` و `4 → 6` مجازند. Capability SQL، DML یا DDL دلخواه و نیز callback عمومی برای اجرای کار پس از Failure نمی‌پذیرد.
+- Fatal Error بر ثبت عادی Status اولویت دارد. اگر نوشتن Status با Failure عادی روبه‌رو شود، آن خطا ثانویه به Failure اصلی متصل می‌شود؛ Fatal Error با هویت و اولویت Fatal خود منتشر می‌شود.
+
+Migration مسئول اعتبارسنجی مثبت‌بودن Version ID و ارتباط آن با اجرای Migration جاری، تشخیص نوع Failure و انتخاب انتقال مجاز است. Failureهای Preflight و Fatal نباید به این Capability برسند. Migration باید Failure عادی را ابتدا در Scope ثبت کند و سپس Capability را فراخوانی کند.
+
+Operation هویت فراخواننده را احراز نمی‌کند و مستقلاً منشأ یا تعلق Version ID به اجرای جاری را بررسی نمی‌کند؛ ID ورودی فرمان را خود فراخواننده می‌دهد. بنابراین این محدودیت‌ها به کد Migration مورداعتماد واگذار شده‌اند. در Kotlin، `internal` به محدودهٔ Gradle module محدود است، نه Package؛ چون SPI، Operation Executor و Migration Executor ماژول‌های جداگانه‌اند، این قرارداد برای مسیر فعلی بین‌ماژولی عمومی است و Package به‌تنهایی آن را پنهان نمی‌کند.
+
+تصمیم فعلی حفظ همین API عمومی است: Execution Token یا چارچوب عمومی Authorization اضافه نمی‌شود، وابستگی ماژول‌ها تغییر نمی‌کند و امکان اجرای عمومی عملیات پس از Failure ایجاد نمی‌شود. اگر مدل تهدید پروژه به مصرف‌کنندگان یا افزونه‌های غیرقابل‌اعتمادِ دارای دسترسی به Scope تغییر کرد، این مرز اعتماد باید دوباره طراحی شود.
 
 `init()` فقط جدول‌های سیستمی را در صورت نبودن ایجاد می‌کند و ارتقای Schema جدول‌های موجود را انجام نمی‌دهد. اگر ساختار قبلی جدول با تعریف فعلی سازگار نیست، مسیر ارتقای خودکار در این مرحله مستند یا پیاده‌سازی نشده است.
 

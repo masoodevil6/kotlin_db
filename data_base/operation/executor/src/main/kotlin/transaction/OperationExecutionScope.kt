@@ -6,6 +6,11 @@ import gog.my_project.data_base.core.query.reader.QueryParameterBinding
 import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base_manager.execute.manager.QueryExecute
 import gog.my_project.data_base_manager.execute.query.BoundQuery
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCapability
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCommand
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusWriteResult
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStatusCapability
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
@@ -25,6 +30,7 @@ import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.Types
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Opaque, lifecycle-neutral view of an active Operation scope for operation-family facades.
@@ -220,6 +226,9 @@ class OperationExecutionScope private constructor(
     /** A session lock is a single, non-reentrant lease on this managed Connection Scope. */
     private var sessionAdvisoryLockInProgress = false
 
+    /** The exact Migration lock acquisition that currently owns a status-write capability. */
+    private var activeMigrationFailureStatusLease: MigrationFailureStatusLease? = null
+
     var firstFailure: Throwable?
         get() = failureOwner.firstFailure
         private set(value) {
@@ -301,6 +310,41 @@ class OperationExecutionScope private constructor(
         }
 
         return withSessionAdvisoryLock(lockName, timeoutSeconds, block)
+    }
+
+    /**
+     * Runs [block] under the Migration system lock and lends it one restricted failure-status
+     * capability. The capability is valid only for this Scope, owner thread, and lock acquisition.
+     */
+    fun <T> withMigrationFailureStatusCapability(
+        timeoutSeconds: Int,
+        block: (capability: MigrationFailureStatusCapability) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = withSystemLock(SystemLock.MIGRATION, timeoutSeconds) {
+        val lease = MigrationFailureStatusLease()
+        synchronized(this) {
+            check(active) { "Execution scope has ended; it cannot issue a Migration failure capability" }
+            check(Thread.currentThread() === ownerThread) {
+                "Migration failure capabilities must be issued on the scope callback thread"
+            }
+            check(activeChildScope == null) {
+                "A Migration failure capability cannot be issued while a child transaction is active"
+            }
+            check(activeMigrationFailureStatusLease == null) {
+                "A Migration failure capability lease is already active for this scope"
+            }
+            activeMigrationFailureStatusLease = lease
+        }
+
+        try {
+            block(MigrationFailureStatusCapabilityImpl(this, lease))
+        } finally {
+            synchronized(this) {
+                lease.active = false
+                if (activeMigrationFailureStatusLease === lease) {
+                    activeMigrationFailureStatusLease = null
+                }
+            }
+        }
     }
 
     /**
@@ -1107,6 +1151,134 @@ class OperationExecutionScope private constructor(
             DdlFailureDisposition.FATAL ->
                 DdlExecutionOutcome.Failure(recordFailure(failure), DdlFailureDisposition.FATAL)
         }
+    }
+
+    private fun writeMigrationFailureStatus(
+        lease: MigrationFailureStatusLease,
+        consumed: AtomicBoolean,
+        command: MigrationFailureStatusCommand,
+        diagnostic: MigrationFailureDiagnostic?,
+    ): MigrationFailureStatusWriteResult {
+        synchronized(this) {
+            check(active) { "Execution scope has ended; Migration failure status cannot be written" }
+            check(Thread.currentThread() === ownerThread) {
+                "Migration failure status must be written on the scope callback thread"
+            }
+            check(activeChildScope == null) {
+                "Migration failure status cannot be written while a child transaction is active"
+            }
+            check(lease.active && activeMigrationFailureStatusLease === lease) {
+                "The Migration failure capability is outside its issuing lock lease"
+            }
+            failureOwner.admitPostFailureWrite(consumed)
+        }
+
+        return try {
+            val (expectedStatus, targetStatus) = when (command) {
+                is MigrationFailureStatusCommand.UpExecutionFailure -> 0 to 1
+                is MigrationFailureStatusCommand.UpRecordingFailure -> 0 to 2
+                is MigrationFailureStatusCommand.DownExecutionFailure -> 4 to 5
+                is MigrationFailureStatusCommand.DownRecordingFailure -> 4 to 6
+            }
+            val diagnosticMessage = try {
+                diagnostic?.toStorageMessage(command.versionId)
+            } catch (fatal: Error) {
+                recordMigrationFailureStatusWriteFailure(fatal)
+                return MigrationFailureStatusWriteResult.INDETERMINATE
+            } catch (serializationFailure: Throwable) {
+                // Serialization precedes SQL submission. Preserve the already-latched Migration
+                // failure and make the single permitted CAS attempt without optional diagnostics.
+                failureOwner.attachPostFailureWriteFailure(serializationFailure)
+                null
+            }
+            val query = if (diagnosticMessage == null) {
+                BoundQuery(
+                    "UPDATE system_migration_version SET status = ? WHERE id = ? AND status = ?",
+                    listOf(
+                        QueryParameterBinding("targetStatus", targetStatus, Types.INTEGER),
+                        QueryParameterBinding("versionId", command.versionId, Types.INTEGER),
+                        QueryParameterBinding("expectedStatus", expectedStatus, Types.INTEGER),
+                    ),
+                )
+            } else {
+                BoundQuery(
+                    "UPDATE system_migration_version SET status = ?, message = ? WHERE id = ? AND status = ?",
+                    listOf(
+                        QueryParameterBinding("targetStatus", targetStatus, Types.INTEGER),
+                        QueryParameterBinding("diagnosticMessage", diagnosticMessage, Types.VARCHAR),
+                        QueryParameterBinding("versionId", command.versionId, Types.INTEGER),
+                        QueryParameterBinding("expectedStatus", expectedStatus, Types.INTEGER),
+                    ),
+                )
+            }
+            val execution = observeSql(query.jdbcSql) {
+                var callbackCount = 0
+                var result: ExecuteResult<Int>? = null
+                typedQueryExecutor.executeUpdate(query) { delivered ->
+                    callbackCount++
+                    if (callbackCount != 1) {
+                        throw IllegalStateException("Migration failure status UPDATE returned more than one result")
+                    }
+                    result = delivered
+                    if (delivered is ExecuteResult.Failure) {
+                        recordMigrationFailureStatusWriteFailure(delivered.exception)
+                    }
+                }
+                result ?: if (callbackCount == 0) {
+                    ExecuteResult.Failure(
+                        IllegalStateException("Migration failure status UPDATE completed without a result"),
+                    )
+                } else {
+                    ExecuteResult.Failure(
+                        IllegalStateException("Migration failure status UPDATE produced no result"),
+                    )
+                }
+            }
+
+            when (execution) {
+                is ExecuteResult.Failure -> MigrationFailureStatusWriteResult.INDETERMINATE
+                is ExecuteResult.Success -> when (execution.result) {
+                    0 -> MigrationFailureStatusWriteResult.NOT_APPLIED
+                    1 -> MigrationFailureStatusWriteResult.APPLIED
+                    else -> MigrationFailureStatusWriteResult.INDETERMINATE
+                }
+            }
+        } catch (failure: Throwable) {
+            recordMigrationFailureStatusWriteFailure(failure)
+        }
+    }
+
+    private fun recordMigrationFailureStatusWriteFailure(
+        failure: Throwable,
+    ): MigrationFailureStatusWriteResult {
+        if (failure is Error) {
+            failureOwner.recordFatal(failure)
+            throw failureOwner.fatalError ?: failure
+        }
+        failureOwner.attachPostFailureWriteFailure(failure)
+        return MigrationFailureStatusWriteResult.INDETERMINATE
+    }
+
+    private class MigrationFailureStatusLease {
+        var active: Boolean = true
+    }
+
+    private class MigrationFailureStatusCapabilityImpl(
+        private val scope: OperationExecutionScope,
+        private val lease: MigrationFailureStatusLease,
+    ) : MigrationFailureDiagnosticStatusCapability {
+        private val consumed = AtomicBoolean()
+
+        override fun write(
+            command: MigrationFailureStatusCommand,
+        ): MigrationFailureStatusWriteResult =
+            scope.writeMigrationFailureStatus(lease, consumed, command, diagnostic = null)
+
+        override fun write(
+            command: MigrationFailureStatusCommand,
+            diagnostic: MigrationFailureDiagnostic,
+        ): MigrationFailureStatusWriteResult =
+            scope.writeMigrationFailureStatus(lease, consumed, command, diagnostic)
     }
 
     override fun <T> executeRead(

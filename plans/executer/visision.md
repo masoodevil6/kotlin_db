@@ -584,49 +584,46 @@ db.connection<MigrationState> {
 ```
 ```kotlin
 val result: ExecuteResult<MigrationState> =
-    db.transaction<MigrationState> {
-
-        start<Migration> { ctx ->
+    db.executeTransactionDefinition(
+        definition = start<MigrationState, Migration> { ctx ->
 
             val migration = loadMigration()
 
             ctx.state.migration = migration
 
-            ctx.next(migration)
+            migration
         }
+            .then<Migration, ValidationResult> { migration, ctx ->
 
-        .then<Migration, ValidationResult> { migration, ctx ->
+                val validation = validate(migration)
 
-            val validation = validate(migration)
+                ctx.state.validation = validation
 
-            ctx.state.validation = validation
-
-            ctx.next(validation)
-        }
-
-        .then<ValidationResult, ExecutionResult> { validation, ctx ->
-
-            if (!validation.isValid) {
-                return@then Unit
-            }
-
-            val execution = executeMigration(
-                ctx.state.migration!!,
                 validation
-            )
+            }
+            .then<ValidationResult, ExecutionResult> { validation, ctx ->
 
-            ctx.state.execution = execution
+                if (!validation.isValid) {
+                    // باید از مکانیزم توقف Stage در API واقعی استفاده شود.
+                    return@then ctx.stop()
+                }
 
-            ctx.next(execution)
-        }
+                val execution = executeMigration(
+                    ctx.state.migration!!,
+                    validation
+                )
 
-        .then<ExecutionResult, Unit> { execution, ctx ->
+                ctx.state.execution = execution
 
-            finalizeMigration(execution)
+                execution
+            }
+            .then<ExecutionResult, MigrationState> { execution, ctx ->
 
-            Unit
-        }
-    }
+                finalizeMigration(execution)
+
+                ctx.state
+            }
+    )
 ```
 ```kotlin
 when (result) {

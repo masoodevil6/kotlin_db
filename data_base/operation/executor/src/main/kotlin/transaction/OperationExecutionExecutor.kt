@@ -9,6 +9,10 @@ import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_operation.executor.events.OperationEventType
 import gog.my_project.data_base_operation.executor.events.publish
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.then.OperationPipelineDefinition
+import gog.my_project.data_base_operation.then.OperationPipelineExecution
+import gog.my_project.data_base_operation.then.OperationPipelineRunner
+import gog.my_project.data_base_operation.then.StageOutcome
 import java.sql.Connection
 
 /** Owns Connection and Transaction scope lifecycles for an execution lineage. */
@@ -62,6 +66,22 @@ class OperationExecutionExecutor private constructor(
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
     ): ExecuteResult<T> = executeConnection<Unit, T>(coordinator, null) { scope, _ -> block(scope) }
 
+    /** Executes a reusable Connection Pipeline Definition with a fresh preparation and State. */
+    fun <State : Any, Result> executeConnectionDefinition(
+        definition: OperationPipelineDefinition<State, Result>,
+    ): ExecuteResult<Result> = executeConnectionDefinition(OperationExecutionCoordinator(), definition)
+
+    /** Executes a Connection Pipeline Definition within the supplied Operation lineage. */
+    fun <State : Any, Result> executeConnectionDefinition(
+        coordinator: OperationExecutionCoordinator,
+        definition: OperationPipelineDefinition<State, Result>,
+    ): ExecuteResult<Result> = connectionWithPreparation(
+        coordinator = coordinator,
+        prepare = { definition.prepareExecution() },
+    ) { scope, execution ->
+        pipelineOutcomeResult(OperationPipelineRunner.run(execution, scope), scope)
+    }
+
     /**
      * Internal pre-acquisition path reserved for Pipeline execution. Admission and Failure Owner
      * installation happen before [prepare], while this executor retains all resource ownership.
@@ -87,201 +107,204 @@ class OperationExecutionExecutor private constructor(
         val nestedFailure = OperationScopeGuard.enter()
         if (nestedFailure != null) return ExecuteResult.Failure(nestedFailure)
 
-        val pipelineFailureOwner = if (prepareBeforeAcquire != null) {
-            when (val start = coordinator.tryStartPipelineScope(
-                IllegalStateException("Nested connection scopes are not supported"),
-            )) {
-                is OperationExecutionCoordinator.PipelineScopeStart.Started -> start.failureOwner
-                is OperationExecutionCoordinator.PipelineScopeStart.Rejected -> {
-                    OperationScopeGuard.exit()
-                    return ExecuteResult.Failure(start.failure)
-                }
-            }
-        } else {
-            val startFailure = coordinator.tryStartScope(
-                IllegalStateException("Nested connection scopes are not supported"),
-            )
-            if (startFailure != null) {
-                OperationScopeGuard.exit()
-                return ExecuteResult.Failure(startFailure)
-            }
-            null
-        }
-
-        var scope: OperationExecutionScope? = null
-        var scopeActivated = false
-        var pipelineAdmissionFinalized = false
-        var connection: Connection? = null
-        var connectionClosed = false
-
-        fun closeOnce(primary: Throwable?): Throwable? {
-            if (connectionClosed) return primary
-            val ownedConnection = connection ?: return primary
-            connectionClosed = true
-            return closeConnection(ownedConnection, primary)
-        }
-
         try {
-            pipelineFailureOwner?.let { OperationScopeGuard.installPipelineFailureOwner(it) }
-            val prepared = if (prepareBeforeAcquire == null) {
-                null
-            } else {
-                try {
-                    prepareBeforeAcquire()
-                } catch (failure: Throwable) {
-                    val owner = requireNotNull(pipelineFailureOwner)
-                    owner.recordThrowable(failure)
-                    val failureToReturn = coordinator.finishPipelinePreparation(owner)
-                    pipelineAdmissionFinalized = true
-                    return pipelineFailureResult(failureToReturn)
-                }
-            }
-
-            if (pipelineFailureOwner != null) {
-                when (val claim = coordinator.claimPipelineAcquisition(pipelineFailureOwner)) {
-                    OperationExecutionCoordinator.PipelineAcquisitionClaim.Claimed -> Unit
-                    is OperationExecutionCoordinator.PipelineAcquisitionClaim.Rejected -> {
-                        pipelineAdmissionFinalized = true
-                        return pipelineFailureResult(claim.failure)
+            val pipelineFailureOwner = if (prepareBeforeAcquire != null) {
+                when (val start = coordinator.tryStartPipelineScope(
+                    IllegalStateException("Nested connection scopes are not supported"),
+                )) {
+                    is OperationExecutionCoordinator.PipelineScopeStart.Started -> start.failureOwner
+                    is OperationExecutionCoordinator.PipelineScopeStart.Rejected -> {
+                        return ExecuteResult.Failure(start.failure)
                     }
                 }
-            }
-
-            connection = try {
-                requireNotNull(connectionFactory()).also {
-                    eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPENED))
+            } else {
+                val startFailure = coordinator.tryStartScope(
+                    IllegalStateException("Nested connection scopes are not supported"),
+                )
+                if (startFailure != null) {
+                    return ExecuteResult.Failure(startFailure)
                 }
-            } catch (failure: Throwable) {
-                eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPEN_FAILED, error = failure))
-                throw failure
+                null
             }
-            val ownedConnection = requireNotNull(connection)
 
-            val activeScope = try {
-                val createdScope = if (pipelineFailureOwner == null) {
-                    OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity, eventListener)
+            var scope: OperationExecutionScope? = null
+            var scopeActivated = false
+            var pipelineAdmissionFinalized = false
+            var connection: Connection? = null
+            var connectionClosed = false
+
+            fun closeOnce(primary: Throwable?): Throwable? {
+                if (connectionClosed) return primary
+                val ownedConnection = connection ?: return primary
+                connectionClosed = true
+                return closeConnection(ownedConnection, primary)
+            }
+
+            try {
+                pipelineFailureOwner?.let { OperationScopeGuard.installPipelineFailureOwner(it) }
+                val prepared = if (prepareBeforeAcquire == null) {
+                    null
                 } else {
-                    OperationExecutionScope(
-                        ownedConnection,
-                        databasePlatformConfig,
-                        databaseIdentity,
-                        eventListener,
-                        pipelineFailureOwner,
+                    try {
+                        prepareBeforeAcquire()
+                    } catch (failure: Throwable) {
+                        val owner = requireNotNull(pipelineFailureOwner)
+                        owner.recordThrowable(failure)
+                        val failureToReturn = coordinator.finishPipelinePreparation(owner)
+                        pipelineAdmissionFinalized = true
+                        return pipelineFailureResult(failureToReturn)
+                    }
+                }
+
+                if (pipelineFailureOwner != null) {
+                    when (val claim = coordinator.claimPipelineAcquisition(pipelineFailureOwner)) {
+                        OperationExecutionCoordinator.PipelineAcquisitionClaim.Claimed -> Unit
+                        is OperationExecutionCoordinator.PipelineAcquisitionClaim.Rejected -> {
+                            pipelineAdmissionFinalized = true
+                            return pipelineFailureResult(claim.failure)
+                        }
+                    }
+                }
+
+                connection = try {
+                    requireNotNull(connectionFactory()).also {
+                        eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPENED))
+                    }
+                } catch (failure: Throwable) {
+                    eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPEN_FAILED, error = failure))
+                    throw failure
+                }
+                val ownedConnection = requireNotNull(connection)
+
+                val activeScope = try {
+                    val createdScope = if (pipelineFailureOwner == null) {
+                        OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity, eventListener)
+                    } else {
+                        OperationExecutionScope(
+                            ownedConnection,
+                            databasePlatformConfig,
+                            databaseIdentity,
+                            eventListener,
+                            pipelineFailureOwner,
+                        )
+                    }
+                    createdScope.also {
+                        scope = it
+                        coordinator.prepareScope(it)
+                        OperationScopeGuard.activate(it)
+                        coordinator.activateOwned(it)
+                        scopeActivated = true
+                    }
+                } catch (failure: Throwable) {
+                    val closeFailure = closeOnce(failure)
+                    if (pipelineFailureOwner != null) {
+                        pipelineFailureOwner.recordThrowable(failure)
+                        if (closeFailure != null && closeFailure !== failure) {
+                            pipelineFailureOwner.recordThrowable(closeFailure)
+                        }
+                        val failureToReturn = coordinator.finishPipelinePreparation(pipelineFailureOwner)
+                        pipelineAdmissionFinalized = true
+                        return pipelineFailureResult(failureToReturn)
+                    }
+                    if (failure is Error) throw failure
+                    if (closeFailure is Error) throw closeFailure
+                    return ExecuteResult.Failure(failure)
+                }
+
+                var callbackResult: ExecuteResult<T>? = null
+                var callbackFailure: Throwable? = null
+                // The Owner lock makes this admission decision atomic with failure recording. Once
+                // admitted, user code runs without the Owner lock; a later rejection remains latched.
+                if (pipelineFailureOwner == null || pipelineFailureOwner.tryEnterCallback()) {
+                    try {
+                        callbackResult = block(activeScope, prepared)
+                        activeScope.recordResult(callbackResult)
+                    } catch (failure: Throwable) {
+                        callbackFailure = failure
+                        if (failure is Error) activeScope.recordFatal(failure) else activeScope.recordFailure(failure)
+                    }
+                }
+
+                try {
+                    coordinator.sealOwned(activeScope)
+                } catch (sealFailure: Throwable) {
+                    activeScope.recordFailure(sealFailure)
+                    if (sealFailure is Error) activeScope.recordFatal(sealFailure)
+                    coordinator.abortScope(activeScope, sealFailure)
+                }
+
+                val fatalError = activeScope.fatalError ?: (callbackFailure as? Error)
+                if (fatalError != null) {
+                    closeOnce(fatalError)
+                    throw fatalError
+                }
+
+                val scopedFailure = activeScope.firstFailure
+                if (scopedFailure != null) {
+                    val closeOutcome = closeOnce(scopedFailure)
+                    if (closeOutcome is Error) throw closeOutcome
+                    val returnedFailure = callbackResult as? ExecuteResult.Failure
+                    if (returnedFailure?.exception === scopedFailure) return returnedFailure
+                    return ExecuteResult.Failure(scopedFailure)
+                }
+
+                if (callbackFailure != null) {
+                    val closeOutcome = closeOnce(callbackFailure)
+                    if (closeOutcome is Error) throw closeOutcome
+                    return ExecuteResult.Failure(callbackFailure)
+                }
+
+                val result = callbackResult ?: run {
+                    val missingResult = IllegalStateException("Connection-scope callback returned no result")
+                    val closeOutcome = closeOnce(missingResult)
+                    if (closeOutcome is Error) throw closeOutcome
+                    return ExecuteResult.Failure(missingResult)
+                }
+
+                if (result is ExecuteResult.Failure) {
+                    val closeOutcome = closeOnce(result.exception)
+                    if (closeOutcome is Error) throw closeOutcome
+                    return result
+                }
+
+                val closeFailure = closeOnce(null)
+                if (closeFailure is Error) throw closeFailure
+                if (closeFailure is Exception) {
+                    return ExecuteResult.Failure(
+                        IllegalStateException(
+                            "Connection scope completed without commit or rollback, but closing its connection failed; prior changes may already be durable, so do not retry blindly",
+                            closeFailure,
+                        ),
                     )
                 }
-                createdScope.also {
-                    scope = it
-                    coordinator.prepareScope(it)
-                    OperationScopeGuard.activate(it)
-                    coordinator.activateOwned(it)
-                    scopeActivated = true
-                }
+                if (closeFailure != null) return ExecuteResult.Failure(closeFailure)
+                return result
             } catch (failure: Throwable) {
-                val closeFailure = closeOnce(failure)
-                if (pipelineFailureOwner != null) {
+                if (pipelineFailureOwner != null && !scopeActivated && !pipelineAdmissionFinalized) {
                     pipelineFailureOwner.recordThrowable(failure)
-                    if (closeFailure != null && closeFailure !== failure) {
-                        pipelineFailureOwner.recordThrowable(closeFailure)
+                    if (connection != null && !connectionClosed) {
+                        val closeOutcome = closeOnce(failure)
+                        if (closeOutcome != null && closeOutcome !== failure) {
+                            pipelineFailureOwner.recordThrowable(closeOutcome)
+                        }
                     }
                     val failureToReturn = coordinator.finishPipelinePreparation(pipelineFailureOwner)
                     pipelineAdmissionFinalized = true
                     return pipelineFailureResult(failureToReturn)
                 }
-                if (failure is Error) throw failure
-                if (closeFailure is Error) throw closeFailure
-                return ExecuteResult.Failure(failure)
-            }
-
-            var callbackResult: ExecuteResult<T>? = null
-            var callbackFailure: Throwable? = null
-            if (pipelineFailureOwner == null || activeScope.firstFailure == null) {
-                try {
-                    callbackResult = block(activeScope, prepared)
-                    activeScope.recordResult(callbackResult)
-                } catch (failure: Throwable) {
-                    callbackFailure = failure
-                    if (failure is Error) activeScope.recordFatal(failure) else activeScope.recordFailure(failure)
-                }
-            }
-
-            try {
-                coordinator.sealOwned(activeScope)
-            } catch (sealFailure: Throwable) {
-                activeScope.recordFailure(sealFailure)
-                if (sealFailure is Error) activeScope.recordFatal(sealFailure)
-                coordinator.abortScope(activeScope, sealFailure)
-            }
-
-            val fatalError = activeScope.fatalError ?: (callbackFailure as? Error)
-            if (fatalError != null) {
-                closeOnce(fatalError)
-                throw fatalError
-            }
-
-            val scopedFailure = activeScope.firstFailure
-            if (scopedFailure != null) {
-                val closeOutcome = closeOnce(scopedFailure)
-                if (closeOutcome is Error) throw closeOutcome
-                val returnedFailure = callbackResult as? ExecuteResult.Failure
-                if (returnedFailure?.exception === scopedFailure) return returnedFailure
-                return ExecuteResult.Failure(scopedFailure)
-            }
-
-            if (callbackFailure != null) {
-                val closeOutcome = closeOnce(callbackFailure)
-                if (closeOutcome is Error) throw closeOutcome
-                return ExecuteResult.Failure(callbackFailure)
-            }
-
-            val result = callbackResult ?: run {
-                val missingResult = IllegalStateException("Connection-scope callback returned no result")
-                val closeOutcome = closeOnce(missingResult)
-                if (closeOutcome is Error) throw closeOutcome
-                return ExecuteResult.Failure(missingResult)
-            }
-
-            if (result is ExecuteResult.Failure) {
-                val closeOutcome = closeOnce(result.exception)
-                if (closeOutcome is Error) throw closeOutcome
-                return result
-            }
-
-            val closeFailure = closeOnce(null)
-            if (closeFailure is Error) throw closeFailure
-            if (closeFailure is Exception) {
-                return ExecuteResult.Failure(
-                    IllegalStateException(
-                        "Connection scope completed without commit or rollback, but closing its connection failed; prior changes may already be durable, so do not retry blindly",
-                        closeFailure,
-                    ),
-                )
-            }
-            if (closeFailure != null) return ExecuteResult.Failure(closeFailure)
-            return result
-        } catch (failure: Throwable) {
-            if (pipelineFailureOwner != null && !scopeActivated && !pipelineAdmissionFinalized) {
-                pipelineFailureOwner.recordThrowable(failure)
                 if (connection != null && !connectionClosed) {
                     val closeOutcome = closeOnce(failure)
-                    if (closeOutcome != null && closeOutcome !== failure) {
-                        pipelineFailureOwner.recordThrowable(closeOutcome)
-                    }
+                    if (failure is Error) throw failure
+                    if (closeOutcome is Error) throw closeOutcome
+                    return ExecuteResult.Failure(failure)
                 }
-                val failureToReturn = coordinator.finishPipelinePreparation(pipelineFailureOwner)
-                pipelineAdmissionFinalized = true
-                return pipelineFailureResult(failureToReturn)
-            }
-            if (connection != null && !connectionClosed) {
-                val closeOutcome = closeOnce(failure)
                 if (failure is Error) throw failure
-                if (closeOutcome is Error) throw closeOutcome
                 return ExecuteResult.Failure(failure)
+            } finally {
+                scope?.endForLifecycle()
+                coordinator.finishOwnedScope()
             }
-            if (failure is Error) throw failure
-            return ExecuteResult.Failure(failure)
         } finally {
-            scope?.endForLifecycle()
-            coordinator.finishOwnedScope()
             OperationScopeGuard.exit()
         }
     }
@@ -291,6 +314,19 @@ class OperationExecutionExecutor private constructor(
     ): ExecuteResult<T> {
         if (failure is Error) throw failure
         return ExecuteResult.Failure(failure)
+    }
+
+    private fun <T> pipelineOutcomeResult(
+        outcome: StageOutcome<T>,
+        scope: OperationExecutionScope,
+    ): ExecuteResult<T> = when (outcome) {
+        is StageOutcome.Completed -> ExecuteResult.Success(outcome.value)
+        StageOutcome.Stopped -> {
+            val failure = checkNotNull(scope.operationFailureOwner.propagationFailure) {
+                "Pipeline Runner stopped without an Operation failure"
+            }
+            pipelineFailureResult(failure)
+        }
     }
 
     fun <T> transaction(
@@ -308,6 +344,27 @@ class OperationExecutionExecutor private constructor(
         eventListener,
     )
         .transaction(coordinator, block)
+
+    /** Executes a reusable Transaction Pipeline Definition with a fresh preparation and State. */
+    fun <State : Any, Result> executeTransactionDefinition(
+        definition: OperationPipelineDefinition<State, Result>,
+    ): ExecuteResult<Result> = executeTransactionDefinition(OperationExecutionCoordinator(), definition)
+
+    /** Executes a Transaction Pipeline Definition within the supplied Operation lineage. */
+    fun <State : Any, Result> executeTransactionDefinition(
+        coordinator: OperationExecutionCoordinator,
+        definition: OperationPipelineDefinition<State, Result>,
+    ): ExecuteResult<Result> = OperationTransactionExecutor(
+        connectionFactory,
+        databasePlatformConfig,
+        databaseIdentity,
+        eventListener,
+    ).transactionWithPreparation(
+        coordinator = coordinator,
+        prepare = { definition.prepareExecution() },
+    ) { scope, execution ->
+        pipelineOutcomeResult(OperationPipelineRunner.run(execution, scope), scope)
+    }
 
     /** Internal pre-acquisition path reserved for Transaction Pipeline execution. */
     internal fun <P, T> transactionWithPreparation(

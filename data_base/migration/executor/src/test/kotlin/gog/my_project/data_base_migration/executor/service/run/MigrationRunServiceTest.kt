@@ -19,12 +19,20 @@ import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_migration.executor.controller.MigrationController
 import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionTransactionService
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_schema.Schema
 import gog.my_project.data_base_schema.SchemaDataType
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -1522,6 +1530,497 @@ class MigrationRunServiceTest {
     }
 
     @Test
+    fun `UP execution failure writes one conditional 0 to 1 status under the original lock and connection`() {
+        database.failDdlCalls += 1
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("DDL 1 failed"))
+        val write = failureStatusCalls().single()
+        assertStatusTransition(
+            write,
+            target = 1,
+            versionId = database.generatedIdForVersionInsert.toInt(),
+            expected = 0,
+            messageContains = "DDL 1 failed",
+            migrationId = "run_one_migration",
+        )
+        val writeIndex = database.dmlCalls.indexOf(write)
+        assertTrue(database.lockHeldAtDmlCall[writeIndex], "Failure status write must remain inside the held lock callback")
+        assertEquals(1, database.connectionBuildCount, "The write must use the original Operation Connection")
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertEquals(1, database.events.count { it == "lock-release" })
+        assertEquals(0, database.commitCount)
+        assertEquals(0, database.rollbackCount)
+        assertEquals(1, database.connectionCloseCount)
+    }
+
+    @Test
+    fun `UP SQL exception diagnostic includes SQLState and vendor error code`() {
+        val sqlFailure = SQLException("Duplicate column name display_name", "42S21", 1060)
+        SampleMigration.upFailure = sqlFailure
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertSame(sqlFailure, assertIs<ExecuteResult.Failure>(result).exception)
+        val diagnostic = Json.parseToJsonElement(failureStatusCalls().single().parameters[1] as String).jsonObject
+        assertEquals(1, diagnostic.getValue("schemaVersion").jsonPrimitive.int)
+        assertEquals("UP_EXECUTION", diagnostic.getValue("stage").jsonPrimitive.content)
+        assertEquals(database.generatedIdForVersionInsert.toInt(), diagnostic.getValue("versionId").jsonPrimitive.int)
+        assertEquals("java.sql.SQLException", diagnostic.getValue("exception").jsonPrimitive.content)
+        assertEquals("42S21", diagnostic.getValue("sqlState").jsonPrimitive.content)
+        assertEquals(1060, diagnostic.getValue("errorCode").jsonPrimitive.int)
+        assertEquals(registration.id.value, diagnostic.getValue("migrationId").jsonPrimitive.content)
+        assertEquals("Duplicate column name display_name", diagnostic.getValue("message").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `diagnostic message accessor failure uses safe JSON and preserves original Migration failure`() {
+        val metadataFailure = IllegalStateException("message accessor failed")
+        val migrationFailure = ThrowingMessageException(metadataFailure)
+        SampleMigration.upFailure = migrationFailure
+        database.respond(*emptyReadResponses())
+        var operationScope: OperationExecutionScope? = null
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            operationScope = activeScope
+            MigrationController(sampleConfiguration()).migrate(activeScope)
+        }
+
+        assertSame(migrationFailure, assertIs<ExecuteResult.Failure>(result).exception)
+        assertSame(migrationFailure, operationScope?.firstFailure)
+        assertEquals(1, failureStatusCalls().size, "Diagnostic failure must not retry the status UPDATE")
+        val json = Json.parseToJsonElement(failureStatusCalls().single().parameters[1] as String).jsonObject
+        assertEquals("UP_EXECUTION", json.getValue("stage").jsonPrimitive.content)
+        assertEquals(ThrowingMessageException::class.java.name, json.getValue("exception").jsonPrimitive.content)
+        assertEquals(registration.id.value, json.getValue("migrationId").jsonPrimitive.content)
+        assertEquals("", json.getValue("message").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `ordinary diagnostic construction failure remains secondary to the Migration failure`() {
+        val metadataFailure = IllegalStateException("message accessor failed")
+        val migrationFailure = ThrowingMessageException(metadataFailure)
+        val laterFatal = AssertionError("verify retained secondary failure")
+        SampleMigration.upFailure = migrationFailure
+        database.respond(*emptyReadResponses())
+        var activeScope: OperationExecutionScope? = null
+
+        val thrown = assertFailsWith<AssertionError> {
+            OperationExecutionExecutor(versionTestContext()).connection { scope ->
+                activeScope = scope
+                val migrationResult = MigrationController(sampleConfiguration()).migrate(scope)
+                assertSame(migrationFailure, scope.firstFailure)
+                scope.recordFatal(laterFatal)
+                migrationResult
+            }
+        }
+
+        assertSame(laterFatal, thrown)
+        assertSame(migrationFailure, activeScope?.firstFailure)
+        assertTrue(laterFatal.suppressed.any { it === migrationFailure })
+        assertTrue(laterFatal.suppressed.any { it === metadataFailure })
+        assertEquals(1, failureStatusCalls().size)
+    }
+
+    @Test
+    fun `SQLException metadata accessor failure uses safe JSON and preserves original Migration failure`() {
+        val metadataFailure = IllegalStateException("SQLState accessor failed")
+        val migrationFailure = ThrowingSqlStateException(metadataFailure)
+        SampleMigration.upFailure = migrationFailure
+        database.respond(*emptyReadResponses())
+        var operationScope: OperationExecutionScope? = null
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            operationScope = activeScope
+            MigrationController(sampleConfiguration()).migrate(activeScope)
+        }
+
+        assertSame(migrationFailure, assertIs<ExecuteResult.Failure>(result).exception)
+        assertSame(migrationFailure, operationScope?.firstFailure)
+        assertEquals(1, failureStatusCalls().size, "Diagnostic failure must not retry the status UPDATE")
+        val json = Json.parseToJsonElement(failureStatusCalls().single().parameters[1] as String).jsonObject
+        assertEquals("UP_EXECUTION", json.getValue("stage").jsonPrimitive.content)
+        assertEquals(ThrowingSqlStateException::class.java.name, json.getValue("exception").jsonPrimitive.content)
+        assertEquals(registration.id.value, json.getValue("migrationId").jsonPrimitive.content)
+        assertEquals(null, json.getValue("sqlState").jsonPrimitive.contentOrNull)
+        assertEquals(null, json.getValue("errorCode").jsonPrimitive.intOrNull)
+        assertEquals("", json.getValue("message").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `fatal diagnostic metadata failure keeps exact Error identity and skips status write`() {
+        val fatal = AssertionError("fatal message accessor failure")
+        val migrationFailure = ThrowingMessageException(fatal)
+        SampleMigration.upFailure = migrationFailure
+        database.respond(*emptyReadResponses())
+
+        val thrown = assertFailsWith<AssertionError> {
+            executeSampleMigration()
+        }
+
+        assertSame(fatal, thrown)
+        assertTrue(fatal.suppressed.any { it === migrationFailure })
+        assertTrue(failureStatusCalls().isEmpty(), "Fatal diagnostic construction must bypass status recording")
+    }
+
+    @Test
+    fun `diagnostic Migration ID validation matches MigrationIdentity grammar`() {
+        val candidates = listOf(
+            "a",
+            "migration2",
+            "create_manager_customers",
+            "a".repeat(255),
+            "",
+            "_migration",
+            "Migration",
+            "migration_",
+            "migration__item",
+            "migration-item",
+            "a".repeat(256),
+            "create_users\nmalicious=true",
+        )
+
+        candidates.forEach { candidate ->
+            val identityAccepted = runCatching { MigrationIdentity.fromValue(candidate) }.isSuccess
+            val diagnostic = MigrationFailureDiagnostic(
+                stage = MigrationFailureDiagnosticStage.UP_EXECUTION,
+                exceptionClassName = "java.lang.IllegalStateException",
+                sqlState = null,
+                vendorErrorCode = null,
+                message = null,
+                migrationId = candidate,
+            )
+            assertEquals(
+                if (identityAccepted) candidate else null,
+                diagnostic.migrationId,
+                "Diagnostic validation diverged for '$candidate'",
+            )
+        }
+    }
+
+    @Test
+    fun `UP history recording failure writes one conditional 0 to 2 status`() {
+        database.failDmlWhen = { call ->
+            if (call.sql.contains("INSERT", true) &&
+                call.sql.contains("system_migration", true) &&
+                !call.sql.contains("system_migration_tag", true) &&
+                !call.sql.contains("system_migration_version", true)
+            ) SQLException("Migration history insert failed") else null
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertEquals("Migration history insert failed", failure.message)
+        assertTrue(database.events.any { it.startsWith("ddl:") }, "UP must succeed before history recording fails")
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 2,
+            versionId = database.generatedIdForVersionInsert.toInt(),
+            expected = 0,
+            messageContains = "Migration history insert failed",
+            migrationId = "run_one_migration",
+        )
+    }
+
+    @Test
+    fun `UP completion status update failure writes one conditional 0 to 2 status`() {
+        database.updateCountWhen = { call ->
+            if (isVersionStatusUpdate(call) && call.parameters.size == 2 && call.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED) 0
+            else null
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("updated 0 rows"), failure.message)
+        assertEquals(2, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 2,
+            versionId = database.generatedIdForVersionInsert.toInt(),
+            expected = 0,
+            messageContains = "updated 0 rows",
+            migrationId = null,
+        )
+    }
+
+    @Test
+    fun `DOWN execution failure writes one conditional 4 to 5 status`() {
+        database.failDdlCalls += 1
+        val history = orchestrationHistory(appliedVersionCount = 1)
+        respondForRollback(history, listOf(VersionTagOne.value))
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(orchestrationConfiguration()).rollback(scope)
+        }
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("DDL 1 failed"))
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 5,
+            versionId = VERSION_ID_ONE,
+            expected = 4,
+            messageContains = "DDL 1 failed",
+            migrationId = VersionItemSecond.value,
+        )
+    }
+
+    @Test
+    fun `DOWN history recording failure writes one conditional 4 to 6 status`() {
+        database.failDmlWhen = { call ->
+            if (call.sql.contains("DELETE", true) &&
+                call.sql.contains("system_migration", true) &&
+                !call.sql.contains("system_migration_tag", true) &&
+                !call.sql.contains("system_migration_version", true)
+            ) SQLException("Migration history delete failed") else null
+        }
+        val history = orchestrationHistory(appliedVersionCount = 1)
+        respondForRollback(history, listOf(VersionTagOne.value))
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(orchestrationConfiguration()).rollback(scope)
+        }
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertEquals("Migration history delete failed", failure.message)
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 6,
+            versionId = VERSION_ID_ONE,
+            expected = 4,
+            messageContains = "Migration history delete failed",
+            migrationId = VersionItemSecond.value,
+        )
+    }
+
+    @Test
+    fun `DOWN Version deletion failure writes one conditional 4 to 6 status without recreating the Version`() {
+        database.failDmlWhen = { call ->
+            if (isVersionDelete(call)) SQLException("Version delete acknowledgement failed") else null
+        }
+        database.applyDmlBeforeFailure = ::isVersionDelete
+        val history = orchestrationHistory(appliedVersionCount = 1)
+        respondForRollback(history, listOf(VersionTagOne.value))
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(orchestrationConfiguration()).rollback(scope)
+        }
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertEquals("Version delete acknowledgement failed", failure.message)
+        assertEquals(null, database.versionStatuses[VERSION_ID_ONE], "The simulated committed delete must remain deleted")
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 6,
+            versionId = VERSION_ID_ONE,
+            expected = 4,
+            messageContains = "Version delete acknowledgement failed",
+            migrationId = null,
+        )
+        assertTrue(database.dmlCalls.none {
+            it.sql.contains("INSERT", true) && it.sql.contains("system_migration_version", true)
+        }, "Failure recording must never recreate the Version row")
+    }
+
+    @Test
+    fun `UP preflight failure after Version insertion does not write a failure status`() {
+        database.failReadCalls += 5 // Three orchestration reads, one Version Tag lookup, then UP attempt preflight.
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(0, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
+        assertTrue(failureStatusCalls().isEmpty())
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `DOWN preflight failure after status 4 does not write failure status or execute down`() {
+        val tags = listOf(
+            tag(VERSION_TAG_ID_ONE, VersionTagOne.value, VERSION_TAG_TYPE),
+            tag(MIGRATION_TAG_ID, MigrationItem.value, MIGRATION_TAG_TYPE),
+        )
+        val versions = listOf(mapOf("id" to VERSION_ID_ONE, "tagId" to VERSION_TAG_ID_ONE, "status" to STATUS_MIGRATE_COMPLETED))
+        val histories = listOf(history(APPLIED_ID, MIGRATION_TAG_ID, VERSION_ID_ONE))
+        database.respond(tags, versions, histories, tags, versions, histories, emptyList())
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(sampleConfiguration()).rollback(scope)
+        }
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(4, database.versionStatuses[VERSION_ID_ONE])
+        assertTrue(failureStatusCalls().isEmpty())
+        assertEquals(1, database.dmlCalls.count { isVersionStatusUpdate(it) })
+        assertEquals(0, SampleMigration.downCalls)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `invalid UP Version id does not write a failure status`() {
+        database.nextGeneratedId = Int.MAX_VALUE.toLong()
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertTrue(database.generatedIdForVersionInsert > Int.MAX_VALUE.toLong())
+        assertTrue(failureStatusCalls().isEmpty())
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `unconfirmed DOWN status 4 does not write failure status or execute down`() {
+        database.respondUpdateCounts(0)
+        val history = singleAppliedSampleHistory()
+        database.respond(history.tags, history.versions, history.migrations, history.tags, history.versions, history.migrations)
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(sampleConfiguration()).rollback(scope)
+        }
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertTrue(failureStatusCalls().isEmpty())
+        assertEquals(0, SampleMigration.downCalls)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `fatal Migration Error bypasses ordinary failure status recording`() {
+        val fatal = AssertionError("fatal Migration up")
+        SampleMigration.upFailure = fatal
+        database.respond(*emptyReadResponses())
+
+        val thrown = assertFailsWith<AssertionError> { executeSampleMigration() }
+
+        assertSame(fatal, thrown)
+        assertTrue(failureStatusCalls().isEmpty())
+    }
+
+    @Test
+    fun `fatal Error from failure status write preserves exact Fatal identity and original ordinary failure`() {
+        val original = SQLException("Migration DDL failed")
+        val fatal = AssertionError("failure status write failed fatally")
+        SampleMigration.upFailure = original
+        database.failDmlWhen = { call -> if (isFailureStatusWrite(call)) fatal else null }
+        database.respond(*emptyReadResponses())
+        var activeScope: OperationExecutionScope? = null
+
+        val thrown = assertFailsWith<AssertionError> {
+            OperationExecutionExecutor(versionTestContext()).connection { scope ->
+                activeScope = scope
+                MigrationController(sampleConfiguration()).migrate(scope)
+            }
+        }
+
+        assertSame(fatal, thrown)
+        assertSame(fatal, activeScope?.fatalError)
+        assertSame(original, activeScope?.firstFailure)
+        assertTrue(fatal.suppressed.any { it === original })
+        assertEquals(1, failureStatusCalls().size)
+    }
+
+    @Test
+    fun `status write exception remains suppressed under the original Migration failure`() {
+        val original = SQLException("Migration DDL failed")
+        val statusFailure = SQLException("status UPDATE failed")
+        SampleMigration.upFailure = original
+        database.failDmlWhen = { call -> if (isFailureStatusWrite(call)) statusFailure else null }
+        database.respond(*emptyReadResponses())
+        var activeScope: OperationExecutionScope? = null
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            activeScope = scope
+            MigrationController(sampleConfiguration()).migrate(scope)
+        }
+
+        assertSame(original, assertIs<ExecuteResult.Failure>(result).exception)
+        assertSame(original, activeScope?.firstFailure)
+        assertTrue(original.suppressed.any { it === statusFailure })
+        assertEquals(1, failureStatusCalls().size)
+    }
+
+    @Test
+    fun `NOT_APPLIED failure status result does not trigger another write`() {
+        SampleMigration.upFailure = SQLException("Migration DDL failed")
+        database.updateCountWhen = { call -> if (isFailureStatusWrite(call)) 0 else null }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(1, failureStatusCalls().size)
+    }
+
+    @Test
+    fun `INDETERMINATE failure status result does not trigger another write`() {
+        SampleMigration.upFailure = SQLException("Migration DDL failed")
+        database.updateCountWhen = { call -> if (isFailureStatusWrite(call)) 2 else null }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(1, failureStatusCalls().size)
+    }
+
+    @Test
+    fun `late UP recording write cannot overwrite a Version already marked completed`() {
+        val completionFailure = SQLException("completion acknowledgement lost")
+        database.failDmlWhen = { call ->
+            if (isVersionStatusUpdate(call) && call.parameters.size == 2 && call.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED) {
+                completionFailure
+            } else null
+        }
+        database.applyDmlBeforeFailure = { call ->
+            isVersionStatusUpdate(call) && call.parameters.size == 2 && call.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertSame(completionFailure, assertIs<ExecuteResult.Failure>(result).exception)
+        assertEquals(STATUS_MIGRATE_COMPLETED, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 2,
+            versionId = database.generatedIdForVersionInsert.toInt(),
+            expected = 0,
+            messageContains = "completion acknowledgement lost",
+            migrationId = null,
+        )
+        assertEquals(0, database.dmlUpdateCounts.last())
+    }
+
+    @Test
+    fun `failure status write remains before Migration lock release and uses one Operation Connection`() {
+        database.failDdlCalls += 1
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        val statusWrite = failureStatusCalls().single()
+        val writeDmlIndex = database.dmlCalls.indexOf(statusWrite)
+        assertTrue(database.lockHeldAtDmlCall[writeDmlIndex])
+        assertEquals(1, database.connectionBuildCount)
+        val writeEventIndex = database.events.indexOf("dml:${statusWrite.sql}")
+        assertTrue(database.events.indexOf("lock-acquire") < writeEventIndex)
+        assertTrue(writeEventIndex < database.events.indexOf("lock-release"))
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertEquals(1, database.events.count { it == "lock-release" })
+    }
+
+    @Test
     fun `constructor failure in the last selected Version prevents all markers and Migration execution`() {
         val configuration = migrationConfig {
             migrationVersion(PreparedVersionOne) { migration<PreparedFirstMigration>() }
@@ -1809,10 +2308,17 @@ class MigrationRunServiceTest {
         assertEquals(0, database.autoCommitFalseCount)
         assertEquals(0, database.autoCommitRestoreCount)
         val statusUpdates = database.dmlCalls.filter {
-            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+            isVersionStatusUpdate(it) && it.parameters.size == 2
         }
         assertEquals(1, statusUpdates.size)
         assertEquals(STATUS_MIGRATE_COMPLETED, statusUpdates.single().parameters.first())
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 1,
+            versionId = database.generatedIdForVersionInsert.toInt(),
+            expected = 0,
+            migrationId = VersionItemThird.value,
+        )
     }
 
     @Test
@@ -1959,10 +2465,17 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertTrue(database.dmlCalls.none { it.sql.contains("DELETE", true) })
-        val startUpdate = database.dmlCalls.single {
-            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+        val startUpdate = database.dmlCalls.first {
+            isVersionStatusUpdate(it) && it.parameters.size == 2
         }
         assertEquals(listOf(STATUS_ROLLBACK_STARTED, 101), startUpdate.parameters)
+        assertStatusTransition(
+            failureStatusCalls().single(),
+            target = 5,
+            versionId = 101,
+            expected = 4,
+            migrationId = UnsupportedDownItem.value,
+        )
     }
 
     @Test
@@ -2142,6 +2655,78 @@ class MigrationRunServiceTest {
         assertEquals(0, database.rollbackCount)
     }
 
+    private fun executeSampleMigration(): ExecuteResult<Boolean> =
+        OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(sampleConfiguration()).migrate(scope)
+        }
+
+    private fun sampleConfiguration(): MigrationConfiguration = migrationConfig {
+        migrationVersion(VersionTagOne) { migration<SampleMigration>() }
+    }
+
+    private fun singleAppliedSampleHistory(): OrchestrationHistory {
+        val tags = listOf(
+            tag(VERSION_TAG_ID_ONE, VersionTagOne.value, VERSION_TAG_TYPE),
+            tag(MIGRATION_TAG_ID, MigrationItem.value, MIGRATION_TAG_TYPE),
+        )
+        val versions = listOf(
+            mapOf("id" to VERSION_ID_ONE, "tagId" to VERSION_TAG_ID_ONE, "status" to STATUS_MIGRATE_COMPLETED),
+        )
+        val migrations = listOf(history(APPLIED_ID, MIGRATION_TAG_ID, VERSION_ID_ONE))
+        return OrchestrationHistory(tags, versions, migrations)
+    }
+
+    private fun failureStatusCalls(): List<FakeDatabase.DmlCall> =
+        database.dmlCalls.filter(::isFailureStatusWrite)
+
+    private fun isFailureStatusWrite(call: FakeDatabase.DmlCall): Boolean =
+        isVersionStatusUpdate(call) && call.parameters.size == 4
+
+    private fun isVersionStatusUpdate(call: FakeDatabase.DmlCall): Boolean =
+        call.sql.contains("UPDATE", ignoreCase = true) &&
+            call.sql.contains("system_migration_version", ignoreCase = true)
+
+    private fun isVersionDelete(call: FakeDatabase.DmlCall): Boolean =
+        call.sql.contains("DELETE", ignoreCase = true) &&
+            call.sql.contains("system_migration_version", ignoreCase = true)
+
+    private fun assertStatusTransition(
+        call: FakeDatabase.DmlCall,
+        target: Int,
+        versionId: Int,
+        expected: Int,
+        messageContains: String? = null,
+        migrationId: String? = null,
+    ) {
+        assertTrue(isFailureStatusWrite(call), "Expected a conditional failure-status UPDATE: ${call.sql}")
+        assertEquals(target, call.parameters[0])
+        val diagnostic = call.parameters[1] as? String
+            ?: error("Expected a persisted diagnostic message")
+        val json = Json.parseToJsonElement(diagnostic).jsonObject
+        val expectedStage = when (target) {
+            1 -> "UP_EXECUTION"
+            2 -> "UP_RECORDING"
+            5 -> "DOWN_EXECUTION"
+            6 -> "DOWN_RECORDING"
+            else -> error("Unexpected failure status target $target")
+        }
+        assertEquals(1, json.getValue("schemaVersion").jsonPrimitive.int, diagnostic)
+        assertEquals(expectedStage, json.getValue("stage").jsonPrimitive.content, diagnostic)
+        assertEquals(versionId, json.getValue("versionId").jsonPrimitive.int, diagnostic)
+        assertEquals(
+            migrationId,
+            json.getValue("migrationId").jsonPrimitive.contentOrNull,
+            diagnostic,
+        )
+        assertTrue(json.getValue("exception").jsonPrimitive.content.isNotEmpty(), diagnostic)
+        if (messageContains != null) {
+            assertTrue(json.getValue("message").jsonPrimitive.content.contains(messageContains), diagnostic)
+        }
+        assertEquals(versionId, call.parameters[2])
+        assertEquals(expected, call.parameters[3])
+        assertTrue(call.sql.contains("SET status = ?, message = ?"), call.sql)
+    }
+
     private fun singleMigrationHistory(): OrchestrationHistory = OrchestrationHistory(
         tags = listOf(
             mapOf("id" to VERSION_TAG_ID_ONE, "tagName" to VersionTagOne.value, "tagType" to VERSION_TAG_TYPE),
@@ -2256,6 +2841,19 @@ class MigrationRunServiceTest {
             callerExecutor.connection { scope -> service.transactionDown(scope, versionTag) }
     }
 
+    private class ThrowingMessageException(
+        private val metadataFailure: Throwable,
+    ) : RuntimeException() {
+        override val message: String?
+            get() = throw metadataFailure
+    }
+
+    private class ThrowingSqlStateException(
+        private val metadataFailure: RuntimeException,
+    ) : SQLException("driver failure", "42S21", 1060) {
+        override fun getSQLState(): String? = throw metadataFailure
+    }
+
     private fun versionConfiguration(
         vararg migrations: RegisteredMigration,
         versionName: String = VersionTag.validatedValue,
@@ -2309,6 +2907,9 @@ class MigrationRunServiceTest {
         val executedSql = mutableListOf<String>()
         val failDmlCalls = mutableSetOf<Int>()
         val failDdlCalls = mutableSetOf<Int>()
+        var failDmlWhen: ((DmlCall) -> Throwable?)? = null
+        var updateCountWhen: ((DmlCall) -> Int?)? = null
+        var applyDmlBeforeFailure: ((DmlCall) -> Boolean)? = null
         private val readResponses = ArrayDeque<List<Map<String, Any?>>>()
         private val updateCounts = ArrayDeque<Int>()
         var nextGeneratedId = 1000L
@@ -2319,9 +2920,13 @@ class MigrationRunServiceTest {
 
         val readParameters = mutableListOf<List<Any?>>()
         val dmlCalls = mutableListOf<DmlCall>()
+        val dmlUpdateCounts = mutableListOf<Int?>()
+        val lockHeldAtDmlCall = mutableListOf<Boolean>()
+        val versionStatuses = mutableMapOf<Int, Int>()
         var onVersionWrite: (() -> Unit)? = null
         var connectionBuildCount = 0
         private var connectionAutoCommit = true
+        private var migrationLockHeld = false
         var autoCommitFalseCount = 0
             private set
         var autoCommitRestoreCount = 0
@@ -2410,11 +3015,13 @@ class MigrationRunServiceTest {
                         if ("get_lock(" in normalizedSql) {
                             events += "lock-acquire"
                             systemLockAcquireFailure?.let { throw it }
+                            migrationLockHeld = systemLockAcquireValue == 1
                             return@proxy resultSet(listOf(mapOf("acquired" to systemLockAcquireValue)), sql)
                         }
                         if ("release_lock(" in normalizedSql) {
                             events += "lock-release"
                             systemLockReleaseFailure?.let { throw it }
+                            if (systemLockReleaseValue == 1) migrationLockHeld = false
                             return@proxy resultSet(listOf(mapOf("released" to systemLockReleaseValue)), sql)
                         }
                         readCount++
@@ -2445,7 +3052,11 @@ class MigrationRunServiceTest {
         private fun executeUpdate(sql: String, values: List<Any?>): Int {
             dmlCount++
             val lower = sql.lowercase()
-            dmlCalls += DmlCall(sql, values)
+            val call = DmlCall(sql, values)
+            dmlCalls += call
+            dmlUpdateCounts += null
+            val callIndex = dmlCalls.lastIndex
+            lockHeldAtDmlCall += migrationLockHeld
             if (lower.contains("system_migration_version")) onVersionWrite?.invoke()
             if (lower.contains("insert into") && lower.contains("system_migration_version")) {
                 lastGeneratedId = nextGeneratedId++
@@ -2473,8 +3084,59 @@ class MigrationRunServiceTest {
                 }
                 else -> events += "dml:$sql"
             }
-            if (dmlCount in failDmlCalls) throw SQLException("DML $dmlCount failed")
-            return if (updateCounts.isEmpty()) 1 else updateCounts.removeFirst()
+            val injectedFailure = failDmlWhen?.invoke(call)
+                ?: if (dmlCount in failDmlCalls) SQLException("DML $dmlCount failed") else null
+            if (injectedFailure != null) {
+                if (applyDmlBeforeFailure?.invoke(call) == true) applyFakeDmlState(call)
+                throw injectedFailure
+            }
+
+            val returnedCount = updateCountWhen?.invoke(call)
+                ?: if (updateCounts.isEmpty()) 1 else updateCounts.removeFirst()
+            val effectiveCount = if (isConditionalVersionStatusUpdate(call)) {
+                val versionIdIndex = if (values.size == 4) 2 else 1
+                val expectedStatusIndex = if (values.size == 4) 3 else 2
+                val versionId = values.getOrNull(versionIdIndex) as? Int
+                val expectedStatus = values.getOrNull(expectedStatusIndex) as? Int
+                if (versionId == null || expectedStatus == null || versionStatuses[versionId] != expectedStatus) {
+                    0
+                } else {
+                    returnedCount
+                }
+            } else {
+                returnedCount
+            }
+            if (effectiveCount == 1) applyFakeDmlState(call)
+            dmlUpdateCounts[callIndex] = effectiveCount
+            return effectiveCount
+        }
+
+        private fun isConditionalVersionStatusUpdate(call: DmlCall): Boolean =
+            call.sql.contains("UPDATE", ignoreCase = true) &&
+                call.sql.contains("system_migration_version", ignoreCase = true) &&
+                call.parameters.size in 3..4
+
+        private fun applyFakeDmlState(call: DmlCall) {
+            val lower = call.sql.lowercase()
+            when {
+                lower.contains("insert into") && lower.contains("system_migration_version") ->
+                    versionStatuses[lastGeneratedId.toInt()] = 0
+                lower.contains("update") && lower.contains("system_migration_version") -> {
+                    val targetStatus = call.parameters.getOrNull(0) as? Int ?: return
+                    val versionIdIndex = if (call.parameters.size == 4) 2 else 1
+                    val expectedStatusIndex = if (call.parameters.size == 4) 3 else 2
+                    val versionId = call.parameters.getOrNull(versionIdIndex) as? Int ?: return
+                    if (call.parameters.size !in 3..4 ||
+                        versionStatuses[versionId] == call.parameters.getOrNull(expectedStatusIndex)
+                    ) {
+                        versionStatuses[versionId] = targetStatus
+                    }
+                }
+                lower.contains("delete") && lower.contains("system_migration_version") -> {
+                    val versionId = call.parameters.firstOrNull() as? Int ?: return
+                    versionStatuses.remove(versionId)
+                }
+            }
         }
 
         private fun resultSet(rows: List<Map<String, Any?>>, statementSql: String = ""): ResultSet {

@@ -1,5 +1,7 @@
 package gog.my_project.data_base_operation.executor.transaction
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 /**
  * The canonical failure state for one managed Operation execution. A Pipeline may own this state
  * before a Scope exists; after activation, the Scope delegates its failure API to the same object.
@@ -20,6 +22,15 @@ internal class OperationFailureOwner {
     internal val propagationFailure: Throwable?
         get() = synchronized(monitor) { fatalFailure ?: primaryFailure }
 
+    /**
+     * Atomically admits the Operation callback only if no failure has won the Owner lock first.
+     * A successful return is the callback-admission linearization point; the lock is released
+     * before user code runs, so a later failure is retained without cancelling admitted work.
+     */
+    internal fun tryEnterCallback(): Boolean = synchronized(monitor) {
+        primaryFailure == null && fatalFailure == null
+    }
+
     internal fun recordFailure(failure: Throwable): Throwable = synchronized(monitor) {
         recordFailureLocked(failure)
     }
@@ -32,6 +43,26 @@ internal class OperationFailureOwner {
 
     internal fun recordThrowable(failure: Throwable) {
         if (failure is Error) recordFatal(failure) else recordFailure(failure)
+    }
+
+    /**
+     * Admits one narrowly-authorized post-failure write. The capability's one-shot state changes
+     * under this monitor, making admission atomic with ordinary and fatal failure recording.
+     */
+    internal fun admitPostFailureWrite(consumed: AtomicBoolean) = synchronized(monitor) {
+        fatalFailure?.let { throw it }
+        check(primaryFailure != null) {
+            "A post-failure write requires an existing ordinary Operation failure"
+        }
+        check(consumed.compareAndSet(false, true)) {
+            "The post-failure write capability has already been consumed"
+        }
+    }
+
+    /** Keeps a narrowly-authorized post-failure write error secondary to the current failure. */
+    internal fun attachPostFailureWriteFailure(failure: Throwable) = synchronized(monitor) {
+        val authoritativeFailure = fatalFailure ?: primaryFailure ?: return@synchronized
+        addOperationSuppressedSafely(authoritativeFailure, failure)
     }
 
     internal fun hasRecordedFailure(failure: Throwable): Boolean = synchronized(monitor) {

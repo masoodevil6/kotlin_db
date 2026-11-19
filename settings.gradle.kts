@@ -38,6 +38,7 @@ include(":data_base:core")
 include(":data_base:operation")
 include(":data_base:operation:config")
 include(":data_base:operation:executor")
+include(":data_base:operation:failure-spi")
 
 include(":data_base:models")
 include(":data_base:models:eloquent")

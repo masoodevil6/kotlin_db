@@ -5,6 +5,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionCon
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_operation.then.OperationPipelineDefinition
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -159,6 +160,61 @@ class DatabaseManagerLifecycleTest {
             assertEquals(1, provider.providerCloseCount.get())
         } finally {
             release.countDown()
+            workers.shutdownNow()
+            manager.shutdown()
+        }
+    }
+
+    @Test
+    fun shutdownWaitsForDefinitionLeaseThroughConnectionCleanupAndCoordinatorFinalization() {
+        val connectionCloseEntered = CountDownLatch(1)
+        val releaseConnectionClose = CountDownLatch(1)
+        val provider = ControlledProvider(
+            beforeConnectionCloseReturns = {
+                connectionCloseEntered.countDown()
+                await(releaseConnectionClose)
+            },
+        )
+        val (manager, handle) = manager(provider)
+        val stageEntered = CountDownLatch(1)
+        val releaseStage = CountDownLatch(1)
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start {
+                stageEntered.countDown()
+                await(releaseStage)
+                "definition-complete"
+            }
+        }
+        val workers = Executors.newFixedThreadPool(2)
+
+        try {
+            val operation = workers.submit<ExecuteResult<String>> {
+                handle.executeConnectionDefinition(definition)
+            }
+            assertTrue(stageEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            val shutdown = startShutdown(workers, manager)
+            awaitShutdownStart(manager)
+            assertEquals(0, provider.providerCloseCount.get())
+            assertTrue(!shutdown.isDone)
+
+            releaseStage.countDown()
+            assertTrue(connectionCloseEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertTrue(!operation.isDone)
+            assertTrue(!shutdown.isDone)
+            assertEquals(0, provider.providerCloseCount.get())
+
+            releaseConnectionClose.countDown()
+            assertEquals(
+                "definition-complete",
+                assertIs<ExecuteResult.Success<String>>(operation.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)).result,
+            )
+            shutdown.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(1, provider.providerCloseCount.get())
+        } finally {
+            releaseStage.countDown()
+            releaseConnectionClose.countDown()
             workers.shutdownNow()
             manager.shutdown()
         }
@@ -480,6 +536,7 @@ class DatabaseManagerLifecycleTest {
     private class ControlledProvider(
         private val blockStatement: (() -> Unit)? = null,
         private val closeFailure: Throwable? = null,
+        private val beforeConnectionCloseReturns: (() -> Unit)? = null,
     ) : IDatabaseConnection, AutoCloseable {
         val openCount = AtomicInteger()
         val connectionCloseCount = AtomicInteger()
@@ -497,7 +554,10 @@ class DatabaseManagerLifecycleTest {
             ) { _, method, args ->
                 when (method.name) {
                     "close" -> {
-                        if (closed.compareAndSet(false, true)) connectionCloseCount.incrementAndGet()
+                        if (closed.compareAndSet(false, true)) {
+                            connectionCloseCount.incrementAndGet()
+                            beforeConnectionCloseReturns?.invoke()
+                        }
                         null
                     }
                     "isClosed" -> closed.get()

@@ -15,6 +15,11 @@ import gog.my_project.data_base_migration.executor.service.run.PreparedMigration
 import gog.my_project.data_base_migration.executor.service.run.MigrationRunService
 import gog.my_project.data_base_migration.executor.service.run.MigrationRunOutcome
 import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCapability
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCommand
+import gog.my_project.data_base_operation.migration.failure.spi.write
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
@@ -25,6 +30,8 @@ import gog.my_project.data_base_query.executor.result.QueryRow
 import model.version_history.MigrationVersionHistorySnapshot
 import model.prepared.PreparedMigrationVersion
 import service.version.MigrationVersionPreparationService
+import java.sql.SQLException
+import java.util.IdentityHashMap
 
 /** Runs all Migrations belonging to one Version on the supplied Operation scope. */
 internal class MigrationVersionTransactionService(
@@ -39,7 +46,7 @@ internal class MigrationVersionTransactionService(
     fun transactionUp(
         scope: OperationExecutionScope,
         versionTag: MigrationVersionTag,
-    ): ExecuteResult<Boolean> = transactionUpInternal(scope, versionTag, null, null)
+    ): ExecuteResult<Boolean> = transactionUpInternal(scope, versionTag, null, null, null)
 
     /** Prepares runtime instances for a selected Version without writing Tags, History, or markers. */
     internal fun prepareMigrations(
@@ -72,13 +79,35 @@ internal class MigrationVersionTransactionService(
         versionTag: MigrationVersionTag,
         selectedVersion: PreparedMigrationVersion,
         preparedMigrations: List<PreparedMigration>,
-    ): ExecuteResult<Boolean> = transactionUpInternal(scope, versionTag, selectedVersion, preparedMigrations)
+    ): ExecuteResult<Boolean> = transactionUpInternal(
+        scope,
+        versionTag,
+        selectedVersion,
+        preparedMigrations,
+        null,
+    )
+
+    /** Applies a selected Version with the lock-scoped failure-status capability from orchestration. */
+    internal fun transactionUp(
+        scope: OperationExecutionScope,
+        versionTag: MigrationVersionTag,
+        selectedVersion: PreparedMigrationVersion,
+        preparedMigrations: List<PreparedMigration>,
+        failureStatusCapability: MigrationFailureStatusCapability,
+    ): ExecuteResult<Boolean> = transactionUpInternal(
+        scope,
+        versionTag,
+        selectedVersion,
+        preparedMigrations,
+        failureStatusCapability,
+    )
 
     private fun transactionUpInternal(
         scope: OperationExecutionScope,
         versionTag: MigrationVersionTag,
         selectedVersion: PreparedMigrationVersion?,
         preparedMigrations: List<PreparedMigration>?,
+        failureStatusCapability: MigrationFailureStatusCapability?,
     ): ExecuteResult<Boolean> = safely(scope) {
         val prepared = resolvePreparedVersion(scope, versionTag, selectedVersion, preparedMigrations)
             ?: return@safely failureResult(scope)
@@ -93,8 +122,22 @@ internal class MigrationVersionTransactionService(
             val runOutcome = preparedMigrations?.let { runtimeMigrations ->
                 migrationRunService.runUpAttempt(versionTag, versionId, scope, runtimeMigrations[index])
             } ?: migrationRunService.runUpAttempt(versionTag, versionId, scope, migration)
-            val result = runOutcome
-                .toExecuteResult()
+            val result = when (runOutcome) {
+                is MigrationRunOutcome.PreflightFailure -> runOutcome.toExecuteResult()
+                is MigrationRunOutcome.Attempt -> when (val attempt = runOutcome.result) {
+                    is MigrationExecutionResult.Failure -> {
+                        recordUpAttemptFailure(
+                            scope,
+                            failureStatusCapability,
+                            versionId,
+                            attempt,
+                        )
+                        ExecuteResult.Failure(attempt.cause)
+                    }
+                    is MigrationExecutionResult.Fatal -> throw attempt.error
+                    is MigrationExecutionResult.Success -> ExecuteResult.Success(true)
+                }
+            }
             if (result is ExecuteResult.Failure) return@safely result
             if ((result as ExecuteResult.Success).result != true) {
                 return@safely fail(
@@ -107,22 +150,219 @@ internal class MigrationVersionTransactionService(
         val updated = executeUpdate(
             scope,
             SystemMigrationVersionUpdateQuery(versionId, STATUS_MIGRATE_COMPLETED).query(),
-        ) ?: return@safely failureResult(scope)
+        ) ?: run {
+            recordLatchedFailureStatus(
+                scope,
+                failureStatusCapability,
+                versionId,
+                MigrationFailureStatusCommand.UpRecordingFailure(versionId),
+                migrationId = null,
+            )
+            return@safely failureResult(scope)
+        }
         if (updated != 1) {
-            return@safely fail(
+            val failure = fail(
                 scope,
                 "Expected to update one Migration Version '${versionTag.validatedValue}' to COMPLETED, but updated $updated rows",
             )
+            recordLatchedFailureStatus(
+                scope,
+                failureStatusCapability,
+                versionId,
+                MigrationFailureStatusCommand.UpRecordingFailure(versionId),
+                migrationId = null,
+            )
+            return@safely failure
         }
 
         ExecuteResult.Success(true)
+    }
+
+    private fun recordUpAttemptFailure(
+        scope: OperationExecutionScope,
+        capability: MigrationFailureStatusCapability?,
+        versionId: Int,
+        failure: MigrationExecutionResult.Failure,
+    ) {
+        if (failure.direction != MigrationExecutionResult.Direction.UP ||
+            failure.versionRecordId != versionId
+        ) return
+
+        val command = when (failure.stage) {
+            MigrationExecutionResult.FailureStage.EXECUTION ->
+                MigrationFailureStatusCommand.UpExecutionFailure(versionId)
+            MigrationExecutionResult.FailureStage.HISTORY_RECORD ->
+                MigrationFailureStatusCommand.UpRecordingFailure(versionId)
+            MigrationExecutionResult.FailureStage.VERSION_RECORD -> return
+        }
+        recordLatchedFailureStatus(
+            scope,
+            capability,
+            versionId,
+            command,
+            migrationId = failure.migrationId?.value,
+            expectedFailure = failure.cause,
+        )
+    }
+
+    private fun recordDownAttemptFailure(
+        scope: OperationExecutionScope,
+        capability: MigrationFailureStatusCapability?,
+        versionId: Int,
+        failure: MigrationExecutionResult.Failure,
+    ) {
+        if (failure.direction != MigrationExecutionResult.Direction.DOWN ||
+            failure.versionRecordId != versionId
+        ) return
+
+        val command = when (failure.stage) {
+            MigrationExecutionResult.FailureStage.EXECUTION ->
+                MigrationFailureStatusCommand.DownExecutionFailure(versionId)
+            MigrationExecutionResult.FailureStage.HISTORY_RECORD ->
+                MigrationFailureStatusCommand.DownRecordingFailure(versionId)
+            MigrationExecutionResult.FailureStage.VERSION_RECORD -> return
+        }
+        recordLatchedFailureStatus(
+            scope,
+            capability,
+            versionId,
+            command,
+            migrationId = failure.migrationId?.value,
+            expectedFailure = failure.cause,
+        )
+    }
+
+    /** Writes only after the ordinary Operation failure has already become authoritative. */
+    private fun recordLatchedFailureStatus(
+        scope: OperationExecutionScope,
+        capability: MigrationFailureStatusCapability?,
+        versionId: Int,
+        command: MigrationFailureStatusCommand,
+        migrationId: String?,
+        expectedFailure: Throwable? = null,
+    ) {
+        if (capability == null || versionId <= 0 || scope.fatalError != null) return
+        val primaryFailure = scope.firstFailure ?: return
+        if (primaryFailure is Error || (expectedFailure != null && primaryFailure !== expectedFailure)) return
+
+        // The capability is one-shot. Its result is terminal: no retry, fallback, or recursive write.
+        val failure = expectedFailure ?: primaryFailure
+        val diagnostic = failureDiagnosticSafely(scope, command, failure, migrationId)
+        if (diagnostic == null) {
+            capability.write(command)
+        } else {
+            capability.write(command, diagnostic)
+        }
+    }
+
+    /**
+     * Prepares and validates the complete JSON before consuming the one-shot capability. If
+     * throwable metadata is unavailable, record that problem as secondary and use safe metadata.
+     * If even the safe representation cannot be produced, use the existing status-only write.
+     */
+    private fun failureDiagnosticSafely(
+        scope: OperationExecutionScope,
+        command: MigrationFailureStatusCommand,
+        failure: Throwable,
+        migrationId: String?,
+    ): MigrationFailureDiagnostic? {
+        try {
+            return failureDiagnostic(command, failure, migrationId).also {
+                // Validate encoding before the single status attempt. The Operation implementation
+                // serializes the immutable DTO again while preparing the same UPDATE.
+                it.toStorageMessage(command.versionId)
+            }
+        } catch (fatal: Error) {
+            propagateDiagnosticFatal(scope, fatal)
+        } catch (diagnosticFailure: Throwable) {
+            recordDiagnosticConstructionFailure(scope, diagnosticFailure)
+        }
+
+        return try {
+            fallbackFailureDiagnostic(command, failure, migrationId).also {
+                it.toStorageMessage(command.versionId)
+            }
+        } catch (fatal: Error) {
+            propagateDiagnosticFatal(scope, fatal)
+        } catch (fallbackFailure: Throwable) {
+            recordDiagnosticConstructionFailure(scope, fallbackFailure)
+            null
+        }
+    }
+
+    private fun recordDiagnosticConstructionFailure(
+        scope: OperationExecutionScope,
+        failure: Throwable,
+    ) {
+        try {
+            scope.recordFailure(failure)
+        } catch (fatal: Error) {
+            propagateDiagnosticFatal(scope, fatal)
+        }
+    }
+
+    private fun propagateDiagnosticFatal(
+        scope: OperationExecutionScope,
+        fatal: Error,
+    ): Nothing {
+        scope.recordFatal(fatal)
+        throw scope.fatalError ?: fatal
+    }
+
+    private fun fallbackFailureDiagnostic(
+        command: MigrationFailureStatusCommand,
+        failure: Throwable,
+        migrationId: String?,
+    ): MigrationFailureDiagnostic = MigrationFailureDiagnostic(
+        stage = diagnosticStage(command),
+        // javaClass does not call Throwable message/cause or SQLException metadata accessors.
+        exceptionClassName = failure.javaClass.name,
+        sqlState = null,
+        vendorErrorCode = null,
+        message = null,
+        migrationId = migrationId,
+    )
+
+    private fun failureDiagnostic(
+        command: MigrationFailureStatusCommand,
+        failure: Throwable,
+        migrationId: String?,
+    ): MigrationFailureDiagnostic {
+        val sqlFailure = findSqlException(failure)
+        return MigrationFailureDiagnostic(
+            stage = diagnosticStage(command),
+            exceptionClassName = failure.javaClass.name,
+            sqlState = sqlFailure?.sqlState,
+            vendorErrorCode = sqlFailure?.errorCode,
+            message = failure.message ?: sqlFailure?.message,
+            migrationId = migrationId,
+        )
+    }
+
+    private fun diagnosticStage(
+        command: MigrationFailureStatusCommand,
+    ): MigrationFailureDiagnosticStage = when (command) {
+        is MigrationFailureStatusCommand.UpExecutionFailure -> MigrationFailureDiagnosticStage.UP_EXECUTION
+        is MigrationFailureStatusCommand.UpRecordingFailure -> MigrationFailureDiagnosticStage.UP_RECORDING
+        is MigrationFailureStatusCommand.DownExecutionFailure -> MigrationFailureDiagnosticStage.DOWN_EXECUTION
+        is MigrationFailureStatusCommand.DownRecordingFailure -> MigrationFailureDiagnosticStage.DOWN_RECORDING
+    }
+
+    private fun findSqlException(failure: Throwable): SQLException? {
+        val seen = IdentityHashMap<Throwable, Boolean>()
+        var current: Throwable? = failure
+        while (current != null && seen.put(current, true) == null) {
+            if (current is SQLException) return current
+            current = current.cause
+        }
+        return null
     }
 
     /** Rolls back one applied Version directly on the supplied Operation scope, preserving reverse order. */
     fun transactionDown(
         scope: OperationExecutionScope,
         versionTag: MigrationVersionTag,
-    ): ExecuteResult<Boolean> = transactionDownInternal(scope, versionTag, null, null)
+    ): ExecuteResult<Boolean> = transactionDownInternal(scope, versionTag, null, null, null)
 
     /** Rolls back a selected Version using instances prepared before the first Version marker. */
     internal fun transactionDown(
@@ -130,13 +370,35 @@ internal class MigrationVersionTransactionService(
         versionTag: MigrationVersionTag,
         selectedVersion: PreparedMigrationVersion,
         preparedMigrations: List<PreparedMigration>,
-    ): ExecuteResult<Boolean> = transactionDownInternal(scope, versionTag, selectedVersion, preparedMigrations)
+    ): ExecuteResult<Boolean> = transactionDownInternal(
+        scope,
+        versionTag,
+        selectedVersion,
+        preparedMigrations,
+        null,
+    )
+
+    /** Rolls back a selected Version with the lock-scoped failure-status capability from orchestration. */
+    internal fun transactionDown(
+        scope: OperationExecutionScope,
+        versionTag: MigrationVersionTag,
+        selectedVersion: PreparedMigrationVersion,
+        preparedMigrations: List<PreparedMigration>,
+        failureStatusCapability: MigrationFailureStatusCapability,
+    ): ExecuteResult<Boolean> = transactionDownInternal(
+        scope,
+        versionTag,
+        selectedVersion,
+        preparedMigrations,
+        failureStatusCapability,
+    )
 
     private fun transactionDownInternal(
         scope: OperationExecutionScope,
         versionTag: MigrationVersionTag,
         selectedVersion: PreparedMigrationVersion?,
         preparedMigrations: List<PreparedMigration>?,
+        failureStatusCapability: MigrationFailureStatusCapability?,
     ): ExecuteResult<Boolean> = safely(scope) {
         val prepared = resolvePreparedVersion(scope, versionTag, selectedVersion, preparedMigrations)
             ?: return@safely failureResult(scope)
@@ -203,8 +465,22 @@ internal class MigrationVersionTransactionService(
             val runOutcome = preparedMigrations?.let { runtimeMigrations ->
                 migrationRunService.runDownAttempt(versionTag, versionId, scope, runtimeMigrations[index])
             } ?: migrationRunService.runDownAttempt(versionTag, versionId, scope, migration)
-            val result = runOutcome
-                .toExecuteResult()
+            val result = when (runOutcome) {
+                is MigrationRunOutcome.PreflightFailure -> runOutcome.toExecuteResult()
+                is MigrationRunOutcome.Attempt -> when (val attempt = runOutcome.result) {
+                    is MigrationExecutionResult.Failure -> {
+                        recordDownAttemptFailure(
+                            scope,
+                            failureStatusCapability,
+                            versionId,
+                            attempt,
+                        )
+                        ExecuteResult.Failure(attempt.cause)
+                    }
+                    is MigrationExecutionResult.Fatal -> throw attempt.error
+                    is MigrationExecutionResult.Success -> ExecuteResult.Success(true)
+                }
+            }
             if (result is ExecuteResult.Failure) return@safely result
             if ((result as ExecuteResult.Success).result != true) {
                 return@safely fail(
@@ -217,12 +493,29 @@ internal class MigrationVersionTransactionService(
         val deleted = executeDelete(
             scope,
             SystemMigrationVersionDeleteQuery(versionId).query(),
-        ) ?: return@safely failureResult(scope)
+        ) ?: run {
+            recordLatchedFailureStatus(
+                scope,
+                failureStatusCapability,
+                versionId,
+                MigrationFailureStatusCommand.DownRecordingFailure(versionId),
+                migrationId = null,
+            )
+            return@safely failureResult(scope)
+        }
         if (deleted != 1) {
-            return@safely fail(
+            val failure = fail(
                 scope,
                 "Expected to delete one Migration Version '${versionTag.validatedValue}', but deleted $deleted",
             )
+            recordLatchedFailureStatus(
+                scope,
+                failureStatusCapability,
+                versionId,
+                MigrationFailureStatusCommand.DownRecordingFailure(versionId),
+                migrationId = null,
+            )
+            return@safely failure
         }
 
         ExecuteResult.Success(true)

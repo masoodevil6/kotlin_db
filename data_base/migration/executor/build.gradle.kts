@@ -22,6 +22,7 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(project(":data_base:manager"))
+    testImplementation(libs.kotlinxSerialization)
 }
 
 tasks.test {

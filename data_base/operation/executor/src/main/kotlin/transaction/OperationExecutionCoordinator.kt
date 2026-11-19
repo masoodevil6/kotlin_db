@@ -96,14 +96,17 @@ class OperationExecutionCoordinator(
                         ),
                     )
                 } else {
+                    // Allocate the full success value before publishing STARTING. If either
+                    // allocation throws, the Coordinator remains IDLE and can be reused.
+                    val failureOwner = OperationFailureOwner()
+                    val started = PipelineScopeStart.Started(failureOwner)
                     state = State.STARTING
                     lifecycleThread = Thread.currentThread()
                     preparedScope = null
                     pendingFailure = null
                     pendingFatal = null
-                    val failureOwner = OperationFailureOwner()
                     pipelineFailureOwner = failureOwner
-                    PipelineScopeStart.Started(failureOwner)
+                    started
                 }
             }
             State.STARTING, State.ACQUIRING -> PipelineScopeStart.Rejected(

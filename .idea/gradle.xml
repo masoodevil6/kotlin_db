@@ -41,6 +41,7 @@
             <option value="$PROJECT_DIR$/data_base/operation" />
             <option value="$PROJECT_DIR$/data_base/operation/config" />
             <option value="$PROJECT_DIR$/data_base/operation/executor" />
+            <option value="$PROJECT_DIR$/data_base/operation/failure-spi" />
             <option value="$PROJECT_DIR$/data_base/operation/query" />
             <option value="$PROJECT_DIR$/data_base/operation/query/api" />
             <option value="$PROJECT_DIR$/data_base/operation/query/ast" />

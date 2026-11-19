@@ -9,6 +9,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_operation.then.ConnectionDecision
+import gog.my_project.data_base_operation.then.OperationPipelineDefinition
 import gog.my_project.data_base_operation.then.PipelineCompletion
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import java.lang.reflect.Proxy
@@ -379,6 +380,404 @@ class DatabaseHandleOperationScopeTest {
             assertEquals(1, provider.commitCount.get())
             assertEquals(0, provider.rollbackCount.get())
         } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `connection Definition runs typed stages through the managed handle`() {
+        class State(var calls: Int = 0)
+
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val observedStates = mutableListOf<State>()
+        val definition = OperationPipelineDefinition.create<State, String>(stateFactory = { State() }) {
+            start<Int> { context ->
+                observedStates += context.state
+                context.state.calls++
+                7
+            }.then<Int, String> { value, context ->
+                observedStates += context.state
+                context.state.calls++
+                "${value + context.state.calls}"
+            }
+        }
+
+        try {
+            val result = handle.executeConnectionDefinition(definition)
+
+            assertEquals("9", assertIs<ExecuteResult.Success<String>>(result).result)
+            assertSame(observedStates[0], observedStates[1])
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(0, provider.commitCount.get())
+            assertEquals(0, provider.rollbackCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `transaction Definition runs typed stages through the managed handle and commits`() {
+        class State(var total: Int = 0)
+
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val observedStates = mutableListOf<State>()
+        val definition = OperationPipelineDefinition.create<State, String>(stateFactory = { State() }) {
+            start<Int> { context ->
+                observedStates += context.state
+                context.state.total = 5
+                4
+            }.then<Int, String> { value, context ->
+                observedStates += context.state
+                context.state.total += value
+                "total-${context.state.total}"
+            }
+        }
+
+        try {
+            val result = handle.executeTransactionDefinition(definition)
+
+            assertEquals("total-9", assertIs<ExecuteResult.Success<String>>(result).result)
+            assertSame(observedStates[0], observedStates[1])
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(1, provider.commitCount.get())
+            assertEquals(0, provider.rollbackCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `same Handle Definition calls share Coordinator lineage`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val firstRecipeEntered = CountDownLatch(1)
+        val releaseFirstRecipe = CountDownLatch(1)
+        val recipeCalls = AtomicInteger()
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            if (recipeCalls.incrementAndGet() == 1) {
+                firstRecipeEntered.countDown()
+                check(releaseFirstRecipe.await(5, TimeUnit.SECONDS))
+            }
+            start { "completed" }
+        }
+        val workers = Executors.newSingleThreadExecutor()
+
+        try {
+            val first = workers.submit<ExecuteResult<String>> {
+                handle.executeConnectionDefinition(definition)
+            }
+            assertTrue(firstRecipeEntered.await(5, TimeUnit.SECONDS))
+
+            val rejected = assertIs<ExecuteResult.Failure>(handle.executeConnectionDefinition(definition))
+            releaseFirstRecipe.countDown()
+            val incumbent = assertIs<ExecuteResult.Failure>(first.get(5, TimeUnit.SECONDS))
+
+            assertSame(rejected.exception, incumbent.exception)
+            assertEquals(1, recipeCalls.get())
+            assertEquals(0, provider.openCount.get())
+        } finally {
+            releaseFirstRecipe.countDown()
+            workers.shutdownNow()
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `separate Handles do not share Definition Coordinator lineage`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val firstHandle: DatabaseHandleApi = manager[Primary]
+        val secondHandle: DatabaseHandleApi = manager[Primary]
+        val bothRecipesEntered = CountDownLatch(2)
+        val releaseRecipes = CountDownLatch(1)
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            bothRecipesEntered.countDown()
+            check(releaseRecipes.await(5, TimeUnit.SECONDS))
+            start { "completed" }
+        }
+        val workers = Executors.newFixedThreadPool(2)
+
+        try {
+            val first = workers.submit<ExecuteResult<String>> {
+                firstHandle.executeConnectionDefinition(definition)
+            }
+            val second = workers.submit<ExecuteResult<String>> {
+                secondHandle.executeConnectionDefinition(definition)
+            }
+
+            assertTrue(bothRecipesEntered.await(5, TimeUnit.SECONDS))
+            releaseRecipes.countDown()
+            assertEquals("completed", assertIs<ExecuteResult.Success<String>>(first.get(5, TimeUnit.SECONDS)).result)
+            assertEquals("completed", assertIs<ExecuteResult.Success<String>>(second.get(5, TimeUnit.SECONDS)).result)
+            assertEquals(2, provider.openCount.get())
+            assertEquals(2, provider.connectionCloseCount.get())
+        } finally {
+            releaseRecipes.countDown()
+            workers.shutdownNow()
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `Definition preparation failure returns through ExecuteResult without opening connection`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val failure = IllegalArgumentException("invalid Definition")
+        var stateFactoryCalls = 0
+        val definition = OperationPipelineDefinition.create<Unit, String>(
+            stateFactory = { stateFactoryCalls++; Unit },
+        ) { throw failure }
+
+        try {
+            val result = handle.executeConnectionDefinition(definition)
+
+            assertSame(failure, assertIs<ExecuteResult.Failure>(result).exception)
+            assertEquals(0, stateFactoryCalls)
+            assertEquals(0, provider.openCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `transaction Definition failure rolls back and does not commit`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val failure = IllegalStateException("transaction Definition failed")
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start<Int> { 1 }.then<Int, String> { _, context ->
+                context.failed<String>(failure)
+                "ignored result"
+            }
+        }
+
+        try {
+            val result = handle.executeTransactionDefinition(definition)
+
+            assertSame(failure, assertIs<ExecuteResult.Failure>(result).exception)
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(0, provider.commitCount.get())
+            assertEquals(1, provider.rollbackCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `custom DatabaseHandleApi Definition execution preserves unsupported behavior`() {
+        val handle = LegacyHandle()
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start { "must not execute" }
+        }
+
+        val connectionResult = handle.executeConnectionDefinition(definition)
+        val transactionResult = handle.executeTransactionDefinition(definition)
+
+        assertIs<UnsupportedOperationException>(assertIs<ExecuteResult.Failure>(connectionResult).exception)
+        assertIs<UnsupportedOperationException>(assertIs<ExecuteResult.Failure>(transactionResult).exception)
+    }
+
+    @Test
+    fun `same Handle Connection and Transaction Definitions share admission lineage`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val firstRecipeEntered = CountDownLatch(1)
+        val releaseFirstRecipe = CountDownLatch(1)
+        val recipeCalls = AtomicInteger()
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            if (recipeCalls.incrementAndGet() == 1) {
+                firstRecipeEntered.countDown()
+                check(releaseFirstRecipe.await(5, TimeUnit.SECONDS))
+            }
+            start { "completed" }
+        }
+        val workers = Executors.newSingleThreadExecutor()
+
+        try {
+            val connectionExecution = workers.submit<ExecuteResult<String>> {
+                handle.executeConnectionDefinition(definition)
+            }
+            assertTrue(firstRecipeEntered.await(5, TimeUnit.SECONDS))
+
+            val transactionRejection = assertIs<ExecuteResult.Failure>(
+                handle.executeTransactionDefinition(definition),
+            )
+            releaseFirstRecipe.countDown()
+            val connectionRejection = assertIs<ExecuteResult.Failure>(
+                connectionExecution.get(5, TimeUnit.SECONDS),
+            )
+
+            assertSame(transactionRejection.exception, connectionRejection.exception)
+            assertEquals(1, recipeCalls.get())
+            assertEquals(0, provider.openCount.get())
+        } finally {
+            releaseFirstRecipe.countDown()
+            workers.shutdownNow()
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `same Thread Definition and legacy Pipeline nesting is rejected by OperationScopeGuard`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        var nestedFailure: Throwable? = null
+        val legacyPipeline = handle.connectionPipeline<String> { context ->
+            context.next("legacy").connection(ConnectionDecision.REUSE)
+        }
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start { _ ->
+                nestedFailure = assertIs<ExecuteResult.Failure>(legacyPipeline.execute()).exception
+                "definition-result"
+            }
+        }
+
+        try {
+            val result = handle.executeConnectionDefinition(definition)
+
+            assertSame(nestedFailure, assertIs<ExecuteResult.Failure>(result).exception)
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `different Threads Definition and legacy Pipeline remain independently admitted`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val definitionStageEntered = CountDownLatch(1)
+        val legacyStageEntered = CountDownLatch(1)
+        val releaseStages = CountDownLatch(1)
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start {
+                definitionStageEntered.countDown()
+                check(legacyStageEntered.await(5, TimeUnit.SECONDS))
+                check(releaseStages.await(5, TimeUnit.SECONDS))
+                "definition-result"
+            }
+        }
+        val legacyPipeline = handle.connectionPipeline<String> { _ ->
+            legacyStageEntered.countDown()
+            check(definitionStageEntered.await(5, TimeUnit.SECONDS))
+            check(releaseStages.await(5, TimeUnit.SECONDS))
+            "legacy-result"
+        }
+        val workers = Executors.newFixedThreadPool(2)
+
+        try {
+            val definitionExecution = workers.submit<ExecuteResult<String>> {
+                handle.executeConnectionDefinition(definition)
+            }
+            assertTrue(definitionStageEntered.await(5, TimeUnit.SECONDS))
+            val legacyExecution = workers.submit<ExecuteResult<*>> { legacyPipeline.execute() }
+            assertTrue(legacyStageEntered.await(5, TimeUnit.SECONDS))
+            releaseStages.countDown()
+
+            assertEquals(
+                "definition-result",
+                assertIs<ExecuteResult.Success<String>>(definitionExecution.get(5, TimeUnit.SECONDS)).result,
+            )
+            assertIs<ExecuteResult.Success<*>>(legacyExecution.get(5, TimeUnit.SECONDS))
+            assertEquals(2, provider.openCount.get())
+            assertEquals(2, provider.connectionCloseCount.get())
+        } finally {
+            releaseStages.countDown()
+            workers.shutdownNow()
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `same Thread Definition and legacy Transaction nesting is rejected by OperationScopeGuard`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        var nestedFailure: Throwable? = null
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start {
+                nestedFailure = assertIs<ExecuteResult.Failure>(
+                    handle.transaction { ExecuteResult.Success("nested-transaction") },
+                ).exception
+                "definition-result"
+            }
+        }
+
+        try {
+            val result = handle.executeConnectionDefinition(definition)
+
+            assertSame(nestedFailure, assertIs<ExecuteResult.Failure>(result).exception)
+            assertEquals(1, provider.openCount.get())
+            assertEquals(1, provider.connectionCloseCount.get())
+            assertEquals(0, provider.commitCount.get())
+            assertEquals(0, provider.rollbackCount.get())
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `different Threads Definition and legacy Transaction remain independently admitted`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val definitionStageEntered = CountDownLatch(1)
+        val transactionCallbackEntered = CountDownLatch(1)
+        val releaseOperations = CountDownLatch(1)
+        val definition = OperationPipelineDefinition.create<Unit, String>(stateFactory = { Unit }) {
+            start {
+                definitionStageEntered.countDown()
+                check(transactionCallbackEntered.await(5, TimeUnit.SECONDS))
+                check(releaseOperations.await(5, TimeUnit.SECONDS))
+                "definition-result"
+            }
+        }
+        val workers = Executors.newFixedThreadPool(2)
+
+        try {
+            val definitionExecution = workers.submit<ExecuteResult<String>> {
+                handle.executeConnectionDefinition(definition)
+            }
+            assertTrue(definitionStageEntered.await(5, TimeUnit.SECONDS))
+            val legacyTransaction = workers.submit<ExecuteResult<String>> {
+                handle.transaction {
+                    transactionCallbackEntered.countDown()
+                    check(releaseOperations.await(5, TimeUnit.SECONDS))
+                    ExecuteResult.Success("transaction-result")
+                }
+            }
+            assertTrue(transactionCallbackEntered.await(5, TimeUnit.SECONDS))
+            releaseOperations.countDown()
+
+            assertEquals(
+                "definition-result",
+                assertIs<ExecuteResult.Success<String>>(definitionExecution.get(5, TimeUnit.SECONDS)).result,
+            )
+            assertEquals(
+                "transaction-result",
+                assertIs<ExecuteResult.Success<String>>(legacyTransaction.get(5, TimeUnit.SECONDS)).result,
+            )
+            assertEquals(2, provider.openCount.get())
+            assertEquals(2, provider.connectionCloseCount.get())
+            assertEquals(1, provider.commitCount.get())
+            assertEquals(0, provider.rollbackCount.get())
+        } finally {
+            releaseOperations.countDown()
+            workers.shutdownNow()
             manager.close()
         }
     }
