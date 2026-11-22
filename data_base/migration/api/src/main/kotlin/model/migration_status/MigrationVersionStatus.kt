@@ -6,4 +6,6 @@ enum class MigrationVersionStatus {
     PENDING,
     UNKNOWN,
     INVALID,
+    UP_MANUAL_RECOVERY_REQUIRED,
+    DOWN_MANUAL_RECOVERY_REQUIRED,
 }

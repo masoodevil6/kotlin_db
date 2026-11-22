@@ -1,5 +1,6 @@
 package gog.my_project.data_base_migration.executor.service.status
 
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.group.SingleMigration
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
@@ -15,6 +16,9 @@ import model.migration_status.MigrationStatusSnapshot
 import model.migration_status.MigrationVersionStatus
 import model.prepared.PreparedMigrationVersion
 import model.version_history.MigrationHistoryVersion
+import model.retry.MigrationRetryCheckpoint
+import model.retry.MigrationRetryCheckpointCodec
+import model.retry.MigrationRetryPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -65,7 +69,15 @@ class MigrationStatusAnalyzerTest {
             migrationRow(20, "first_migration", 300, 100, 100, "v1", resolvedVersionTagId = 10),
         )
 
-        listOf(0, 1, 2, 4, 5, 6, 99).forEach { versionStatus ->
+        listOf(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+            99,
+        ).forEach { versionStatus ->
             val snapshot = MigrationStatusSnapshot.withHistoryVersions(
                 rows,
                 listOf(MigrationHistoryVersion(100, 10, versionStatus)),
@@ -79,6 +91,94 @@ class MigrationStatusAnalyzerTest {
             }
             assertTrue(issue.message.contains("status $versionStatus"))
         }
+    }
+
+    @Test
+    fun `manual recovery statuses are distinct for configured and unknown versions`() {
+        val configured = configuration(version("v1", "first_migration"))
+        val configuredRows = listOf(versionRow(10, "v1", 100))
+
+        val upReport = analyzer.analyze(
+            configured,
+            MigrationStatusSnapshot.withHistoryVersions(
+                configuredRows,
+                listOf(MigrationHistoryVersion(100, 10, MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED)),
+            ),
+        )
+        assertEquals(MigrationVersionStatus.UP_MANUAL_RECOVERY_REQUIRED, upReport.versions.single().status)
+        assertTrue(upReport.issues.any {
+            it.code == MigrationStatusReport.Issue.Code.MANUAL_RECOVERY_REQUIRED_UP && 100 in it.versionIds
+        })
+
+        val downReport = analyzer.analyze(
+            configuration(version("configured_v")),
+            MigrationStatusSnapshot.withHistoryVersions(
+                listOf(versionRow(99, "retired_v", 999)),
+                listOf(MigrationHistoryVersion(999, 99, MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED)),
+            ),
+        )
+        assertEquals(MigrationVersionStatus.DOWN_MANUAL_RECOVERY_REQUIRED, downReport.unknownVersions.single().status)
+        assertTrue(downReport.issues.any {
+            it.code == MigrationStatusReport.Issue.Code.MANUAL_RECOVERY_REQUIRED_DOWN && 999 in it.versionIds
+        })
+    }
+
+    @Test
+    fun `status report uses shared checkpoint validation for completed and manual statuses`() {
+        val config = configuration(version("v1", "first_migration"))
+        val completedCheckpoint = MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 1,
+                originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                originalMessage = "original diagnostic",
+                cursorMigrationId = null,
+                phase = MigrationRetryPhase.FINALIZATION_PENDING,
+            ),
+        )
+
+        val completedWithCheckpoint = analyzer.analyze(
+            config,
+            MigrationStatusSnapshot.withHistoryVersions(
+                listOf(versionRow(10, "v1", 100)),
+                listOf(
+                    MigrationHistoryVersion(
+                        100,
+                        10,
+                        MigrationVersionState.STATUS_MIGRATE_COMPLETED,
+                        retryCheckpoint = completedCheckpoint,
+                    ),
+                ),
+            ),
+        )
+        assertEquals(MigrationVersionStatus.INVALID, completedWithCheckpoint.versions.single().status)
+        assertTrue(completedWithCheckpoint.issues.any {
+            it.code == MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY &&
+                "invalid Status/Checkpoint" in it.message
+        })
+
+        val malformedManual = analyzer.analyze(
+            config,
+            MigrationStatusSnapshot.withHistoryVersions(
+                listOf(versionRow(10, "v1", 100)),
+                listOf(
+                    MigrationHistoryVersion(
+                        100,
+                        10,
+                        MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED,
+                        retryCheckpoint = "not-json",
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            MigrationVersionStatus.UP_MANUAL_RECOVERY_REQUIRED,
+            malformedManual.versions.single().status,
+        )
+        assertTrue(malformedManual.issues.any {
+            it.code == MigrationStatusReport.Issue.Code.MANUAL_RECOVERY_REQUIRED_UP &&
+                "malformed Checkpoint" in it.message
+        })
     }
 
     @Test

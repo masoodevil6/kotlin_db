@@ -6,6 +6,7 @@ import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
+import gog.my_project.data_base_operation.config.data_base.SystemLock
 import gog.my_project.data_base_migration.api.builder.migrationConfig
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
@@ -17,8 +18,16 @@ import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_migration.executor.controller.MigrationController
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryOperation
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryTarget
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionSelection
+import model.retry.MigrationRetryCheckpoint
+import model.retry.MigrationRetryCheckpointCodec
+import model.retry.MigrationRetryPhase
 import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionTransactionService
+import gog.my_project.data_base_migration.executor.service.version.MigrationVersionStateService
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
@@ -33,6 +42,10 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import model.version_history.MigrationHistoryEntry
+import model.version_history.MigrationHistoryTag
+import model.version_history.MigrationHistoryVersion
+import model.version_history.MigrationVersionHistorySnapshot
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -44,6 +57,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -304,7 +319,7 @@ class MigrationRunServiceTest {
         assertEquals(1, SampleMigration.upCalls)
         assertEquals(0, SampleMigration.downCalls)
         assertEquals(
-            listOf("read", "ddl", "read", "insert-tag", "read", "insert-history"),
+            listOf("read", "ddl", "read", "insert-tag", "read", "read", "insert-history"),
             database.events.map { it.substringBefore(':') },
         )
         val readSql = database.executedSql.filter { it.contains("SELECT", ignoreCase = true) }
@@ -316,8 +331,9 @@ class MigrationRunServiceTest {
         assertTrue(readSql.none { it.contains("WITH", ignoreCase = true) })
         assertTrue(database.executedSql.none { it.contains("system_migration_version", ignoreCase = true) })
         assertEquals(listOf(MigrationItem.value, MIGRATION_TAG_TYPE), database.readParameters[0])
-        assertEquals(listOf(MigrationItem.value, MIGRATION_TAG_TYPE), database.readParameters[1])
-        assertEquals(listOf(GENERATED_TAG_ID.toInt()), database.readParameters[2])
+        assertEquals(listOf(MigrationItem.value), database.readParameters[1])
+        assertEquals(listOf(MigrationItem.value), database.readParameters[2])
+        assertEquals(listOf(GENERATED_TAG_ID.toInt()), database.readParameters[3])
         assertEquals(listOf(MigrationItem.value, MIGRATION_TAG_TYPE), database.dmlCalls[0].parameters)
         assertEquals(listOf(GENERATED_TAG_ID.toInt(), VERSION_ID), database.dmlCalls[1].parameters)
         val historyInsert = database.executedSql.last { it.contains("INSERT", ignoreCase = true) &&
@@ -332,6 +348,25 @@ class MigrationRunServiceTest {
         assertEquals(0, database.connectionCloseCount)
         assertTrue(database.statementCloseCount > 0)
         assertTrue(database.resultSetCloseCount > 0)
+    }
+
+    @Test
+    fun `recordUpAttempt records metadata independently without invoking Schema`() {
+        database.respond(emptyList(), emptyList())
+
+        val outcome = service.recordUpAttempt(VersionTag, VERSION_ID, scope, registration)
+
+        val success = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.UP, success.direction)
+        assertEquals(registration.id, success.migrationId)
+        assertEquals(0, SampleMigration.upCalls)
+        assertEquals(0, SampleMigration.downCalls)
+        assertEquals(
+            listOf("read", "insert-tag", "read", "read", "insert-history"),
+            database.events.map { it.substringBefore(':') },
+        )
     }
 
     @Test
@@ -460,6 +495,7 @@ class MigrationRunServiceTest {
         assertSame(attemptFailure.cause, scope.firstFailure)
         assertEquals(2, database.dmlCount)
         assertEquals(1, database.insertHistoryCount)
+        assertEquals(1, SampleMigration.upCalls, "A recording failure must not execute Schema again")
     }
 
     @Test
@@ -606,6 +642,57 @@ class MigrationRunServiceTest {
     }
 
     @Test
+    fun `recordDownAttempt removes metadata independently without invoking Schema`() {
+        database.respond(emptyList()) // No other Version still references the ITEM Tag.
+
+        val outcome = service.recordDownAttempt(
+            VersionTag,
+            VERSION_ID,
+            scope,
+            registration,
+            MigrationDownRecordingDecision.DeleteTargetHistory(MIGRATION_TAG_ID, VERSION_ID),
+        )
+
+        val success = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+        )
+        assertEquals(MigrationExecutionResult.Direction.DOWN, success.direction)
+        assertEquals(registration.id, success.migrationId)
+        assertEquals(0, SampleMigration.upCalls)
+        assertEquals(0, SampleMigration.downCalls)
+        assertEquals(1, database.deleteHistoryCount)
+        assertEquals(1, database.deleteTagCount)
+        assertTrue(database.events.indexOfFirst { it.startsWith("delete-history:") } <
+            database.events.indexOfFirst { it.startsWith("delete-tag:") })
+    }
+
+    @Test
+    fun `DOWN recording reconciliation completes already deleted history and tag without Schema or DML`() {
+        val snapshot = MigrationVersionHistorySnapshot(
+            tags = listOf(
+                MigrationHistoryTag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+            ),
+            versions = listOf(
+                MigrationHistoryVersion(
+                    VERSION_ID,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED,
+                ),
+            ),
+            migrations = emptyList<MigrationHistoryEntry>(),
+        )
+        val decision = MigrationDownRecordingReconciler().assess(snapshot, VERSION_ID, registration.id)
+
+        assertEquals(MigrationDownRecordingDecision.Complete(retainedTagId = null), decision)
+        val outcome = service.recordDownAttempt(VersionTag, VERSION_ID, scope, registration, decision)
+
+        assertIs<MigrationExecutionResult.Success>(assertIs<MigrationRunOutcome.Attempt>(outcome).result)
+        assertEquals(0, SampleMigration.downCalls)
+        assertTrue(database.events.isEmpty())
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
     fun `runDown attempt success includes Version and Migration identity`() {
         database.respond(
             rows(id = MIGRATION_TAG_ID, tagType = MIGRATION_TAG_TYPE),
@@ -749,6 +836,7 @@ class MigrationRunServiceTest {
         assertSame(attemptFailure.cause, scope.firstFailure)
         assertEquals(1, database.dmlCount)
         assertEquals(0, database.deleteTagCount)
+        assertEquals(1, SampleMigration.downCalls, "A recording failure must not execute Schema again")
     }
 
     @Test
@@ -938,23 +1026,104 @@ class MigrationRunServiceTest {
         val versionInsert = database.dmlCalls.first { it.sql.contains("INSERT", true) &&
             it.sql.contains("system_migration_version", true) }
         val versionId = database.generatedIdForVersionInsert
-        assertEquals(listOf(1000), versionInsert.parameters)
+        assertEquals(1000, versionInsert.parameters[0])
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, versionInsert.parameters[1])
+        assertNull(versionInsert.parameters[2])
+        val initialCheckpoint = MigrationRetryCheckpointCodec.decode(versionInsert.parameters[3] as String)
+        assertEquals(MigrationRetryPhase.EXECUTION_PENDING, initialCheckpoint.phase)
+        assertEquals(firstRegistration.id.value, initialCheckpoint.cursorMigrationId)
         val completionUpdate = database.dmlCalls.last()
         assertTrue(completionUpdate.sql.contains("UPDATE", true))
         assertTrue(completionUpdate.sql.contains("system_migration_version", true))
-        assertEquals(listOf(STATUS_MIGRATE_COMPLETED, versionId.toInt()), completionUpdate.parameters)
+        assertEquals(STATUS_MIGRATE_COMPLETED, completionUpdate.parameters[0])
+        assertEquals(versionId.toInt(), completionUpdate.parameters[1])
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, completionUpdate.parameters[2])
+        assertTrue(completionUpdate.parameters[3] is String)
         assertEquals(1, database.dmlCalls.count {
-            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+            it.sql.contains("SET status = ?, retry_checkpoint = NULL", true)
         })
         val historyInserts = database.dmlCalls.filter { it.sql.contains("INSERT", true) &&
             it.sql.contains("version_id", true) }
         assertEquals(2, historyInserts.size)
         assertTrue(historyInserts.all { versionId.toInt() in it.parameters })
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, database.versionStatuses[versionId.toInt()])
+        assertNull(database.versionCheckpoints[versionId.toInt()])
+    }
+
+    @Test
+    fun `UP persists in-flight and recording boundaries before advancing the ordered cursor`() {
+        VersionMigrationTrace.reset()
+        database.respond(*emptyReadResponses())
+
+        val result = versionService(versionConfiguration(firstRegistration, secondRegistration))
+            .transactionUp(VersionTag)
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        val versionId = database.generatedIdForVersionInsert.toInt()
+        val phaseWrites = database.dmlCalls.filter {
+            it.sql.contains("UPDATE", true) &&
+                it.sql.contains("system_migration_version", true) &&
+                it.sql.contains("SET retry_checkpoint = ?", true)
+        }
+        val persisted = phaseWrites.map { MigrationRetryCheckpointCodec.decode(it.parameters[0] as String) }
+        assertEquals(
+            listOf(
+                MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+                MigrationRetryPhase.RECORD_PENDING,
+                MigrationRetryPhase.EXECUTION_PENDING,
+                MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+                MigrationRetryPhase.RECORD_PENDING,
+                MigrationRetryPhase.FINALIZATION_PENDING,
+            ),
+            persisted.map { it.phase },
+        )
+        assertEquals(
+            listOf(
+                firstRegistration.id.value,
+                firstRegistration.id.value,
+                secondRegistration.id.value,
+                secondRegistration.id.value,
+                secondRegistration.id.value,
+                null,
+            ),
+            persisted.map { it.cursorMigrationId },
+        )
+        val firstHistoryInsert = database.dmlCalls.indexOfFirst {
+            it.sql.contains("INSERT", true) && it.sql.contains("version_id", true)
+        }
+        val firstCursorAdvance = database.dmlCalls.indexOf(phaseWrites[2])
+        assertTrue(firstHistoryInsert >= 0 && firstHistoryInsert < firstCursorAdvance)
+        assertEquals(STATUS_MIGRATE_COMPLETED, database.versionStatuses[versionId])
+        assertNull(database.versionCheckpoints[versionId])
+    }
+
+    @Test
+    fun `ambiguous UP Version insert never invokes Schema`() {
+        database.failDmlWhen = { call ->
+            if (call.sql.contains("INSERT", true) && call.sql.contains("system_migration_version", true)) {
+                SQLException("Version insert acknowledgement lost")
+            } else null
+        }
+        database.applyDmlBeforeFailure = { call ->
+            call.sql.contains("INSERT", true) && call.sql.contains("system_migration_version", true)
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(0, SampleMigration.upCalls)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
+        assertTrue(database.versionCheckpoints[database.generatedIdForVersionInsert.toInt()] is String)
     }
 
     @Test
     fun `transactionUp fails and leaves Version started when completion update count is not one`() {
-        database.respondUpdateCounts(1, 1, 0)
+        database.updateCountWhen = { call ->
+            if (call.sql.contains("SET status = ?, retry_checkpoint = NULL", true)) 0 else null
+        }
         database.respond(*emptyReadResponses())
         val configuration = migrationConfig { migrationVersion(VersionTagOne) { } }
 
@@ -966,10 +1135,8 @@ class MigrationRunServiceTest {
             it.sql.contains("system_migration_version", true) }
         val completionUpdate = database.dmlCalls.last()
         assertTrue(completionUpdate.sql.contains("UPDATE", true))
-        assertEquals(
-            listOf(STATUS_MIGRATE_COMPLETED, database.generatedIdForVersionInsert.toInt()),
-            completionUpdate.parameters,
-        )
+        assertEquals(STATUS_MIGRATE_COMPLETED, completionUpdate.parameters[0])
+        assertEquals(database.generatedIdForVersionInsert.toInt(), completionUpdate.parameters[1])
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertTrue(database.dmlCalls.none { it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true) })
@@ -1039,9 +1206,19 @@ class MigrationRunServiceTest {
         assertEquals(listOf("close"), database.lifecycleEvents)
         assertTrue(database.executedSql.none { it.contains("DELETE", true) &&
             it.contains("system_migration_version", true) })
-        assertTrue(database.dmlCalls.none {
+        val checkpointWrites = database.dmlCalls.filter {
             it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
-        })
+        }
+        assertTrue(checkpointWrites.size >= 4)
+        // This low-level service overload has no Failure Status Capability. Its durable
+        // checkpoint still identifies the in-flight Migration without running later stages.
+        assertTrue(failureStatusCalls().isEmpty())
+        val latestCheckpointWrite = database.dmlCalls.last {
+            it.sql.contains("UPDATE", true) && it.sql.contains("retry_checkpoint", true)
+        }
+        val checkpoint = MigrationRetryCheckpointCodec.decode(latestCheckpointWrite.parameters[0] as String)
+        assertEquals(MigrationRetryPhase.EXECUTION_IN_FLIGHT, checkpoint.phase)
+        assertEquals(secondRegistration.id.value, checkpoint.cursorMigrationId)
     }
 
     @Test
@@ -1110,7 +1287,13 @@ class MigrationRunServiceTest {
         assertTrue(database.autoCommitAtPrepareStatement.all { it })
         val startUpdate = database.dmlCalls.first { it.sql.contains("UPDATE", true) }
         assertTrue(startUpdate.sql.contains("system_migration_version", true))
-        assertEquals(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID), startUpdate.parameters)
+        assertEquals(STATUS_ROLLBACK_STARTED, startUpdate.parameters[0])
+        assertTrue(startUpdate.parameters[1] is String)
+        assertEquals(VERSION_ID, startUpdate.parameters[2])
+        val initialDownCheckpoint = MigrationRetryCheckpointCodec.decode(startUpdate.parameters[1] as String)
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_STARTED, initialDownCheckpoint.originalStatus)
+        assertEquals(MigrationRetryPhase.EXECUTION_PENDING, initialDownCheckpoint.phase)
+        assertEquals(secondRegistration.id.value, initialDownCheckpoint.cursorMigrationId)
         val startUpdateEvent = database.events.indexOfFirst {
             it.startsWith("dml:") && it.contains("UPDATE", true) && it.contains("system_migration_version", true)
         }
@@ -1127,7 +1310,10 @@ class MigrationRunServiceTest {
         assertTrue(versionDelete.sql.contains("system_migration_version", true))
         assertTrue(versionDelete.sql.contains("id", true))
         assertTrue(!versionDelete.sql.contains("tag_id", true))
-        assertEquals(listOf(VERSION_ID), versionDelete.parameters)
+        assertEquals(VERSION_ID, versionDelete.parameters[0])
+        assertEquals(STATUS_ROLLBACK_STARTED, versionDelete.parameters[1])
+        assertTrue(versionDelete.parameters[2] is String)
+        assertNull(database.versionCheckpoints[VERSION_ID])
     }
 
     @Test
@@ -1148,7 +1334,8 @@ class MigrationRunServiceTest {
         assertIs<ExecuteResult.Failure>(result)
         assertTrue(VersionMigrationTrace.events.isEmpty())
         assertEquals(1, database.dmlCalls.size)
-        assertEquals(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID), database.dmlCalls.single().parameters)
+        assertEquals(STATUS_ROLLBACK_STARTED, database.dmlCalls.single().parameters[0])
+        assertEquals(VERSION_ID, database.dmlCalls.single().parameters[2])
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
     }
@@ -1183,7 +1370,10 @@ class MigrationRunServiceTest {
             it.sql.contains("system_migration_version", true) })
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
-        assertEquals(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID), database.dmlCalls.first().parameters)
+        val startUpdate = database.dmlCalls.first()
+        assertEquals(STATUS_ROLLBACK_STARTED, startUpdate.parameters[0])
+        assertEquals(VERSION_ID, startUpdate.parameters[2])
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, startUpdate.parameters[3])
     }
 
     @Test
@@ -1207,7 +1397,9 @@ class MigrationRunServiceTest {
     @Test
     fun `transactionDown rolls back when deleting anything other than exactly one Version`() {
         VersionMigrationTrace.reset()
-        database.respondUpdateCounts(1, 1, 1, 0)
+        database.updateCountWhen = { call ->
+            if (call.sql.contains("DELETE", true) && call.sql.contains("system_migration_version", true)) 0 else null
+        }
         database.respond(
             tagRows(
                 tag(51, VersionTag.value, VERSION_TAG_TYPE),
@@ -1225,7 +1417,13 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertTrue(database.dmlCalls.last().sql.contains("system_migration_version", true))
-        assertEquals(listOf(VERSION_ID), database.dmlCalls.last().parameters)
+        val finalDelete = database.dmlCalls.last()
+        assertEquals(VERSION_ID, finalDelete.parameters[0])
+        assertEquals(STATUS_ROLLBACK_STARTED, finalDelete.parameters[1])
+        assertEquals(
+            MigrationRetryPhase.FINALIZATION_PENDING,
+            MigrationRetryCheckpointCodec.decode(finalDelete.parameters[2] as String).phase,
+        )
     }
 
     @Test
@@ -1246,7 +1444,11 @@ class MigrationRunServiceTest {
         })
         val completionUpdate = database.dmlCalls.last()
         assertTrue(completionUpdate.sql.contains("UPDATE", true))
-        assertEquals(listOf(STATUS_MIGRATE_COMPLETED, database.generatedIdForVersionInsert.toInt()), completionUpdate.parameters)
+        assertEquals(STATUS_MIGRATE_COMPLETED, completionUpdate.parameters[0])
+        assertEquals(database.generatedIdForVersionInsert.toInt(), completionUpdate.parameters[1])
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, completionUpdate.parameters[2])
+        assertEquals(MigrationRetryPhase.FINALIZATION_PENDING,
+            MigrationRetryCheckpointCodec.decode(completionUpdate.parameters[3] as String).phase)
         assertTrue(database.dmlCalls.none {
             it.sql.contains("INSERT", true) && it.sql.contains("system_migration_tag", true) &&
                 it.parameters.firstOrNull() == VersionTag.value
@@ -1367,7 +1569,8 @@ class MigrationRunServiceTest {
         })
         val versionDelete = database.dmlCalls.first { it.sql.contains("DELETE", true) &&
             it.sql.contains("system_migration_version", true) }
-        assertEquals(listOf(VERSION_ID), versionDelete.parameters)
+        assertEquals(VERSION_ID, versionDelete.parameters[0])
+        assertEquals(STATUS_ROLLBACK_STARTED, versionDelete.parameters[1])
     }
 
     @Test
@@ -1447,7 +1650,7 @@ class MigrationRunServiceTest {
         )
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
-        assertEquals(8, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
+        assertEquals(23, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
         assertEquals(1, database.connectionBuildCount)
         assertEquals(0, database.autoCommitFalseCount)
         assertEquals(0, database.autoCommitRestoreCount)
@@ -1530,7 +1733,7 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `UP execution failure writes one conditional 0 to 1 status under the original lock and connection`() {
+    fun `UP execution failure writes one conditional 100 to manual recovery status under the original lock and connection`() {
         database.failDdlCalls += 1
         database.respond(*emptyReadResponses())
 
@@ -1541,11 +1744,13 @@ class MigrationRunServiceTest {
         val write = failureStatusCalls().single()
         assertStatusTransition(
             write,
-            target = 1,
+            target = MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED,
             versionId = database.generatedIdForVersionInsert.toInt(),
-            expected = 0,
+            expected = MigrationVersionState.STATUS_MIGRATE_STARTED,
+            expectedStage = "UP_EXECUTION",
             messageContains = "DDL 1 failed",
             migrationId = "run_one_migration",
+            checkpointPhase = MigrationRetryPhase.EXECUTION_IN_FLIGHT,
         )
         val writeIndex = database.dmlCalls.indexOf(write)
         assertTrue(database.lockHeldAtDmlCall[writeIndex], "Failure status write must remain inside the held lock callback")
@@ -1555,6 +1760,83 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionCloseCount)
+    }
+
+    @Test
+    fun `failed EXECUTION_IN_FLIGHT CAS prevents UP Schema dispatch`() {
+        database.updateCountWhen = { call ->
+            if (call.sql.contains("SET retry_checkpoint = ?", true) &&
+                MigrationRetryCheckpointCodec.decode(call.parameters[0] as String).phase ==
+                MigrationRetryPhase.EXECUTION_IN_FLIGHT
+            ) 0 else null
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(0, SampleMigration.upCalls)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+        val write = failureStatusCalls().single()
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED, write.parameters[0])
+        val checkpoint = MigrationRetryCheckpointCodec.decode(write.parameters[2] as String)
+        assertEquals(MigrationRetryPhase.EXECUTION_PENDING, checkpoint.phase)
+    }
+
+    @Test
+    fun `failed RECORD_PENDING CAS prevents UP Recording and keeps execution uncertainty manual`() {
+        database.updateCountWhen = { call ->
+            if (call.sql.contains("SET retry_checkpoint = ?", true) &&
+                MigrationRetryCheckpointCodec.decode(call.parameters[0] as String).phase ==
+                MigrationRetryPhase.RECORD_PENDING
+            ) 0 else null
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = executeSampleMigration()
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(1, SampleMigration.upCalls)
+        assertTrue(database.events.any { it.startsWith("ddl:") })
+        assertEquals(0, database.insertHistoryCount)
+        val write = failureStatusCalls().single()
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED, write.parameters[0])
+        val checkpoint = MigrationRetryCheckpointCodec.decode(write.parameters[2] as String)
+        assertEquals(MigrationRetryPhase.EXECUTION_IN_FLIGHT, checkpoint.phase)
+    }
+
+    @Test
+    fun `failed cursor advancement after UP Recording does not execute the next Migration`() {
+        database.updateCountWhen = { call ->
+            if (call.sql.contains("SET retry_checkpoint = ?", true)) {
+                val checkpoint = MigrationRetryCheckpointCodec.decode(call.parameters[0] as String)
+                if (checkpoint.phase == MigrationRetryPhase.EXECUTION_PENDING &&
+                    checkpoint.cursorMigrationId == secondRegistration.id.value
+                ) 0 else null
+            } else null
+        }
+        database.respond(*emptyReadResponses())
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            MigrationController(migrationConfig {
+                migrationVersion(VersionTag) {
+                    migration<VersionFirstMigration>()
+                    migration<VersionSecondMigration>()
+                }
+            }).migrate(scope)
+        }
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(
+            listOf("up:first"),
+            VersionMigrationTrace.events,
+        )
+        assertEquals(1, database.insertHistoryCount)
+        val write = failureStatusCalls().single()
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, write.parameters[0])
+        val checkpoint = MigrationRetryCheckpointCodec.decode(write.parameters[2] as String)
+        assertEquals(MigrationRetryPhase.RECORD_PENDING, checkpoint.phase)
+        assertEquals(firstRegistration.id.value, checkpoint.cursorMigrationId)
     }
 
     @Test
@@ -1703,7 +1985,7 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `UP history recording failure writes one conditional 0 to 2 status`() {
+    fun `UP history recording failure writes status 102 and preserves RECORD_PENDING`() {
         database.failDmlWhen = { call ->
             if (call.sql.contains("INSERT", true) &&
                 call.sql.contains("system_migration", true) &&
@@ -1718,20 +2000,104 @@ class MigrationRunServiceTest {
         val failure = assertIs<ExecuteResult.Failure>(result).exception
         assertEquals("Migration history insert failed", failure.message)
         assertTrue(database.events.any { it.startsWith("ddl:") }, "UP must succeed before history recording fails")
+        assertEquals(1, database.events.count { it.startsWith("ddl:") }, "UP Schema must run exactly once")
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 2,
+            target = MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
             versionId = database.generatedIdForVersionInsert.toInt(),
-            expected = 0,
+            expected = MigrationVersionState.STATUS_MIGRATE_STARTED,
+            expectedStage = "UP_RECORDING",
             messageContains = "Migration history insert failed",
             migrationId = "run_one_migration",
+            checkpointPhase = MigrationRetryPhase.RECORD_PENDING,
         )
+        assertTrue(database.dmlCalls.none {
+            isVersionStatusUpdate(it) && it.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED
+        }, "UP finalization must not run after Recording fails")
     }
 
     @Test
-    fun `UP completion status update failure writes one conditional 0 to 2 status`() {
+    fun `UP metadata recording resumes existing item Tag after partial failure without rerunning Schema`() {
+        database.failDmlWhen = { call ->
+            if (isHistoryInsert(call)) SQLException("Migration history insert failed") else null
+        }
+        database.respond(*emptyReadResponses())
+
+        val initialResult = executeSampleMigration()
+        val initialFailure = assertIs<ExecuteResult.Failure>(initialResult).exception
+        assertEquals("Migration history insert failed", initialFailure.message)
+        assertEquals(1, SampleMigration.upCalls)
+
+        val versionId = database.generatedIdForVersionInsert.toInt()
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, database.versionStatuses[versionId])
+        val checkpointBeforeRecording = MigrationRetryCheckpointCodec.decode(
+            requireNotNull(database.versionCheckpoints[versionId]),
+        )
+        assertEquals(MigrationRetryPhase.RECORD_PENDING, checkpointBeforeRecording.phase)
+
+        val itemTagInsertsBeforeRecording = database.dmlCalls.count(::isItemTagInsert)
+        val writesBeforeRecording = database.dmlCalls.size
+        database.failDmlWhen = null
+
+        val resumedOutcome = service.recordUpAttempt(VersionTag, versionId, scope, registration)
+        val resumedResult = assertIs<MigrationExecutionResult.Success>(
+            assertIs<MigrationRunOutcome.Attempt>(resumedOutcome).result,
+        )
+        assertEquals(versionId, resumedResult.versionRecordId)
+        assertEquals(registration.id, resumedResult.migrationId)
+
+        val resumedWrites = database.dmlCalls.drop(writesBeforeRecording)
+        assertEquals(1, resumedWrites.size, "Recording continuation should write only the missing History row")
+        assertTrue(isHistoryInsert(resumedWrites.single()), resumedWrites.single().sql)
+        assertEquals(itemTagInsertsBeforeRecording, database.dmlCalls.count(::isItemTagInsert))
+        assertEquals(1, itemTagInsertsBeforeRecording, "The valid ITEM Tag created before failure must be reused")
+        assertEquals(1, SampleMigration.upCalls, "Metadata-only recording must not invoke Schema again")
+        assertEquals(1, database.events.count { it.startsWith("ddl:") })
+
+        fun assertReconciliationRejected(vararg reads: List<Map<String, Any?>>) {
+            val conflictingDatabase = FakeDatabase()
+            val conflictingScope = OperationExecutionScope(
+                conflictingDatabase.connection,
+                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            )
+            conflictingDatabase.respond(*reads)
+
+            val outcome = service.recordUpAttempt(VersionTag, versionId, conflictingScope, registration)
+            val failure = assertIs<MigrationExecutionResult.Failure>(
+                assertIs<MigrationRunOutcome.Attempt>(outcome).result,
+            )
+            assertEquals(MigrationExecutionResult.FailureStage.RECONCILIATION, failure.stage)
+            assertSame(failure.cause, conflictingScope.firstFailure)
+            assertEquals(0, conflictingDatabase.dmlCount, "Contradictory evidence must fail before any write")
+        }
+
+        assertReconciliationRejected(
+            tagRows(
+                tag(MIGRATION_TAG_ID, MigrationItem.value, MIGRATION_TAG_TYPE),
+                tag(MIGRATION_TAG_ID + 1, MigrationItem.value, MIGRATION_TAG_TYPE),
+            ),
+        )
+        assertReconciliationRejected(
+            tagRows(tag(MIGRATION_TAG_ID, MigrationItem.value, VERSION_TAG_TYPE)),
+        )
+        assertReconciliationRejected(
+            tagRows(tag(MIGRATION_TAG_ID, MigrationItem.value, MIGRATION_TAG_TYPE)),
+            historyRows(history(APPLIED_ID, MIGRATION_TAG_ID, OTHER_VERSION_ID)),
+        )
+        assertReconciliationRejected(
+            tagRows(tag(MIGRATION_TAG_ID, MigrationItem.value, MIGRATION_TAG_TYPE)),
+            historyRows(
+                history(APPLIED_ID, MIGRATION_TAG_ID, versionId),
+                history(OTHER_APPLIED_ID, MIGRATION_TAG_ID, versionId),
+            ),
+        )
+        assertEquals(1, SampleMigration.upCalls, "Reconciliation checks must never invoke Schema")
+    }
+
+    @Test
+    fun `UP completion status update failure writes status 102 and preserves FINALIZATION_PENDING`() {
         database.updateCountWhen = { call ->
-            if (isVersionStatusUpdate(call) && call.parameters.size == 2 && call.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED) 0
+            if (call.sql.contains("SET status = ?, retry_checkpoint = NULL", true)) 0
             else null
         }
         database.respond(*emptyReadResponses())
@@ -1739,20 +2105,25 @@ class MigrationRunServiceTest {
         val result = executeSampleMigration()
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
-        assertTrue(failure.message.orEmpty().contains("updated 0 rows"), failure.message)
-        assertEquals(2, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
+        assertTrue(failure.message.orEmpty().contains("Could not finalize UP Migration Version"), failure.message)
+        assertEquals(
+            MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+            database.versionStatuses[database.generatedIdForVersionInsert.toInt()],
+        )
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 2,
+            target = MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
             versionId = database.generatedIdForVersionInsert.toInt(),
-            expected = 0,
-            messageContains = "updated 0 rows",
+            expected = MigrationVersionState.STATUS_MIGRATE_STARTED,
+            expectedStage = "UP_RECORDING",
+            messageContains = "Could not finalize UP Migration Version",
             migrationId = null,
+            checkpointPhase = MigrationRetryPhase.FINALIZATION_PENDING,
         )
     }
 
     @Test
-    fun `DOWN execution failure writes one conditional 4 to 5 status`() {
+    fun `DOWN execution failure writes one conditional 200 to manual recovery status`() {
         database.failDdlCalls += 1
         val history = orchestrationHistory(appliedVersionCount = 1)
         respondForRollback(history, listOf(VersionTagOne.value))
@@ -1765,16 +2136,18 @@ class MigrationRunServiceTest {
         assertTrue(failure.message.orEmpty().contains("DDL 1 failed"))
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 5,
+            target = MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED,
             versionId = VERSION_ID_ONE,
-            expected = 4,
+            expected = MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            expectedStage = "DOWN_EXECUTION",
             messageContains = "DDL 1 failed",
             migrationId = VersionItemSecond.value,
+            checkpointPhase = MigrationRetryPhase.EXECUTION_IN_FLIGHT,
         )
     }
 
     @Test
-    fun `DOWN history recording failure writes one conditional 4 to 6 status`() {
+    fun `DOWN history recording failure writes status 202 and preserves RECORD_PENDING`() {
         database.failDmlWhen = { call ->
             if (call.sql.contains("DELETE", true) &&
                 call.sql.contains("system_migration", true) &&
@@ -1791,18 +2164,24 @@ class MigrationRunServiceTest {
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
         assertEquals("Migration history delete failed", failure.message)
+        assertEquals(1, database.events.count { it.startsWith("ddl:") }, "DOWN Schema must run exactly once")
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 6,
+            target = MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
             versionId = VERSION_ID_ONE,
-            expected = 4,
+            expected = MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            expectedStage = "DOWN_RECORDING",
             messageContains = "Migration history delete failed",
             migrationId = VersionItemSecond.value,
+            checkpointPhase = MigrationRetryPhase.RECORD_PENDING,
         )
+        assertTrue(database.dmlCalls.none {
+            it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true)
+        }, "DOWN finalization must not delete the Version after Recording fails")
     }
 
     @Test
-    fun `DOWN Version deletion failure writes one conditional 4 to 6 status without recreating the Version`() {
+    fun `DOWN Version deletion failure writes status 202 without recreating the Version`() {
         database.failDmlWhen = { call ->
             if (isVersionDelete(call)) SQLException("Version delete acknowledgement failed") else null
         }
@@ -1819,11 +2198,13 @@ class MigrationRunServiceTest {
         assertEquals(null, database.versionStatuses[VERSION_ID_ONE], "The simulated committed delete must remain deleted")
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 6,
+            target = MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
             versionId = VERSION_ID_ONE,
-            expected = 4,
+            expected = MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            expectedStage = "DOWN_RECORDING",
             messageContains = "Version delete acknowledgement failed",
             migrationId = null,
+            checkpointPhase = MigrationRetryPhase.FINALIZATION_PENDING,
         )
         assertTrue(database.dmlCalls.none {
             it.sql.contains("INSERT", true) && it.sql.contains("system_migration_version", true)
@@ -1838,13 +2219,16 @@ class MigrationRunServiceTest {
         val result = executeSampleMigration()
 
         assertIs<ExecuteResult.Failure>(result)
-        assertEquals(0, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
+        assertEquals(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            database.versionStatuses[database.generatedIdForVersionInsert.toInt()],
+        )
         assertTrue(failureStatusCalls().isEmpty())
         assertTrue(database.events.none { it.startsWith("ddl:") })
     }
 
     @Test
-    fun `DOWN preflight failure after status 4 does not write failure status or execute down`() {
+    fun `DOWN preflight failure after status 200 does not write failure status or execute down`() {
         val tags = listOf(
             tag(VERSION_TAG_ID_ONE, VersionTagOne.value, VERSION_TAG_TYPE),
             tag(MIGRATION_TAG_ID, MigrationItem.value, MIGRATION_TAG_TYPE),
@@ -1858,7 +2242,7 @@ class MigrationRunServiceTest {
         }
 
         assertIs<ExecuteResult.Failure>(result)
-        assertEquals(4, database.versionStatuses[VERSION_ID_ONE])
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_STARTED, database.versionStatuses[VERSION_ID_ONE])
         assertTrue(failureStatusCalls().isEmpty())
         assertEquals(1, database.dmlCalls.count { isVersionStatusUpdate(it) })
         assertEquals(0, SampleMigration.downCalls)
@@ -1879,7 +2263,7 @@ class MigrationRunServiceTest {
     }
 
     @Test
-    fun `unconfirmed DOWN status 4 does not write failure status or execute down`() {
+    fun `unconfirmed DOWN status 200 does not write failure status or execute down`() {
         database.respondUpdateCounts(0)
         val history = singleAppliedSampleHistory()
         database.respond(history.tags, history.versions, history.migrations, history.tags, history.versions, history.migrations)
@@ -1977,12 +2361,12 @@ class MigrationRunServiceTest {
     fun `late UP recording write cannot overwrite a Version already marked completed`() {
         val completionFailure = SQLException("completion acknowledgement lost")
         database.failDmlWhen = { call ->
-            if (isVersionStatusUpdate(call) && call.parameters.size == 2 && call.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED) {
+            if (call.sql.contains("SET status = ?, retry_checkpoint = NULL", true)) {
                 completionFailure
             } else null
         }
         database.applyDmlBeforeFailure = { call ->
-            isVersionStatusUpdate(call) && call.parameters.size == 2 && call.parameters.firstOrNull() == STATUS_MIGRATE_COMPLETED
+            call.sql.contains("SET status = ?, retry_checkpoint = NULL", true)
         }
         database.respond(*emptyReadResponses())
 
@@ -1992,9 +2376,10 @@ class MigrationRunServiceTest {
         assertEquals(STATUS_MIGRATE_COMPLETED, database.versionStatuses[database.generatedIdForVersionInsert.toInt()])
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 2,
+            target = MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
             versionId = database.generatedIdForVersionInsert.toInt(),
-            expected = 0,
+            expected = MigrationVersionState.STATUS_MIGRATE_STARTED,
+            expectedStage = "UP_RECORDING",
             messageContains = "completion acknowledgement lost",
             migrationId = null,
         )
@@ -2118,7 +2503,7 @@ class MigrationRunServiceTest {
         assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
         assertEquals(listOf("up:first", "up:second", "up:third"), VersionMigrationTrace.events)
         assertEquals(0, database.commitCount)
-        assertEquals(4, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
+        assertEquals(13, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
         assertEquals(1, database.connectionBuildCount)
     }
 
@@ -2246,14 +2631,18 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         val startUpdates = database.dmlCalls.filter {
-            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true) &&
+                it.sql.contains("retry_checkpoint IS NULL", true)
         }
-        assertEquals(listOf(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID_THREE)), startUpdates.map { it.parameters })
+        assertEquals(1, startUpdates.size)
+        assertEquals(STATUS_ROLLBACK_STARTED, startUpdates.single().parameters[0])
+        assertEquals(VERSION_ID_THREE, startUpdates.single().parameters[2])
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, startUpdates.single().parameters[3])
         val versionDeletes = database.dmlCalls.filter {
             it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true)
         }
         assertEquals(1, versionDeletes.size)
-        assertEquals(listOf(VERSION_ID_THREE), versionDeletes.map { it.parameters.single() })
+        assertEquals(listOf(VERSION_ID_THREE), versionDeletes.map { it.parameters[0] })
         assertEquals(1, database.connectionBuildCount)
     }
 
@@ -2272,17 +2661,16 @@ class MigrationRunServiceTest {
         assertEquals(listOf("down:fifth", "down:fourth", "down:third"), VersionMigrationTrace.events)
         assertEquals(0, database.commitCount)
         val startUpdates = database.dmlCalls.filter {
-            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true)
+            it.sql.contains("UPDATE", true) && it.sql.contains("system_migration_version", true) &&
+                it.sql.contains("retry_checkpoint IS NULL", true)
         }
-        assertEquals(
-            listOf(listOf(STATUS_ROLLBACK_STARTED, VERSION_ID_THREE), listOf(STATUS_ROLLBACK_STARTED, VERSION_ID_TWO)),
-            startUpdates.map { it.parameters },
-        )
+        assertEquals(2, startUpdates.size)
+        assertEquals(listOf(VERSION_ID_THREE, VERSION_ID_TWO), startUpdates.map { it.parameters[2] })
         val versionDeletes = database.dmlCalls.filter {
             it.sql.contains("DELETE", true) && it.sql.contains("system_migration_version", true)
         }
         assertEquals(2, versionDeletes.size)
-        assertEquals(listOf(VERSION_ID_THREE, VERSION_ID_TWO), versionDeletes.map { it.parameters.single() })
+        assertEquals(listOf(VERSION_ID_THREE, VERSION_ID_TWO), versionDeletes.map { it.parameters[0] })
         assertEquals(1, database.connectionBuildCount)
     }
 
@@ -2308,15 +2696,16 @@ class MigrationRunServiceTest {
         assertEquals(0, database.autoCommitFalseCount)
         assertEquals(0, database.autoCommitRestoreCount)
         val statusUpdates = database.dmlCalls.filter {
-            isVersionStatusUpdate(it) && it.parameters.size == 2
+            it.sql.contains("SET status = ?, retry_checkpoint = NULL", true)
         }
         assertEquals(1, statusUpdates.size)
         assertEquals(STATUS_MIGRATE_COMPLETED, statusUpdates.single().parameters.first())
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 1,
+            target = MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED,
             versionId = database.generatedIdForVersionInsert.toInt(),
-            expected = 0,
+            expected = MigrationVersionState.STATUS_MIGRATE_STARTED,
+            expectedStage = "UP_EXECUTION",
             migrationId = VersionItemThird.value,
         )
     }
@@ -2326,11 +2715,11 @@ class MigrationRunServiceTest {
         val history = withVersionStatus(
             orchestrationHistory(appliedVersionCount = 2),
             VERSION_ID_ONE,
-            status = 0,
+            status = MigrationVersionState.STATUS_MIGRATE_STARTED,
         )
         val controller = MigrationController(orchestrationConfiguration())
 
-        assertIncompleteVersionBlocks(history, expectedStatus = 0) { scope ->
+        assertIncompleteVersionBlocks(history, expectedStatus = MigrationVersionState.STATUS_MIGRATE_STARTED) { scope ->
             controller.migrate(scope)
         }
     }
@@ -2355,12 +2744,12 @@ class MigrationRunServiceTest {
         val history = withVersionStatus(
             orchestrationHistory(appliedVersionCount = 3),
             VERSION_ID_TWO,
-            status = 2,
+            status = MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
         )
         val controller = MigrationController(orchestrationConfiguration())
 
         // rollback() would select only v3; the incomplete v2 must still stop the command.
-        assertIncompleteVersionBlocks(history, expectedStatus = 2) { scope ->
+        assertIncompleteVersionBlocks(history, expectedStatus = MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD) { scope ->
             controller.rollback(scope)
         }
     }
@@ -2377,6 +2766,38 @@ class MigrationRunServiceTest {
         // rollback(v1) selects v2 for DOWN and excludes v1, but the global gate still checks v1.
         assertIncompleteVersionBlocks(history, expectedStatus = STATUS_ROLLBACK_STARTED) { scope ->
             controller.rollback(VersionTagOne, scope)
+        }
+    }
+
+    @Test
+    fun `manual recovery statuses block every normal migrate and rollback entry point`() {
+        val controller = MigrationController(orchestrationConfiguration())
+        val manualStatuses = listOf(
+            MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED,
+            MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED,
+        )
+
+        manualStatuses.forEach { status ->
+            database = FakeDatabase()
+            assertIncompleteVersionBlocks(
+                withVersionStatus(orchestrationHistory(appliedVersionCount = 2), VERSION_ID_ONE, status),
+                expectedStatus = status,
+            ) { scope -> controller.migrate(scope) }
+            database = FakeDatabase()
+            assertIncompleteVersionBlocks(
+                withVersionStatus(orchestrationHistory(appliedVersionCount = 1), VERSION_ID_ONE, status),
+                expectedStatus = status,
+            ) { scope -> controller.migrate(VersionTagThree, scope) }
+            database = FakeDatabase()
+            assertIncompleteVersionBlocks(
+                withVersionStatus(orchestrationHistory(appliedVersionCount = 3), VERSION_ID_TWO, status),
+                expectedStatus = status,
+            ) { scope -> controller.rollback(scope) }
+            database = FakeDatabase()
+            assertIncompleteVersionBlocks(
+                withVersionStatus(orchestrationHistory(appliedVersionCount = 2), VERSION_ID_ONE, status),
+                expectedStatus = status,
+            ) { scope -> controller.rollback(VersionTagOne, scope) }
         }
     }
 
@@ -2466,14 +2887,16 @@ class MigrationRunServiceTest {
         assertEquals(0, database.rollbackCount)
         assertTrue(database.dmlCalls.none { it.sql.contains("DELETE", true) })
         val startUpdate = database.dmlCalls.first {
-            isVersionStatusUpdate(it) && it.parameters.size == 2
+            it.sql.contains("retry_checkpoint IS NULL", true)
         }
-        assertEquals(listOf(STATUS_ROLLBACK_STARTED, 101), startUpdate.parameters)
+        assertEquals(STATUS_ROLLBACK_STARTED, startUpdate.parameters[0])
+        assertEquals(101, startUpdate.parameters[2])
         assertStatusTransition(
             failureStatusCalls().single(),
-            target = 5,
+            target = MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED,
             versionId = 101,
-            expected = 4,
+            expected = MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            expectedStage = "DOWN_EXECUTION",
             migrationId = UnsupportedDownItem.value,
         )
     }
@@ -2502,15 +2925,26 @@ class MigrationRunServiceTest {
     @Test
     fun `repeated migrate and rollback are idempotent for an applied Version`() {
         VersionMigrationTrace.reset()
-        val history = singleMigrationHistory()
+        // Match the fake generated IDs from the preceding real UP execution:
+        // Version Tag=1000, Version=1001, ITEM Tag=1002, History=1003.
+        val history = OrchestrationHistory(
+            tags = listOf(
+                tag(1000, VersionTagOne.value, VERSION_TAG_TYPE),
+                tag(1002, VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+            versions = listOf(
+                mapOf("id" to 1001, "tagId" to 1000, "status" to STATUS_MIGRATE_COMPLETED),
+            ),
+            migrations = listOf(history(1003, 1002, 1001)),
+        )
         database.respond(
             emptyList(), emptyList(), emptyList(), // Initial history.
-            emptyList(), emptyList(), emptyList(), emptyList(), // Initial Version up.
+            emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), // Initial Version up, including Tag confirmation.
             history.tags, history.versions, history.migrations, // Repeated migrate preflight.
             history.tags, history.versions, history.migrations, // Rollback preflight.
             history.tags, history.versions, history.migrations, // Version transactionDown validation.
-            listOf(mapOf("id" to ITEM_TAG_ID_FIRST, "tagType" to MIGRATION_TAG_TYPE)),
-            listOf(mapOf("id" to 800, "versionId" to VERSION_ID_ONE)),
+            listOf(mapOf("id" to 1002, "tagType" to MIGRATION_TAG_TYPE)),
+            listOf(mapOf("id" to 1003, "tagId" to 1002, "versionId" to 1001)),
             emptyList(),
             history.tags.take(1), emptyList(), emptyList(), // Repeated rollback preflight after rollback.
         )
@@ -2520,9 +2954,9 @@ class MigrationRunServiceTest {
 
         val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.migrate(scope)).result)
-            assertEquals(5, database.dmlCount)
+            assertEquals(8, database.dmlCount)
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.migrate(scope)).result)
-            assertEquals(5, database.dmlCount)
+            assertEquals(8, database.dmlCount)
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.rollback(scope)).result)
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(orchestration.rollback(scope)).result)
             ExecuteResult.Success(true)
@@ -2548,7 +2982,11 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(2, database.dmlCalls.count { it.sql.contains("system_migration_version", true) })
         val versionUpdate = database.dmlCalls.single { it.sql.contains("UPDATE", true) }
-        assertEquals(listOf(STATUS_MIGRATE_COMPLETED, database.generatedIdForVersionInsert.toInt()), versionUpdate.parameters)
+        assertEquals(STATUS_MIGRATE_COMPLETED, versionUpdate.parameters[0])
+        assertEquals(database.generatedIdForVersionInsert.toInt(), versionUpdate.parameters[1])
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, versionUpdate.parameters[2])
+        assertEquals(MigrationRetryPhase.FINALIZATION_PENDING,
+            MigrationRetryCheckpointCodec.decode(versionUpdate.parameters[3] as String).phase)
         assertEquals(0, database.executedSql.count { it.contains("CREATE TABLE", true) })
     }
 
@@ -2609,10 +3047,46 @@ class MigrationRunServiceTest {
     ): OrchestrationHistory {
         val matchingVersions = history.versions.filter { it["id"] == versionId }
         assertEquals(1, matchingVersions.size, "Expected exactly one fixture Version row with id $versionId")
+        val retryCheckpoint = checkpointForStatus(status)
         return history.copy(
             versions = history.versions.map { version ->
-                if (version["id"] == versionId) version + ("status" to status) else version
+                if (version["id"] == versionId) {
+                    version + mapOf("status" to status, "retryCheckpoint" to retryCheckpoint)
+                } else {
+                    version
+                }
             },
+        )
+    }
+
+    private fun checkpointForStatus(status: Int): String? {
+        val isUp = status == MigrationVersionState.STATUS_MIGRATE_STARTED ||
+            status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+        val isDown = status == MigrationVersionState.STATUS_ROLLBACK_STARTED ||
+            status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+        if (!isUp && !isDown) return null
+
+        return MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 0,
+                originalStatus = if (isUp) {
+                    MigrationVersionState.STATUS_MIGRATE_STARTED
+                } else {
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED
+                },
+                originalMessage = if (status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD ||
+                    status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+                ) "original diagnostic" else null,
+                cursorMigrationId = "create_tables",
+                phase = if (isUp || isDown) {
+                    if (status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD ||
+                        status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+                    ) MigrationRetryPhase.RECORD_PENDING else MigrationRetryPhase.EXECUTION_PENDING
+                } else {
+                    error("Unexpected retry status $status")
+                },
+            ),
         )
     }
 
@@ -2627,7 +3101,16 @@ class MigrationRunServiceTest {
         val result = OperationExecutionExecutor(versionTestContext()).connection(command)
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
-        assertTrue(failure.message.orEmpty().contains("non-completed status $expectedStatus"), failure.message)
+        val failureMessage = failure.message.orEmpty()
+        if (expectedStatus == MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED) {
+            assertTrue(failureMessage.contains("manual UP recovery"), failureMessage)
+            assertTrue(failureMessage.contains("automatic Migration execution is blocked"), failureMessage)
+        } else if (expectedStatus == MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED) {
+            assertTrue(failureMessage.contains("manual DOWN recovery"), failureMessage)
+            assertTrue(failureMessage.contains("automatic Migration execution is blocked"), failureMessage)
+        } else {
+            assertTrue(failureMessage.contains("non-completed status $expectedStatus"), failureMessage)
+        }
         assertTrue(VersionMigrationTrace.events.isEmpty(), "No Migration UP/DOWN method may execute")
 
         // DML covers Version markers, Version/ITEM Tags, and Migration History writes/deletes.
@@ -2679,8 +3162,51 @@ class MigrationRunServiceTest {
     private fun failureStatusCalls(): List<FakeDatabase.DmlCall> =
         database.dmlCalls.filter(::isFailureStatusWrite)
 
+    private fun isItemTagInsert(call: FakeDatabase.DmlCall): Boolean =
+        call.sql.contains("INSERT", ignoreCase = true) &&
+            call.sql.contains("system_migration_tag", ignoreCase = true) &&
+            call.parameters.firstOrNull() == MigrationItem.value
+
+    private fun isHistoryInsert(call: FakeDatabase.DmlCall): Boolean =
+        call.sql.contains("INSERT", ignoreCase = true) &&
+            call.sql.contains("system_migration", ignoreCase = true) &&
+            !call.sql.contains("system_migration_tag", ignoreCase = true) &&
+            !call.sql.contains("system_migration_version", ignoreCase = true)
+
+    private fun isHistoryDelete(call: FakeDatabase.DmlCall): Boolean =
+        call.sql.contains("DELETE", ignoreCase = true) &&
+            call.sql.contains("system_migration", ignoreCase = true) &&
+            !call.sql.contains("system_migration_tag", ignoreCase = true) &&
+            !call.sql.contains("system_migration_version", ignoreCase = true)
+
     private fun isFailureStatusWrite(call: FakeDatabase.DmlCall): Boolean =
-        isVersionStatusUpdate(call) && call.parameters.size == 4
+        isVersionStatusUpdate(call) && call.sql.contains("SET status = ?, message = ?", ignoreCase = true)
+
+    private fun isRecordingNormalizationCas(call: FakeDatabase.DmlCall): Boolean =
+        isVersionStatusUpdate(call) &&
+            call.sql.contains("SET status = ?", ignoreCase = true) &&
+            !call.sql.contains("retry_checkpoint = NULL", ignoreCase = true) &&
+            call.parameters.getOrNull(0) in setOf(
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+                MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            ) &&
+            call.parameters.getOrNull(2) in setOf(
+                MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+            )
+
+    private fun isCheckpointUpdateTo(
+        call: FakeDatabase.DmlCall,
+        phase: MigrationRetryPhase,
+        cursor: String?,
+    ): Boolean {
+        if (!call.sql.contains("SET retry_checkpoint = ?", ignoreCase = true)) return false
+        val encoded = call.parameters.firstOrNull() as? String ?: return false
+        return runCatching { MigrationRetryCheckpointCodec.decode(encoded) }
+            .getOrNull()
+            ?.let { it.phase == phase && it.cursorMigrationId == cursor }
+            ?: false
+    }
 
     private fun isVersionStatusUpdate(call: FakeDatabase.DmlCall): Boolean =
         call.sql.contains("UPDATE", ignoreCase = true) &&
@@ -2695,21 +3221,16 @@ class MigrationRunServiceTest {
         target: Int,
         versionId: Int,
         expected: Int,
+        expectedStage: String,
         messageContains: String? = null,
         migrationId: String? = null,
+        checkpointPhase: MigrationRetryPhase? = null,
     ) {
         assertTrue(isFailureStatusWrite(call), "Expected a conditional failure-status UPDATE: ${call.sql}")
         assertEquals(target, call.parameters[0])
         val diagnostic = call.parameters[1] as? String
             ?: error("Expected a persisted diagnostic message")
         val json = Json.parseToJsonElement(diagnostic).jsonObject
-        val expectedStage = when (target) {
-            1 -> "UP_EXECUTION"
-            2 -> "UP_RECORDING"
-            5 -> "DOWN_EXECUTION"
-            6 -> "DOWN_RECORDING"
-            else -> error("Unexpected failure status target $target")
-        }
         assertEquals(1, json.getValue("schemaVersion").jsonPrimitive.int, diagnostic)
         assertEquals(expectedStage, json.getValue("stage").jsonPrimitive.content, diagnostic)
         assertEquals(versionId, json.getValue("versionId").jsonPrimitive.int, diagnostic)
@@ -2722,9 +3243,20 @@ class MigrationRunServiceTest {
         if (messageContains != null) {
             assertTrue(json.getValue("message").jsonPrimitive.content.contains(messageContains), diagnostic)
         }
-        assertEquals(versionId, call.parameters[2])
-        assertEquals(expected, call.parameters[3])
-        assertTrue(call.sql.contains("SET status = ?, message = ?"), call.sql)
+        if (call.parameters.size == 6) {
+            assertEquals(versionId, call.parameters[3])
+            assertEquals(expected, call.parameters[4])
+            assertTrue(call.sql.contains("SET status = ?, message = ?, retry_checkpoint = ?"), call.sql)
+            val checkpoint = MigrationRetryCheckpointCodec.decode(call.parameters[2] as String)
+            assertEquals(MigrationRetryCheckpointCodec.FORMAT_VERSION, checkpoint.formatVersion)
+            assertNotNull(checkpoint.originalMessage)
+            assertEquals(diagnostic, checkpoint.originalMessage, "The first Diagnostic must be retained in the Checkpoint")
+            checkpointPhase?.let { assertEquals(it, checkpoint.phase) }
+        } else {
+            assertEquals(versionId, call.parameters[2])
+            assertEquals(expected, call.parameters[3])
+            assertTrue(call.sql.contains("SET status = ?, message = ?"), call.sql)
+        }
     }
 
     private fun singleMigrationHistory(): OrchestrationHistory = OrchestrationHistory(
@@ -2796,6 +3328,1783 @@ class MigrationRunServiceTest {
         assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionCloseCount)
     }
+
+    @Test
+    fun `state reads latest raw version under migration lock without writes`() {
+        val message = """{"schemaVersion":1,"versionId":41,"stage":"UP_EXECUTION"}"""
+        database.respond(
+            listOf(
+                mapOf("id" to 41, "tagId" to 12, "status" to 91, "message" to message),
+                mapOf(
+                    "id" to 18,
+                    "tagId" to 7,
+                    "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED,
+                    "message" to null,
+                ),
+            ),
+        )
+        val controller = MigrationController(MigrationConfiguration(emptyList()))
+
+        val operationResult = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            controller.state(activeScope)
+        }
+        val state = assertIs<ExecuteResult.Success<MigrationVersionState?>>(
+            operationResult,
+            (operationResult as? ExecuteResult.Failure)?.exception?.stackTraceToString().orEmpty(),
+        ).result
+
+        assertEquals(MigrationVersionState(41, 12, 91, message), state)
+        assertTrue(database.events.indexOf("lock-acquire") >= 0)
+        assertTrue(database.events.indexOf("lock-acquire") < database.events.indexOfFirst { it.startsWith("read:") })
+        assertTrue(database.events.indexOf("lock-release") > database.events.indexOfFirst { it.startsWith("read:") })
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+        val versionQuery = database.executedSql.single {
+            "system_migration_version" in it.lowercase() && "message" in it.lowercase()
+        }.lowercase()
+        assertTrue(versionQuery.contains("order by"))
+        assertTrue(versionQuery.contains("desc"))
+        assertTrue(versionQuery.contains("limit 1"))
+        assertTrue("insert" !in versionQuery && "update" !in versionQuery && "delete" !in versionQuery)
+        assertEquals(1, database.connectionBuildCount)
+        assertEquals(1, database.connectionCloseCount)
+    }
+
+    @Test
+    fun `state returns null for an empty version table through the managed operation`() {
+        database.respond(emptyList())
+        val controller = MigrationController(MigrationConfiguration(emptyList()))
+
+        val operationResult = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            controller.state(activeScope)
+        }
+        assertNull(assertIs<ExecuteResult.Success<MigrationVersionState?>>(operationResult).result)
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `state can select the latest incomplete version under the migration lock`() {
+        val message = """{"schemaVersion":1,"versionId":88,"stage":"UP_EXECUTION"}"""
+        database.respond(listOf(mapOf("id" to 88, "tagId" to 8, "status" to 9876, "message" to message)))
+        val controller = MigrationController(MigrationConfiguration(emptyList()))
+
+        val operationResult = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            controller.state(activeScope, lastIncompleteVersion = true)
+        }
+        val state = assertIs<ExecuteResult.Success<MigrationVersionState?>>(operationResult).result
+
+        assertEquals(MigrationVersionState(88, 8, 9876, message), state)
+        val versionQuery = database.executedSql.single {
+            "system_migration_version" in it.lowercase() && "message" in it.lowercase()
+        }.lowercase()
+        assertTrue(Regex("status\\s*(?:<>|!=)\\s*\\?").containsMatchIn(versionQuery), versionQuery)
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertEquals(1, database.events.count { it == "lock-release" })
+        assertTrue(database.events.indexOf("lock-acquire") < database.events.indexOfFirst { it.startsWith("read:") })
+        assertTrue(database.events.indexOf("lock-release") > database.events.indexOfFirst { it.startsWith("read:") })
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `state query failure is propagated by the enclosing operation and releases the lock`() {
+        database.failReadCalls += 1
+        val controller = MigrationController(MigrationConfiguration(emptyList()))
+
+        val operationResult = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            controller.state(activeScope)
+        }
+
+        val failure = assertIs<SQLException>(assertIs<ExecuteResult.Failure>(operationResult).exception)
+        assertEquals("Read 1 failed", failure.message)
+        assertTrue(database.events.indexOf("lock-acquire") < database.events.indexOf("lock-release"))
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `typed latest incomplete state resolves exact diagnostic migration under the migration lock`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":${VERSION_ID_ONE},"migrationId":"${firstRegistration.id.value}"}"""
+        val (result, db) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                    diagnostic,
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                ),
+            ),
+            selection = MigrationVersionSelection.LATEST_INCOMPLETE,
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(
+            MigrationVersionState(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                diagnostic,
+            ),
+            target.version,
+        )
+        assertEquals(firstRegistration, target.migration)
+        assertEquals(MigrationRecoveryOperation.UP_EXECUTION, target.operation)
+        assertEquals(1, db.events.count { it == "lock-acquire" })
+        assertEquals(1, db.events.count { it == "lock-release" })
+        assertTrue(db.events.indexOf("lock-acquire") < db.events.indexOfFirst { it.startsWith("read:") })
+        assertTrue(db.events.indexOf("lock-release") > db.events.indexOfFirst { it.startsWith("read:") })
+        assertEquals(0, db.dmlCount)
+        assertTrue(db.events.none { it.startsWith("ddl:") })
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+    }
+
+    @Test
+    fun `typed state maps known and unknown persisted statuses without rewriting the raw status`() {
+        val expected = mapOf(
+            MigrationVersionState.STATUS_MIGRATE_STARTED to MigrationRecoveryOperation.UNKNOWN,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_UP to MigrationRecoveryOperation.UP_EXECUTION,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD to MigrationRecoveryOperation.UNKNOWN,
+            MigrationVersionState.STATUS_MIGRATE_COMPLETED to MigrationRecoveryOperation.MIGRATE_DONE,
+            MigrationVersionState.STATUS_ROLLBACK_STARTED to MigrationRecoveryOperation.UNKNOWN,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN to MigrationRecoveryOperation.DOWN_EXECUTION,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD to MigrationRecoveryOperation.UNKNOWN,
+            MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED to MigrationRecoveryOperation.UP_MANUAL_RECOVERY_REQUIRED,
+            MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED to MigrationRecoveryOperation.DOWN_MANUAL_RECOVERY_REQUIRED,
+            943 to MigrationRecoveryOperation.UNKNOWN,
+        )
+
+        expected.forEach { (status, operation) ->
+            val (result, db) = readRecoveryTarget(
+                configuration = MigrationConfiguration(emptyList()),
+                selectedRows = listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, status, null)),
+                snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, "unregistered_version", VERSION_TAG_TYPE)),
+                snapshotVersions = listOf(versionSnapshotRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, status)),
+            )
+
+            val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+            assertEquals(status, target.version.status)
+            assertEquals(operation, target.operation)
+            assertNull(target.migration)
+            assertEquals(0, db.dmlCount)
+            assertTrue(db.events.none { it.startsWith("ddl:") })
+        }
+    }
+
+    @Test
+    fun `typed state classifies started Versions through the shared checkpoint contract`() {
+        val cases = listOf(
+            MigrationRetryPhase.EXECUTION_PENDING to MigrationRecoveryOperation.START_EXECUTION,
+            MigrationRetryPhase.EXECUTION_IN_FLIGHT to MigrationRecoveryOperation.UP_MANUAL_RECOVERY_REQUIRED,
+            MigrationRetryPhase.RECORD_PENDING to MigrationRecoveryOperation.UP_RECORDING_EXECUTION,
+            MigrationRetryPhase.PAUSED_NEXT to MigrationRecoveryOperation.START_EXECUTION,
+            MigrationRetryPhase.FINALIZATION_PENDING to MigrationRecoveryOperation.UP_RECORDING_EXECUTION,
+        )
+
+        cases.forEach { (phase, expectedOperation) ->
+            val checkpoint = MigrationRetryCheckpointCodec.encode(
+                MigrationRetryCheckpoint(
+                    formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                    revision = 1,
+                    originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    originalMessage = "original diagnostic",
+                    cursorMigrationId = if (phase == MigrationRetryPhase.FINALIZATION_PENDING) null else "create_tables",
+                    phase = phase,
+                ),
+            )
+            val (result, _) = readRecoveryTarget(
+                configuration = MigrationConfiguration(emptyList()),
+                selectedRows = listOf(
+                    versionStateRow(
+                        VERSION_ID_ONE,
+                        VERSION_TAG_ID_ONE,
+                        MigrationVersionState.STATUS_MIGRATE_STARTED,
+                        null,
+                        checkpoint,
+                    ),
+                ),
+                snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, "unregistered_version", VERSION_TAG_TYPE)),
+                snapshotVersions = listOf(
+                    versionSnapshotRow(
+                        VERSION_ID_ONE,
+                        VERSION_TAG_ID_ONE,
+                        MigrationVersionState.STATUS_MIGRATE_STARTED,
+                        checkpoint,
+                    ),
+                ),
+            )
+
+            val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+            assertEquals(expectedOperation, target.operation, "phase=$phase")
+        }
+
+        val (malformedResult, _) = readRecoveryTarget(
+            configuration = MigrationConfiguration(emptyList()),
+            selectedRows = listOf(
+                versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, "bad-json"),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, "unregistered_version", VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, "bad-json"),
+            ),
+        )
+        assertEquals(
+            MigrationRecoveryOperation.UNKNOWN,
+            assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(malformedResult).result).operation,
+        )
+    }
+
+    @Test
+    fun `typed state does not fabricate a migration for a version-level null identity`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":${VERSION_ID_ONE},"migrationId":null}"""
+        val checkpoint = MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 1,
+                originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                originalMessage = diagnostic,
+                cursorMigrationId = null,
+                phase = MigrationRetryPhase.FINALIZATION_PENDING,
+            ),
+        )
+        val (result, _) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                    diagnostic,
+                    checkpoint,
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                    checkpoint,
+                ),
+            ),
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertNull(target.migration)
+        assertEquals(MigrationRecoveryOperation.UP_RECORDING_EXECUTION, target.operation)
+    }
+
+    @Test
+    fun `typed state resolves the current checkpoint cursor instead of the original diagnostic migration`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":$VERSION_ID_ONE,"migrationId":"${firstRegistration.id.value}"}"""
+        val checkpoint = MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 3,
+                originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                originalMessage = diagnostic,
+                cursorMigrationId = secondRegistration.id.value,
+                phase = MigrationRetryPhase.PAUSED_NEXT,
+            ),
+        )
+        val (result, _) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration, secondRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    diagnostic,
+                    checkpoint,
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    checkpoint,
+                ),
+            ),
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(secondRegistration, target.migration)
+        assertEquals(MigrationRecoveryOperation.START_EXECUTION, target.operation)
+        assertEquals(3L, target.checkpointRevision)
+    }
+
+    @Test
+    fun `retry target validator accepts a current locked snapshot`() {
+        val checkpoint = MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 5,
+                originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                originalMessage = null,
+                cursorMigrationId = firstRegistration.id.value,
+                phase = MigrationRetryPhase.EXECUTION_PENDING,
+            ),
+        )
+        val target = MigrationRecoveryTarget(
+            MigrationVersionState(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+                null,
+            ),
+            firstRegistration,
+            MigrationRecoveryOperation.START_EXECUTION,
+            5L,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpoint)),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            activeScope.withSystemLock(SystemLock.MIGRATION, 60) { lockedScope ->
+                MigrationVersionStateService(versionConfiguration(firstRegistration))
+                    .validateTargetWhileMigrationLockHeld(lockedScope, target)
+            }
+        }
+
+        val validated = assertIs<ExecuteResult.Success<MigrationRecoveryTarget>>(result).result
+        assertEquals(5L, validated?.checkpointRevision)
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertTrue(database.events.indexOf("lock-acquire") < database.events.indexOfFirst { it.startsWith("read:") })
+        assertTrue(database.events.indexOf("lock-release") > database.events.indexOfFirst { it.startsWith("read:") })
+        assertEquals(0, database.dmlCount)
+    }
+
+    @Test
+    fun `retry target validator rejects a stale locked checkpoint revision before any write`() {
+        val checkpoint = MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 6,
+                originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                originalMessage = null,
+                cursorMigrationId = firstRegistration.id.value,
+                phase = MigrationRetryPhase.EXECUTION_PENDING,
+            ),
+        )
+        val staleTarget = MigrationRecoveryTarget(
+            MigrationVersionState(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+                null,
+            ),
+            firstRegistration,
+            MigrationRecoveryOperation.START_EXECUTION,
+            5L,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpoint)),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            activeScope.withSystemLock(SystemLock.MIGRATION, 60) { lockedScope ->
+                MigrationVersionStateService(versionConfiguration(firstRegistration))
+                    .validateTargetWhileMigrationLockHeld(lockedScope, staleTarget)
+            }
+        }
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertTrue(database.events.indexOf("lock-release") > database.events.indexOfFirst { it.startsWith("read:") })
+        assertEquals(0, database.dmlCount)
+        assertTrue(database.events.none { it.startsWith("ddl:") })
+    }
+
+    @Test
+    fun `typed state does not guess a migration when a valid checkpoint has no cursor`() {
+        val checkpoint = MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 1,
+                originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                originalMessage = null,
+                cursorMigrationId = null,
+                phase = MigrationRetryPhase.FINALIZATION_PENDING,
+            ),
+        )
+        val (result, _) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    null,
+                    checkpoint,
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    checkpoint,
+                ),
+            ),
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertNull(target.migration)
+        assertEquals(MigrationRecoveryOperation.UP_RECORDING_EXECUTION, target.operation)
+    }
+
+    @Test
+    fun `typed state does not use diagnostic fallback when a persisted checkpoint is malformed`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":$VERSION_ID_ONE,"migrationId":"${firstRegistration.id.value}"}"""
+        val (result, _) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    diagnostic,
+                    "malformed-checkpoint",
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    "malformed-checkpoint",
+                ),
+            ),
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(MigrationRecoveryOperation.UNKNOWN, target.operation)
+        assertNull(target.migration)
+    }
+
+    @Test
+    fun `typed state can select one exact version id`() {
+        val (result, db) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                    null,
+                ),
+                versionStateRow(
+                    VERSION_ID_TWO,
+                    VERSION_TAG_ID_TWO,
+                    MigrationVersionState.STATUS_MIGRATE_COMPLETED,
+                    null,
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                ),
+            ),
+            versionId = VERSION_ID_ONE,
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(VERSION_ID_ONE, target.version.versionId)
+        assertEquals(firstRegistration, target.migration)
+        val query = db.executedSql.first { "system_migration_version" in it.lowercase() }.lowercase()
+        assertTrue(Regex("smv\\.id\\s*=\\s*\\?").containsMatchIn(query), query)
+        assertEquals(listOf(VERSION_ID_ONE), db.readParameters.first())
+    }
+
+    @Test
+    fun `typed state returns null for an absent explicit version id`() {
+        val (result, db) = readRecoveryTarget(
+            configuration = MigrationConfiguration(emptyList()),
+            selectedRows = emptyList(),
+            snapshotTags = emptyList(),
+            snapshotVersions = emptyList(),
+            versionId = 9876,
+        )
+
+        assertNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(listOf(9876), db.readParameters.first())
+        assertEquals(1, db.events.count { it == "lock-acquire" })
+        assertEquals(1, db.events.count { it == "lock-release" })
+        assertEquals(0, db.dmlCount)
+    }
+
+    @Test
+    fun `typed state does not fall back when diagnostic identity disagrees with the selected version registry`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":${VERSION_ID_ONE},"migrationId":"${secondRegistration.id.value}"}"""
+        val (result, _) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration),
+            selectedRows = listOf(
+                versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                    diagnostic,
+                ),
+            ),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(
+                versionSnapshotRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                ),
+            ),
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertNull(target.migration)
+    }
+
+    @Test
+    fun `typed state leaves ambiguous configured migrations unresolved`() {
+        val (result, _) = readRecoveryTarget(
+            configuration = versionConfiguration(firstRegistration, secondRegistration),
+            selectedRows = listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, 77, "legacy message")),
+            snapshotTags = listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            snapshotVersions = listOf(versionSnapshotRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, 77)),
+        )
+
+        val target = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(MigrationRecoveryOperation.UNKNOWN, target.operation)
+        assertNull(target.migration)
+    }
+
+    @Test
+    fun `typed state returns null when no selected version exists`() {
+        val (result, db) = readRecoveryTarget(
+            configuration = MigrationConfiguration(emptyList()),
+            selectedRows = emptyList(),
+            snapshotTags = emptyList(),
+            snapshotVersions = emptyList(),
+        )
+
+        assertNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(result).result)
+        assertEquals(1, db.events.count { it == "lock-acquire" })
+        assertEquals(1, db.events.count { it == "lock-release" })
+        assertEquals(0, db.dmlCount)
+    }
+
+    @Test
+    fun `typed latest selection can choose completed latest while incomplete selection skips it`() {
+        val rows = listOf(
+            versionStateRow(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                null,
+            ),
+            versionStateRow(VERSION_ID_TWO, VERSION_TAG_ID_TWO, STATUS_MIGRATE_COMPLETED, null),
+        )
+        val tags = listOf(
+            tag(VERSION_TAG_ID_ONE, "version_one", VERSION_TAG_TYPE),
+            tag(VERSION_TAG_ID_TWO, "version_two", VERSION_TAG_TYPE),
+        )
+        val versions = listOf(
+            versionSnapshotRow(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+            ),
+            versionSnapshotRow(VERSION_ID_TWO, VERSION_TAG_ID_TWO, STATUS_MIGRATE_COMPLETED),
+        )
+
+        val (latestResult, latestDb) = readRecoveryTarget(
+            MigrationConfiguration(emptyList()), rows, tags, versions, MigrationVersionSelection.LATEST,
+        )
+        val latest = assertNotNull(assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(latestResult).result)
+        assertEquals(VERSION_ID_TWO, latest.version.versionId)
+        val latestSql = latestDb.executedSql.single { "system_migration_version" in it.lowercase() }
+        assertTrue(!Regex("status\\s*(?:<>|!=)").containsMatchIn(latestSql), latestSql)
+
+        val (incompleteResult, incompleteDb) = readRecoveryTarget(
+            MigrationConfiguration(emptyList()), rows, tags, versions, MigrationVersionSelection.LATEST_INCOMPLETE,
+        )
+        val incomplete = assertNotNull(
+            assertIs<ExecuteResult.Success<MigrationRecoveryTarget?>>(incompleteResult).result,
+        )
+        assertEquals(VERSION_ID_ONE, incomplete.version.versionId)
+        val incompleteSql = incompleteDb.executedSql.single { "system_migration_version" in it.lowercase() }
+        assertTrue(Regex("status\\s*(?:<>|!=)\\s*\\?").containsMatchIn(incompleteSql), incompleteSql)
+        assertEquals(listOf(STATUS_MIGRATE_COMPLETED), incompleteDb.readParameters.first())
+    }
+
+    @Test
+    fun `retry UP execution pending executes and records under one migration lock`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            0,
+            VersionItemFirst.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        val target = retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, checkpoint, firstRegistration)
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, target.version.status, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val result = callRetryUp(configuration, target, toCompleteVersion = true)
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("up:first"), VersionMigrationTrace.events)
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, database.versionStatuses[VERSION_ID_ONE])
+        assertNull(database.versionCheckpoints[VERSION_ID_ONE])
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+        assertEquals(1, database.events.count { it == "lock-release" })
+    }
+
+    @Test
+    fun `retry UP false from execution pending pauses before the second migration`() {
+        val configuration = retryVersionConfiguration(first = true, second = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            0,
+            VersionItemFirst.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val result = callRetryUp(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, checkpoint, firstRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("up:first"), VersionMigrationTrace.events)
+        assertEquals(1, database.insertHistoryCount)
+        val paused = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.PAUSED_NEXT, paused.phase)
+        assertEquals(VersionItemSecond.value, paused.cursorMigrationId)
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, database.versionStatuses[VERSION_ID_ONE])
+    }
+
+    @Test
+    fun `retry UP false from paused next executes stored cursor and pauses before the following migration`() {
+        val configuration = migrationConfig {
+            migrationVersion(VersionTag) {
+                migration<VersionFirstMigration>()
+                migration<VersionSecondMigration>()
+                migration<VersionThirdMigration>()
+            }
+        }
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            3,
+            VersionItemSecond.value,
+            MigrationRetryPhase.PAUSED_NEXT,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(checkpoint))),
+            listOf(
+                tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+                tag(ITEM_TAG_ID_FIRST, VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+        )
+
+        val result = callRetryUp(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, checkpoint, secondRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("up:second"), VersionMigrationTrace.events)
+        assertEquals(1, database.insertHistoryCount)
+        val paused = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.PAUSED_NEXT, paused.phase)
+        assertEquals(VersionItemThird.value, paused.cursorMigrationId)
+    }
+
+    @Test
+    fun `retry UP false persists finalization pending and a later false call finalizes only`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            0,
+            VersionItemFirst.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val pausedResult = callRetryUp(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, checkpoint, firstRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(pausedResult).result)
+        val finalization = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.FINALIZATION_PENDING, finalization.phase)
+        assertNull(finalization.cursorMigrationId)
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_STARTED, database.versionStatuses[VERSION_ID_ONE])
+        assertEquals(listOf("up:first"), VersionMigrationTrace.events)
+
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(finalization))),
+            listOf(
+                tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+                tag(GENERATED_TAG_ID.toInt(), VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+        )
+        val finalizationTarget = retryTarget(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            finalization,
+            migration = null,
+        )
+        val completedResult = callRetryUp(configuration, finalizationTarget, toCompleteVersion = false)
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(completedResult).result)
+        assertEquals(listOf("up:first"), VersionMigrationTrace.events)
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, database.versionStatuses[VERSION_ID_ONE])
+        assertNull(database.versionCheckpoints[VERSION_ID_ONE])
+        assertEquals(2, database.events.count { it == "lock-acquire" })
+    }
+
+    @Test
+    fun `retry UP RECORD_PENDING records without running schema and pauses at the next cursor`() {
+        val configuration = retryVersionConfiguration(first = true, second = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            2,
+            VersionItemFirst.value,
+            MigrationRetryPhase.RECORD_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val result = callRetryUp(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, checkpoint, firstRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        val paused = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.PAUSED_NEXT, paused.phase)
+        assertEquals(VersionItemSecond.value, paused.cursorMigrationId)
+        assertEquals(1, database.insertHistoryCount)
+        assertEquals(1, database.events.count { it.startsWith("insert-tag:") })
+    }
+
+    @Test
+    fun `retry UP PAUSED_NEXT resumes exactly the stored cursor`() {
+        val configuration = retryVersionConfiguration(first = true, second = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            3,
+            VersionItemSecond.value,
+            MigrationRetryPhase.PAUSED_NEXT,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(checkpoint))),
+            listOf(
+                tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+                tag(GENERATED_TAG_ID.toInt(), VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+        )
+
+        val result = callRetryUp(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, checkpoint, secondRegistration),
+            toCompleteVersion = true,
+        )
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("up:second"), VersionMigrationTrace.events)
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, database.versionStatuses[VERSION_ID_ONE])
+    }
+
+    @Test
+    fun `retry UP rejects EXECUTION_IN_FLIGHT and stale revision before side effects`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val inFlight = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            1,
+            VersionItemFirst.value,
+            MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(inFlight))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+        val inFlightResult = callRetryUp(
+            configuration,
+            retryTarget(
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+                inFlight,
+                firstRegistration,
+                MigrationRecoveryOperation.UP_MANUAL_RECOVERY_REQUIRED,
+            ),
+            toCompleteVersion = true,
+        )
+        assertIs<ExecuteResult.Failure>(inFlightResult)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(0, database.dmlCount)
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+
+        database = FakeDatabase()
+        scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        val current = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            7,
+            VersionItemFirst.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_STARTED, null, checkpointJson(current))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+        val stale = retryTarget(MigrationVersionState.STATUS_MIGRATE_STARTED, current.copy(revision = 6), firstRegistration)
+
+        val staleResult = callRetryUp(configuration, stale, toCompleteVersion = true)
+
+        assertIs<ExecuteResult.Failure>(staleResult)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(0, database.dmlCount)
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+    }
+
+    @Test
+    fun `retry DOWN RECORD_PENDING reconciles history without executing down schema`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            2,
+            VersionItemFirst.value,
+            MigrationRetryPhase.RECORD_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, null, checkpointJson(checkpoint))),
+            listOf(
+                tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+                tag(MIGRATION_TAG_ID, VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+            listOf(
+                tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+                tag(MIGRATION_TAG_ID, VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+            listOf(versionSnapshotRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, checkpointJson(checkpoint))),
+            listOf(history(APPLIED_ID, MIGRATION_TAG_ID, VERSION_ID_ONE)),
+        )
+
+        val result = callRetryDown(
+            retryVersionConfiguration(first = true),
+            retryTarget(MigrationVersionState.STATUS_ROLLBACK_STARTED, checkpoint, firstRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(1, database.deleteHistoryCount)
+        assertEquals(1, database.deleteTagCount)
+        val paused = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.FINALIZATION_PENDING, paused.phase)
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_STARTED, database.versionStatuses[VERSION_ID_ONE])
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+    }
+
+    @Test
+    fun `retry DOWN recording failure normalizes before metadata-only reconciliation`() {
+        val diagnostic = retryRecordingDiagnostic(up = false, migrationId = VersionItemFirst.value)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            4,
+            VersionItemFirst.value,
+            MigrationRetryPhase.RECORD_PENDING,
+            originalMessage = diagnostic,
+        )
+        database.respond(
+            listOf(versionStateRow(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+                diagnostic,
+                checkpointJson(checkpoint),
+            )),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            listOf(
+                tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE),
+                tag(MIGRATION_TAG_ID, VersionItemFirst.value, MIGRATION_TAG_TYPE),
+            ),
+            listOf(versionSnapshotRow(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_ROLLBACK_STARTED,
+                checkpointJson(checkpoint),
+            )),
+            listOf(history(APPLIED_ID, MIGRATION_TAG_ID, VERSION_ID_ONE)),
+        )
+
+        val result = callRetryDown(
+            retryVersionConfiguration(first = true),
+            retryTarget(
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+                checkpoint,
+                firstRegistration,
+                MigrationRecoveryOperation.DOWN_RECORDING_EXECUTION,
+                diagnostic,
+            ),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertTrue(VersionMigrationTrace.events.isEmpty(), "Recording recovery must not invoke down()")
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_STARTED, database.versionStatuses[VERSION_ID_ONE])
+        assertEquals(1, database.deleteHistoryCount)
+        assertEquals(1, database.deleteTagCount)
+        assertEquals(
+            MigrationRetryPhase.FINALIZATION_PENDING,
+            MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE])).phase,
+        )
+        val normalization = database.dmlCalls.first()
+        assertTrue(normalization.sql.contains("SET status = ?", ignoreCase = true), normalization.sql)
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_STARTED, normalization.parameters[0])
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD, normalization.parameters[2])
+        assertTrue(database.dmlCalls.indexOfFirst { it.sql.contains("DELETE", true) } > 0)
+    }
+
+    @Test
+    fun `retry UP and DOWN finalization failures normalize before finalization only`() {
+        for (up in listOf(true, false)) {
+            VersionMigrationTrace.reset()
+            database = FakeDatabase()
+            scope = OperationExecutionScope(
+                database.connection,
+                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            )
+            val originalDiagnostic = retryRecordingDiagnostic(
+                up,
+                migrationId = VersionItemFirst.value,
+            )
+            val currentDiagnostic = retryRecordingDiagnostic(up, migrationId = null)
+            val startedStatus = if (up) {
+                MigrationVersionState.STATUS_MIGRATE_STARTED
+            } else {
+                MigrationVersionState.STATUS_ROLLBACK_STARTED
+            }
+            val failedStatus = if (up) {
+                MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+            } else {
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+            }
+            val checkpoint = retryCheckpoint(
+                startedStatus,
+                6,
+                null,
+                MigrationRetryPhase.FINALIZATION_PENDING,
+                originalMessage = originalDiagnostic,
+            )
+            database.respond(
+                listOf(versionStateRow(
+                    VERSION_ID_ONE,
+                    VERSION_TAG_ID_ONE,
+                    failedStatus,
+                    currentDiagnostic,
+                    checkpointJson(checkpoint),
+                )),
+                listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            )
+            val target = retryTarget(
+                failedStatus,
+                checkpoint,
+                migration = null,
+                operation = if (up) MigrationRecoveryOperation.UP_RECORDING_EXECUTION
+                else MigrationRecoveryOperation.DOWN_RECORDING_EXECUTION,
+                message = currentDiagnostic,
+            )
+
+            val result = if (up) {
+                callRetryUp(retryVersionConfiguration(first = true), target, toCompleteVersion = false)
+            } else {
+                callRetryDown(retryVersionConfiguration(first = true), target, toCompleteVersion = false)
+            }
+
+            assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+            assertTrue(VersionMigrationTrace.events.isEmpty())
+            assertEquals(2, database.dmlCalls.size, "Expected normalization followed by finalization")
+            assertEquals(startedStatus, database.dmlCalls.first().parameters[0])
+            assertTrue(
+                if (up) database.dmlCalls.last().sql.contains("retry_checkpoint = NULL", true)
+                else database.dmlCalls.last().sql.contains("DELETE", true),
+                database.dmlCalls.last().sql,
+            )
+            assertTrue(database.dmlCalls.none(::isHistoryInsert))
+            assertTrue(database.dmlCalls.none(::isHistoryDelete))
+            assertEquals(0, database.deleteTagCount)
+            if (up) {
+                assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, database.versionStatuses[VERSION_ID_ONE])
+                assertNull(database.versionCheckpoints[VERSION_ID_ONE])
+            } else {
+                assertTrue(!database.versionStatuses.containsKey(VERSION_ID_ONE))
+                assertTrue(!database.versionCheckpoints.containsKey(VERSION_ID_ONE))
+            }
+        }
+    }
+
+    @Test
+    fun `retry normalization validates diagnostics and stops before recording or finalization unless CAS applies`() {
+        data class NormalizationCase(val up: Boolean, val phase: MigrationRetryPhase)
+        val cases = listOf(
+            NormalizationCase(up = true, MigrationRetryPhase.RECORD_PENDING),
+            NormalizationCase(up = false, MigrationRetryPhase.RECORD_PENDING),
+            NormalizationCase(up = true, MigrationRetryPhase.FINALIZATION_PENDING),
+            NormalizationCase(up = false, MigrationRetryPhase.FINALIZATION_PENDING),
+        )
+
+        for (case in cases) {
+            for (outcome in listOf("not-applied", "indeterminate", "query-failure")) {
+                VersionMigrationTrace.reset()
+                database = FakeDatabase()
+                scope = OperationExecutionScope(
+                    database.connection,
+                    DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                )
+                val startedStatus = if (case.up) {
+                    MigrationVersionState.STATUS_MIGRATE_STARTED
+                } else {
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED
+                }
+                val failedStatus = if (case.up) {
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+                } else {
+                    MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+                }
+                val cursor = if (case.phase == MigrationRetryPhase.FINALIZATION_PENDING) null
+                else if (case.up) VersionItemFirst.value else VersionItemFirst.value
+                val diagnostic = retryRecordingDiagnostic(case.up, cursor)
+                val checkpoint = retryCheckpoint(
+                    startedStatus,
+                    8,
+                    cursor,
+                    case.phase,
+                    originalMessage = diagnostic,
+                )
+                database.respond(
+                    listOf(versionStateRow(
+                        VERSION_ID_ONE,
+                        VERSION_TAG_ID_ONE,
+                        failedStatus,
+                        diagnostic,
+                        checkpointJson(checkpoint),
+                    )),
+                    listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+                )
+                when (outcome) {
+                    "not-applied" -> database.updateCountWhen = { call ->
+                        if (isRecordingNormalizationCas(call)) 0 else null
+                    }
+                    "indeterminate" -> database.updateCountWhen = { call ->
+                        if (isRecordingNormalizationCas(call)) 2 else null
+                    }
+                    "query-failure" -> database.failDmlWhen = { call ->
+                        if (isRecordingNormalizationCas(call)) SQLException("normalization query failed") else null
+                    }
+                }
+                val migration = if (cursor == null) null else firstRegistration
+                val target = retryTarget(
+                    failedStatus,
+                    checkpoint,
+                    migration,
+                    if (case.up) MigrationRecoveryOperation.UP_RECORDING_EXECUTION
+                    else MigrationRecoveryOperation.DOWN_RECORDING_EXECUTION,
+                    diagnostic,
+                )
+
+                val result = if (case.up) {
+                    callRetryUp(retryVersionConfiguration(first = true), target, toCompleteVersion = true)
+                } else {
+                    callRetryDown(retryVersionConfiguration(first = true), target, toCompleteVersion = true)
+                }
+
+                assertIs<ExecuteResult.Failure>(result, "${case.up}/${case.phase}/$outcome")
+                assertEquals(1, database.dmlCalls.size, "Only normalization may be attempted for $outcome")
+                assertTrue(isRecordingNormalizationCas(database.dmlCalls.single()))
+                assertTrue(VersionMigrationTrace.events.isEmpty())
+                assertEquals(0, database.insertHistoryCount)
+                assertEquals(0, database.deleteHistoryCount)
+                assertEquals(0, database.deleteTagCount)
+                assertEquals(failedStatus, database.versionStatuses[VERSION_ID_ONE])
+                assertEquals(checkpointJson(checkpoint), database.versionCheckpoints[VERSION_ID_ONE])
+            }
+        }
+
+        // A malformed latest Diagnostic is rejected while validating the snapshot, before CAS.
+        database = FakeDatabase()
+        scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        val validDiagnostic = retryRecordingDiagnostic(up = true, migrationId = VersionItemFirst.value)
+        val invalidCheckpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            9,
+            VersionItemFirst.value,
+            MigrationRetryPhase.RECORD_PENDING,
+            originalMessage = validDiagnostic,
+        )
+        database.respond(
+            listOf(versionStateRow(
+                VERSION_ID_ONE,
+                VERSION_TAG_ID_ONE,
+                MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                "{malformed",
+                checkpointJson(invalidCheckpoint),
+            )),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+        val invalidResult = callRetryUp(
+            retryVersionConfiguration(first = true),
+            retryTarget(
+                MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                invalidCheckpoint,
+                firstRegistration,
+                MigrationRecoveryOperation.UP_RECORDING_EXECUTION,
+                "{malformed",
+            ),
+            toCompleteVersion = true,
+        )
+        assertIs<ExecuteResult.Failure>(invalidResult)
+        assertEquals(0, database.dmlCount, "Diagnostic validation must precede normalization")
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+    }
+
+    @Test
+    fun `retry pre-schema and post-schema checkpoint CAS failures stop the corresponding later work`() {
+        for (up in listOf(true, false)) {
+            for (boundary in listOf(MigrationRetryPhase.EXECUTION_IN_FLIGHT, MigrationRetryPhase.RECORD_PENDING)) {
+                for (outcome in listOf("not-applied", "indeterminate", "query-failure")) {
+                    VersionMigrationTrace.reset()
+                    database = FakeDatabase()
+                    scope = OperationExecutionScope(
+                        database.connection,
+                        DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                    )
+                    val startedStatus = if (up) {
+                        MigrationVersionState.STATUS_MIGRATE_STARTED
+                    } else {
+                        MigrationVersionState.STATUS_ROLLBACK_STARTED
+                    }
+                    val checkpoint = retryCheckpoint(
+                        startedStatus,
+                        0,
+                        VersionItemFirst.value,
+                        MigrationRetryPhase.EXECUTION_PENDING,
+                    )
+                    database.respond(
+                        listOf(versionStateRow(
+                            VERSION_ID_ONE,
+                            VERSION_TAG_ID_ONE,
+                            startedStatus,
+                            null,
+                            checkpointJson(checkpoint),
+                        )),
+                        listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+                    )
+                    if (!up) {
+                        database.respond(
+                            listOf(tag(MIGRATION_TAG_ID, VersionItemFirst.value, MIGRATION_TAG_TYPE)),
+                            listOf(history(APPLIED_ID, MIGRATION_TAG_ID, VERSION_ID_ONE)),
+                            emptyList(),
+                        )
+                    }
+                    val failedBoundary = { call: FakeDatabase.DmlCall ->
+                        isCheckpointUpdateTo(call, boundary, VersionItemFirst.value)
+                    }
+                    when (outcome) {
+                        "not-applied" -> database.updateCountWhen = { call -> if (failedBoundary(call)) 0 else null }
+                        "indeterminate" -> database.updateCountWhen = { call -> if (failedBoundary(call)) 2 else null }
+                        "query-failure" -> database.failDmlWhen = { call ->
+                            if (failedBoundary(call)) SQLException("${boundary.name} CAS query failed") else null
+                        }
+                    }
+                    val result = if (up) {
+                        callRetryUp(
+                            retryVersionConfiguration(first = true),
+                            retryTarget(startedStatus, checkpoint, firstRegistration),
+                            toCompleteVersion = true,
+                        )
+                    } else {
+                        callRetryDown(
+                            retryVersionConfiguration(first = true),
+                            retryTarget(startedStatus, checkpoint, firstRegistration),
+                            toCompleteVersion = true,
+                        )
+                    }
+
+                    assertIs<ExecuteResult.Failure>(result, "$up/$boundary/$outcome")
+                    val expectedSchema = if (boundary == MigrationRetryPhase.RECORD_PENDING) {
+                        listOf(if (up) "up:first" else "down:first")
+                    } else {
+                        emptyList()
+                    }
+                    assertEquals(expectedSchema, VersionMigrationTrace.events, "$up/$boundary/$outcome")
+                    assertEquals(0, database.insertHistoryCount)
+                    assertEquals(0, database.deleteHistoryCount)
+                    assertEquals(0, database.deleteTagCount)
+                    assertEquals(1, database.dmlCalls.count { failedBoundary(it) })
+                    assertTrue(database.dmlCalls.none { it.sql.contains("retry_checkpoint = NULL", true) })
+                    assertTrue(database.dmlCalls.none(::isVersionDelete))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `retry cursor advancement CAS failure prevents dispatching the next Migration`() {
+        for (up in listOf(true, false)) {
+            for (nextPhase in listOf(
+                MigrationRetryPhase.EXECUTION_PENDING,
+                MigrationRetryPhase.PAUSED_NEXT,
+                MigrationRetryPhase.FINALIZATION_PENDING,
+            )) {
+                for (outcome in listOf("not-applied", "indeterminate", "query-failure")) {
+                VersionMigrationTrace.reset()
+                database = FakeDatabase()
+                scope = OperationExecutionScope(
+                    database.connection,
+                    DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                )
+                val startedStatus = if (up) {
+                    MigrationVersionState.STATUS_MIGRATE_STARTED
+                } else {
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED
+                }
+                val hasNextMigration = nextPhase != MigrationRetryPhase.FINALIZATION_PENDING
+                val cursor = if (up || !hasNextMigration) VersionItemFirst.value else VersionItemSecond.value
+                val nextCursor = if (!hasNextMigration) null
+                else if (up) VersionItemSecond.value else VersionItemFirst.value
+                val migration = if (up || !hasNextMigration) firstRegistration else secondRegistration
+                val checkpoint = retryCheckpoint(
+                    startedStatus,
+                    2,
+                    cursor,
+                    MigrationRetryPhase.EXECUTION_PENDING,
+                )
+                database.respond(
+                    listOf(versionStateRow(
+                        VERSION_ID_ONE,
+                        VERSION_TAG_ID_ONE,
+                        startedStatus,
+                        null,
+                        checkpointJson(checkpoint),
+                    )),
+                    listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+                )
+                if (!up) {
+                    database.respond(
+                        listOf(tag(ITEM_TAG_ID_SECOND, VersionItemSecond.value, MIGRATION_TAG_TYPE)),
+                        listOf(history(OTHER_APPLIED_ID, ITEM_TAG_ID_SECOND, VERSION_ID_ONE)),
+                        emptyList(),
+                    )
+                }
+                val cursorCas = { call: FakeDatabase.DmlCall ->
+                    isCheckpointUpdateTo(call, nextPhase, nextCursor)
+                }
+                when (outcome) {
+                    "not-applied" -> database.updateCountWhen = { call -> if (cursorCas(call)) 0 else null }
+                    "indeterminate" -> database.updateCountWhen = { call -> if (cursorCas(call)) 2 else null }
+                    "query-failure" -> database.failDmlWhen = { call ->
+                        if (cursorCas(call)) SQLException("cursor advancement query failed") else null
+                    }
+                }
+
+                val configuration = retryVersionConfiguration(first = true, second = hasNextMigration)
+                val result = if (up) {
+                    callRetryUp(
+                        configuration,
+                        retryTarget(startedStatus, checkpoint, migration),
+                        toCompleteVersion = nextPhase == MigrationRetryPhase.EXECUTION_PENDING,
+                    )
+                } else {
+                    callRetryDown(
+                        configuration,
+                        retryTarget(startedStatus, checkpoint, migration),
+                        toCompleteVersion = nextPhase == MigrationRetryPhase.EXECUTION_PENDING,
+                    )
+                }
+
+                assertIs<ExecuteResult.Failure>(result, "$up/$nextPhase/$outcome")
+                val expectedMigration = if (up) "up:first" else if (hasNextMigration) "down:second" else "down:first"
+                assertEquals(listOf(expectedMigration), VersionMigrationTrace.events)
+                assertEquals(if (up) 1 else 0, database.insertHistoryCount)
+                assertEquals(if (up) 0 else 1, database.dmlCalls.count(::isHistoryDelete))
+                assertEquals(1, database.dmlCalls.count { cursorCas(it) })
+                assertEquals(
+                    if (up) MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+                    else MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+                    failureStatusCalls().single().parameters[0],
+                )
+                assertTrue(database.dmlCalls.none { it.sql.contains("retry_checkpoint = NULL", true) })
+                assertTrue(database.dmlCalls.none(::isVersionDelete))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `retry finalization CAS failure does not report completion for either direction`() {
+        for (up in listOf(true, false)) {
+            for (outcome in listOf("not-applied", "indeterminate", "query-failure")) {
+                VersionMigrationTrace.reset()
+                database = FakeDatabase()
+                scope = OperationExecutionScope(
+                    database.connection,
+                    DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                )
+                val startedStatus = if (up) {
+                    MigrationVersionState.STATUS_MIGRATE_STARTED
+                } else {
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED
+                }
+                val checkpoint = retryCheckpoint(
+                    startedStatus,
+                    5,
+                    null,
+                    MigrationRetryPhase.FINALIZATION_PENDING,
+                )
+                database.respond(
+                    listOf(versionStateRow(
+                        VERSION_ID_ONE,
+                        VERSION_TAG_ID_ONE,
+                        startedStatus,
+                        null,
+                        checkpointJson(checkpoint),
+                    )),
+                    listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+                )
+                val finalizationCas = { call: FakeDatabase.DmlCall ->
+                    if (up) call.sql.contains("retry_checkpoint = NULL", true) &&
+                        call.parameters.firstOrNull() == MigrationVersionState.STATUS_MIGRATE_COMPLETED
+                    else isVersionDelete(call)
+                }
+                when (outcome) {
+                    "not-applied" -> database.updateCountWhen = { call -> if (finalizationCas(call)) 0 else null }
+                    "indeterminate" -> database.updateCountWhen = { call -> if (finalizationCas(call)) 2 else null }
+                    "query-failure" -> database.failDmlWhen = { call ->
+                        if (finalizationCas(call)) SQLException("finalization query failed") else null
+                    }
+                }
+                val target = retryTarget(startedStatus, checkpoint, migration = null)
+                val result = if (up) {
+                    callRetryUp(retryVersionConfiguration(first = true), target, toCompleteVersion = false)
+                } else {
+                    callRetryDown(retryVersionConfiguration(first = true), target, toCompleteVersion = false)
+                }
+
+                assertIs<ExecuteResult.Failure>(result, "$up/$outcome")
+                assertTrue(VersionMigrationTrace.events.isEmpty())
+                assertEquals(0, database.insertHistoryCount)
+                assertTrue(database.dmlCalls.none(::isHistoryDelete))
+                assertEquals(0, database.deleteTagCount)
+                assertTrue(finalizationCas(database.dmlCalls.first()))
+                assertEquals(1, database.dmlCalls.count(::isFailureStatusWrite))
+                assertEquals(
+                    if (up) MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+                    else MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+                    database.versionStatuses[VERSION_ID_ONE],
+                )
+                if (!up) assertTrue(database.versionStatuses.containsKey(VERSION_ID_ONE))
+            }
+        }
+    }
+
+    @Test
+    fun `retry DOWN execution pending runs schema then records before pausing for finalization`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            0,
+            VersionItemFirst.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            listOf(tag(MIGRATION_TAG_ID, VersionItemFirst.value, MIGRATION_TAG_TYPE)),
+            listOf(history(APPLIED_ID, MIGRATION_TAG_ID, VERSION_ID_ONE)),
+            emptyList(),
+        )
+
+        val result = callRetryDown(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_ROLLBACK_STARTED, checkpoint, firstRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("down:first"), VersionMigrationTrace.events)
+        assertEquals(1, database.deleteHistoryCount)
+        assertEquals(1, database.deleteTagCount)
+        assertEquals(MigrationVersionState.STATUS_ROLLBACK_STARTED, database.versionStatuses[VERSION_ID_ONE])
+        val finalization = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.FINALIZATION_PENDING, finalization.phase)
+        assertNull(finalization.cursorMigrationId)
+        assertEquals(1, database.events.count { it == "lock-acquire" })
+
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, null, checkpointJson(finalization))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+        val finalized = callRetryDown(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_ROLLBACK_STARTED, finalization, migration = null),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(finalized).result)
+        assertEquals(listOf("down:first"), VersionMigrationTrace.events)
+        assertTrue(!database.versionStatuses.containsKey(VERSION_ID_ONE))
+        assertTrue(!database.versionCheckpoints.containsKey(VERSION_ID_ONE))
+        assertEquals(2, database.events.count { it == "lock-acquire" })
+    }
+
+    @Test
+    fun `retry DOWN false from execution pending pauses at the next cursor in reverse order`() {
+        val configuration = retryVersionConfiguration(first = true, second = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            0,
+            VersionItemSecond.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            listOf(tag(ITEM_TAG_ID_SECOND, VersionItemSecond.value, MIGRATION_TAG_TYPE)),
+            listOf(history(OTHER_APPLIED_ID, ITEM_TAG_ID_SECOND, VERSION_ID_ONE)),
+            emptyList(),
+        )
+
+        val result = callRetryDown(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_ROLLBACK_STARTED, checkpoint, secondRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("down:second"), VersionMigrationTrace.events)
+        assertEquals(1, database.deleteHistoryCount)
+        val paused = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.PAUSED_NEXT, paused.phase)
+        assertEquals(VersionItemFirst.value, paused.cursorMigrationId)
+    }
+
+    @Test
+    fun `retry DOWN false from paused next executes stored reverse cursor once and pauses at the next cursor`() {
+        val configuration = migrationConfig {
+            migrationVersion(VersionTag) {
+                migration<VersionFirstMigration>()
+                migration<VersionSecondMigration>()
+                migration<VersionThirdMigration>()
+            }
+        }
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            3,
+            VersionItemSecond.value,
+            MigrationRetryPhase.PAUSED_NEXT,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            listOf(tag(ITEM_TAG_ID_SECOND, VersionItemSecond.value, MIGRATION_TAG_TYPE)),
+            listOf(history(OTHER_APPLIED_ID, ITEM_TAG_ID_SECOND, VERSION_ID_ONE)),
+            emptyList(),
+        )
+
+        val result = callRetryDown(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_ROLLBACK_STARTED, checkpoint, secondRegistration),
+            toCompleteVersion = false,
+        )
+
+        assertEquals(false, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("down:second"), VersionMigrationTrace.events)
+        assertEquals(1, database.deleteHistoryCount)
+        val paused = MigrationRetryCheckpointCodec.decode(requireNotNull(database.versionCheckpoints[VERSION_ID_ONE]))
+        assertEquals(MigrationRetryPhase.PAUSED_NEXT, paused.phase)
+        assertEquals(VersionItemFirst.value, paused.cursorMigrationId)
+    }
+
+    @Test
+    fun `retry DOWN to complete version resumes cursor then follows reverse declaration order`() {
+        val configuration = retryVersionConfiguration(first = true, second = true)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            3,
+            VersionItemSecond.value,
+            MigrationRetryPhase.EXECUTION_PENDING,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_ROLLBACK_STARTED, null, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            listOf(tag(ITEM_TAG_ID_SECOND, VersionItemSecond.value, MIGRATION_TAG_TYPE)),
+            listOf(history(APPLIED_ID, ITEM_TAG_ID_SECOND, VERSION_ID_ONE)),
+            emptyList(),
+            listOf(tag(ITEM_TAG_ID_FIRST, VersionItemFirst.value, MIGRATION_TAG_TYPE)),
+            listOf(history(OTHER_APPLIED_ID, ITEM_TAG_ID_FIRST, VERSION_ID_ONE)),
+            emptyList(),
+        )
+
+        val result = callRetryDown(
+            configuration,
+            retryTarget(MigrationVersionState.STATUS_ROLLBACK_STARTED, checkpoint, secondRegistration),
+            toCompleteVersion = true,
+        )
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertEquals(listOf("down:second", "down:first"), VersionMigrationTrace.events)
+        assertEquals(
+            2,
+            database.dmlCalls.count { call ->
+                call.sql.contains("DELETE", ignoreCase = true) &&
+                    call.sql.contains("system_migration", ignoreCase = true) &&
+                    call.parameters.size == 2
+            },
+        )
+        assertEquals(2, database.deleteTagCount)
+        assertTrue(!database.versionStatuses.containsKey(VERSION_ID_ONE))
+        assertTrue(!database.versionCheckpoints.containsKey(VERSION_ID_ONE))
+    }
+
+    @Test
+    fun `retry UP recording failure stops when normalization CAS is not applied or indeterminate`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val diagnostic = MigrationFailureDiagnostic(
+            stage = MigrationFailureDiagnosticStage.UP_RECORDING,
+            exceptionClassName = "java.lang.IllegalStateException",
+            sqlState = null,
+            vendorErrorCode = null,
+            message = "recording failed",
+            migrationId = VersionItemFirst.value,
+        ).toStorageMessage(VERSION_ID_ONE)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            4,
+            VersionItemFirst.value,
+            MigrationRetryPhase.RECORD_PENDING,
+            originalMessage = diagnostic,
+        )
+
+        for (updateCount in listOf(0, 2)) {
+            VersionMigrationTrace.reset()
+            database = FakeDatabase()
+            scope = OperationExecutionScope(
+                database.connection,
+                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            )
+            database.respond(
+                listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, diagnostic, checkpointJson(checkpoint))),
+                listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+            )
+            database.respondUpdateCounts(updateCount)
+
+            val result = callRetryUp(
+                configuration,
+                retryTarget(
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                    checkpoint,
+                    firstRegistration,
+                    MigrationRecoveryOperation.UP_RECORDING_EXECUTION,
+                    diagnostic,
+                ),
+                toCompleteVersion = true,
+            )
+
+            assertIs<ExecuteResult.Failure>(result)
+            assertTrue(VersionMigrationTrace.events.isEmpty())
+            assertEquals(1, database.dmlCalls.size, "normalization must be the last write for CAS result $updateCount")
+            assertEquals(MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, database.versionStatuses[VERSION_ID_ONE])
+            assertEquals(checkpointJson(checkpoint), database.versionCheckpoints[VERSION_ID_ONE])
+        }
+    }
+
+    @Test
+    fun `retry UP recording failure normalizes via exact checkpoint and does not execute schema`() {
+        val configuration = retryVersionConfiguration(first = true)
+        val diagnostic = MigrationFailureDiagnostic(
+            stage = MigrationFailureDiagnosticStage.UP_RECORDING,
+            exceptionClassName = "java.lang.IllegalStateException",
+            sqlState = null,
+            vendorErrorCode = null,
+            message = "recording failed",
+            migrationId = VersionItemFirst.value,
+        ).toStorageMessage(VERSION_ID_ONE)
+        val checkpoint = retryCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            4,
+            VersionItemFirst.value,
+            MigrationRetryPhase.RECORD_PENDING,
+            originalMessage = diagnostic,
+        )
+        database.respond(
+            listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, diagnostic, checkpointJson(checkpoint))),
+            listOf(tag(VERSION_TAG_ID_ONE, VersionTag.value, VERSION_TAG_TYPE)),
+        )
+
+        val result = callRetryUp(
+            configuration,
+            retryTarget(
+                MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                checkpoint,
+                firstRegistration,
+                MigrationRecoveryOperation.UP_RECORDING_EXECUTION,
+                diagnostic,
+            ),
+            toCompleteVersion = true,
+        )
+
+        assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(result).result)
+        assertTrue(VersionMigrationTrace.events.isEmpty())
+        assertEquals(MigrationVersionState.STATUS_MIGRATE_COMPLETED, database.versionStatuses[VERSION_ID_ONE])
+        assertTrue(database.dmlCalls.first().sql.contains("SET status = ?", ignoreCase = true))
+        assertTrue(database.dmlCalls.first().sql.contains("retry_checkpoint", ignoreCase = true))
+    }
+
+    private fun callRetryUp(
+        configuration: MigrationConfiguration,
+        target: MigrationRecoveryTarget,
+        toCompleteVersion: Boolean,
+    ): ExecuteResult<Boolean> = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+        MigrationController(configuration).retryUp(target, toCompleteVersion, activeScope)
+    }
+
+    private fun callRetryDown(
+        configuration: MigrationConfiguration,
+        target: MigrationRecoveryTarget,
+        toCompleteVersion: Boolean,
+    ): ExecuteResult<Boolean> = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+        MigrationController(configuration).retryDown(target, toCompleteVersion, activeScope)
+    }
+
+    private fun retryVersionConfiguration(first: Boolean, second: Boolean = false): MigrationConfiguration = migrationConfig {
+        migrationVersion(VersionTag) {
+            if (first) migration<VersionFirstMigration>()
+            if (second) migration<VersionSecondMigration>()
+        }
+    }
+
+    private fun retryCheckpoint(
+        originalStatus: Int,
+        revision: Long,
+        cursor: String?,
+        phase: MigrationRetryPhase,
+        originalMessage: String? = null,
+    ) = MigrationRetryCheckpoint(
+        formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+        revision = revision,
+        originalStatus = originalStatus,
+        originalMessage = originalMessage,
+        cursorMigrationId = cursor,
+        phase = phase,
+    )
+
+    private fun retryRecordingDiagnostic(up: Boolean, migrationId: String?): String =
+        MigrationFailureDiagnostic(
+            stage = if (up) MigrationFailureDiagnosticStage.UP_RECORDING
+            else MigrationFailureDiagnosticStage.DOWN_RECORDING,
+            exceptionClassName = "java.lang.IllegalStateException",
+            sqlState = null,
+            vendorErrorCode = null,
+            message = "recording failed",
+            migrationId = migrationId,
+        ).toStorageMessage(VERSION_ID_ONE)
+
+    private fun checkpointJson(checkpoint: MigrationRetryCheckpoint): String =
+        MigrationRetryCheckpointCodec.encode(checkpoint)
+
+    private fun retryTarget(
+        status: Int,
+        checkpoint: MigrationRetryCheckpoint,
+        migration: RegisteredMigration?,
+        operation: MigrationRecoveryOperation = when {
+            checkpoint.phase == MigrationRetryPhase.EXECUTION_IN_FLIGHT &&
+                checkpoint.originalStatus == MigrationVersionState.STATUS_MIGRATE_STARTED ->
+                MigrationRecoveryOperation.UP_MANUAL_RECOVERY_REQUIRED
+            checkpoint.phase == MigrationRetryPhase.EXECUTION_IN_FLIGHT ->
+                MigrationRecoveryOperation.DOWN_MANUAL_RECOVERY_REQUIRED
+            checkpoint.phase in setOf(MigrationRetryPhase.EXECUTION_PENDING, MigrationRetryPhase.PAUSED_NEXT) ->
+                MigrationRecoveryOperation.START_EXECUTION
+            checkpoint.originalStatus == MigrationVersionState.STATUS_MIGRATE_STARTED ->
+                MigrationRecoveryOperation.UP_RECORDING_EXECUTION
+            else -> MigrationRecoveryOperation.DOWN_RECORDING_EXECUTION
+        },
+        message: String? = checkpoint.originalMessage,
+    ) = MigrationRecoveryTarget(
+        MigrationVersionState(VERSION_ID_ONE, VERSION_TAG_ID_ONE, status, message),
+        migration,
+        operation,
+        checkpoint.revision,
+    )
+
+    private fun readRecoveryTarget(
+        configuration: MigrationConfiguration,
+        selectedRows: List<Map<String, Any?>>,
+        snapshotTags: List<Map<String, Any?>>,
+        snapshotVersions: List<Map<String, Any?>>,
+        selection: MigrationVersionSelection = MigrationVersionSelection.LATEST,
+        versionId: Int? = null,
+    ): Pair<ExecuteResult<MigrationRecoveryTarget?>, FakeDatabase> {
+        database = FakeDatabase()
+        scope = OperationExecutionScope(
+            database.connection,
+            DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        )
+        database.respond(selectedRows, snapshotTags, snapshotVersions, emptyList())
+        val controller = MigrationController(configuration)
+
+        val result = OperationExecutionExecutor(versionTestContext()).connection { activeScope ->
+            if (versionId == null) {
+                controller.state(activeScope, selection)
+            } else {
+                controller.state(activeScope, versionId)
+            }
+        }
+        return result to database
+    }
+
+    private fun versionStateRow(id: Int, tagId: Int, status: Int, message: String?, retryCheckpoint: String? = null) =
+        mapOf(
+            "id" to id,
+            "tagId" to tagId,
+            "status" to status,
+            "message" to message,
+            "retryCheckpoint" to retryCheckpoint,
+        )
+
+    private fun versionSnapshotRow(id: Int, tagId: Int, status: Int, retryCheckpoint: String? = null) =
+        mapOf("id" to id, "tagId" to tagId, "status" to status, "retryCheckpoint" to retryCheckpoint)
 
     private fun versionService(configuration: MigrationConfiguration): VersionTransactionHarness {
         return VersionTransactionHarness(
@@ -2912,6 +5221,8 @@ class MigrationRunServiceTest {
         var applyDmlBeforeFailure: ((DmlCall) -> Boolean)? = null
         private val readResponses = ArrayDeque<List<Map<String, Any?>>>()
         private val updateCounts = ArrayDeque<Int>()
+        private val persistedTags = mutableListOf<FakeTag>()
+        private val persistedHistories = mutableListOf<FakeHistory>()
         var nextGeneratedId = 1000L
         val failReadCalls = mutableSetOf<Int>()
         private var readCount = 0
@@ -2935,6 +5246,7 @@ class MigrationRunServiceTest {
         val lifecycleEvents = mutableListOf<String>()
         var generatedIdForVersionInsert: Long = 0
             private set
+        val versionCheckpoints = mutableMapOf<Int, String?>()
 
         var dmlCount = 0
             private set
@@ -3028,8 +5340,17 @@ class MigrationRunServiceTest {
                         events += "read:$sql"
                         readParameters += values.values.toList()
                         if (readCount in failReadCalls) throw SQLException("Read $readCount failed")
+                        val queuedResponse = if (readResponses.isEmpty()) emptyList() else readResponses.removeFirst()
+                        val response = queuedResponse.ifEmpty {
+                            simulatedSystemRows(normalizedSql, values.values.toList())
+                        }
+                        if ("system_migration_version" in normalizedSql) rememberVersions(response)
                         resultSet(
-                            if (readResponses.isEmpty()) emptyList() else readResponses.removeFirst(),
+                            if ("system_migration_version" in normalizedSql) {
+                                selectVersionRows(normalizedSql, response, values.values.toList())
+                            } else {
+                                response
+                            },
                             sql,
                         )
                     }
@@ -3067,7 +5388,8 @@ class MigrationRunServiceTest {
                     events += "insert-tag:$sql"
                     lastGeneratedId = nextGeneratedId++
                 }
-                lower.contains("insert into") && lower.contains("system_migration") -> {
+                lower.contains("insert into") && lower.contains("system_migration") &&
+                    !lower.contains("system_migration_version") -> {
                     events += "insert-history:$sql"
                     insertHistoryCount++
                     if (!lower.contains("system_migration_version")) lastGeneratedId = nextGeneratedId++
@@ -3093,49 +5415,144 @@ class MigrationRunServiceTest {
 
             val returnedCount = updateCountWhen?.invoke(call)
                 ?: if (updateCounts.isEmpty()) 1 else updateCounts.removeFirst()
-            val effectiveCount = if (isConditionalVersionStatusUpdate(call)) {
-                val versionIdIndex = if (values.size == 4) 2 else 1
-                val expectedStatusIndex = if (values.size == 4) 3 else 2
-                val versionId = values.getOrNull(versionIdIndex) as? Int
-                val expectedStatus = values.getOrNull(expectedStatusIndex) as? Int
-                if (versionId == null || expectedStatus == null || versionStatuses[versionId] != expectedStatus) {
-                    0
-                } else {
-                    returnedCount
-                }
-            } else {
-                returnedCount
-            }
+            val effectiveCount = conditionalCount(call, returnedCount)
             if (effectiveCount == 1) applyFakeDmlState(call)
             dmlUpdateCounts[callIndex] = effectiveCount
             return effectiveCount
         }
 
-        private fun isConditionalVersionStatusUpdate(call: DmlCall): Boolean =
-            call.sql.contains("UPDATE", ignoreCase = true) &&
-                call.sql.contains("system_migration_version", ignoreCase = true) &&
-                call.parameters.size in 3..4
+        private fun conditionalCount(call: DmlCall, returnedCount: Int): Int {
+            val lower = call.sql.lowercase()
+            if (lower.contains("system_migration_version") && lower.contains("update")) {
+                val values = call.parameters
+                val (versionIdIndex, expectedStatusIndex, expectedCheckpointIndex) = when {
+                    values.size == 6 -> Triple(3, 4, 5) // Failure Status + Diagnostic + Checkpoint CAS.
+                    values.size == 4 && lower.contains("retry_checkpoint is null") -> Triple(2, 3, null)
+                    values.size == 4 && lower.contains("cast(retry_checkpoint as binary)") ->
+                        if (lower.contains("set retry_checkpoint = ?")) Triple(1, 2, 3)
+                        else Triple(1, 2, 3) // Finalize UP.
+                    else -> return returnedCount
+                }
+                val versionId = values.getOrNull(versionIdIndex) as? Int ?: return 0
+                val expectedStatus = values.getOrNull(expectedStatusIndex) as? Int ?: return 0
+                if (versionStatuses[versionId] != expectedStatus) return 0
+                if (expectedCheckpointIndex != null &&
+                    versionCheckpoints[versionId] != values.getOrNull(expectedCheckpointIndex)
+                ) return 0
+                if (lower.contains("retry_checkpoint is null") && versionCheckpoints[versionId] != null) return 0
+                return returnedCount
+            }
+            if (lower.contains("system_migration_version") && lower.contains("delete") && call.parameters.size == 3) {
+                val versionId = call.parameters.getOrNull(0) as? Int ?: return 0
+                val expectedStatus = call.parameters.getOrNull(1) as? Int ?: return 0
+                val expectedCheckpoint = call.parameters.getOrNull(2)
+                return if (versionStatuses[versionId] == expectedStatus &&
+                    versionCheckpoints[versionId] == expectedCheckpoint
+                ) returnedCount else 0
+            }
+            return returnedCount
+        }
 
         private fun applyFakeDmlState(call: DmlCall) {
             val lower = call.sql.lowercase()
             when {
-                lower.contains("insert into") && lower.contains("system_migration_version") ->
-                    versionStatuses[lastGeneratedId.toInt()] = 0
+                lower.contains("insert into") && lower.contains("system_migration_tag") -> {
+                    val tagId = lastGeneratedId.toInt()
+                    persistedTags += FakeTag(
+                        id = tagId,
+                        name = call.parameters.getOrNull(0) as? String ?: return,
+                        type = call.parameters.getOrNull(1) as? Int ?: return,
+                    )
+                }
+                lower.contains("insert into") && lower.contains("system_migration") &&
+                    !lower.contains("system_migration_version") -> {
+                    persistedHistories += FakeHistory(
+                        id = lastGeneratedId.toInt(),
+                        tagId = call.parameters.getOrNull(0) as? Int ?: return,
+                        versionId = call.parameters.getOrNull(1) as? Int ?: return,
+                    )
+                }
+                lower.contains("insert into") && lower.contains("system_migration_version") -> {
+                    versionStatuses[lastGeneratedId.toInt()] = call.parameters.getOrNull(1) as? Int
+                        ?: MigrationVersionState.STATUS_MIGRATE_STARTED
+                    versionCheckpoints[lastGeneratedId.toInt()] = call.parameters.getOrNull(3) as? String
+                }
                 lower.contains("update") && lower.contains("system_migration_version") -> {
-                    val targetStatus = call.parameters.getOrNull(0) as? Int ?: return
-                    val versionIdIndex = if (call.parameters.size == 4) 2 else 1
-                    val expectedStatusIndex = if (call.parameters.size == 4) 3 else 2
+                    val targetStatus = call.parameters.getOrNull(0) as? Int
+                    val versionIdIndex = when {
+                        call.parameters.size == 6 -> 3
+                        call.parameters.size == 4 && lower.contains("retry_checkpoint is null") -> 2
+                        call.parameters.size == 4 -> 1
+                        else -> 1
+                    }
                     val versionId = call.parameters.getOrNull(versionIdIndex) as? Int ?: return
-                    if (call.parameters.size !in 3..4 ||
-                        versionStatuses[versionId] == call.parameters.getOrNull(expectedStatusIndex)
-                    ) {
-                        versionStatuses[versionId] = targetStatus
+                    val expectedStatusIndex = when {
+                        call.parameters.size == 6 -> 4
+                        call.parameters.size == 4 && lower.contains("retry_checkpoint is null") -> 3
+                        call.parameters.size == 4 -> 2
+                        else -> 2
+                    }
+                    if (versionStatuses[versionId] == call.parameters.getOrNull(expectedStatusIndex)) {
+                        if (lower.contains("set status = ?") && targetStatus != null) {
+                            versionStatuses[versionId] = targetStatus
+                        }
+                        when {
+                            lower.contains("set status = ?, message = ?, retry_checkpoint = ?") ->
+                                versionCheckpoints[versionId] = call.parameters.getOrNull(2) as? String
+                            lower.contains("set status = ?, retry_checkpoint = ?") ->
+                                versionCheckpoints[versionId] = call.parameters.getOrNull(1) as? String
+                            lower.contains("retry_checkpoint = null") -> versionCheckpoints[versionId] = null
+                            lower.contains("set retry_checkpoint = ?") ->
+                                versionCheckpoints[versionId] = call.parameters.getOrNull(0) as? String
+                        }
                     }
                 }
                 lower.contains("delete") && lower.contains("system_migration_version") -> {
                     val versionId = call.parameters.firstOrNull() as? Int ?: return
                     versionStatuses.remove(versionId)
+                    versionCheckpoints.remove(versionId)
                 }
+                lower.contains("delete") && lower.contains("system_migration_tag") -> {
+                    val tagId = call.parameters.firstOrNull() as? Int ?: return
+                    persistedTags.removeAll { it.id == tagId }
+                }
+                lower.contains("delete") && lower.contains("system_migration") -> {
+                    val tagId = call.parameters.getOrNull(0) as? Int ?: return
+                    val versionId = call.parameters.getOrNull(1) as? Int ?: return
+                    persistedHistories.removeAll { it.tagId == tagId && it.versionId == versionId }
+                }
+            }
+        }
+
+        private fun simulatedSystemRows(sql: String, parameters: List<Any?>): List<Map<String, Any?>> {
+            if (Regex("\\bfrom\\s+system_migration_tag\\b").containsMatchIn(sql)) {
+                val name = parameters.filterIsInstance<String>().firstOrNull()
+                val type = parameters.filterIsInstance<Int>().firstOrNull()
+                return persistedTags
+                    .filter { (name == null || it.name == name) && (type == null || it.type == type) }
+                    .map { mapOf("id" to it.id, "tagName" to it.name, "tagType" to it.type) }
+            }
+            if (Regex("\\bfrom\\s+system_migration\\b").containsMatchIn(sql) &&
+                "system_migration_tag" !in sql && "system_migration_version" !in sql
+            ) {
+                val tagId = parameters.filterIsInstance<Int>().firstOrNull()
+                return persistedHistories
+                    .filter { tagId == null || it.tagId == tagId }
+                    .map { mapOf("id" to it.id, "tagId" to it.tagId, "versionId" to it.versionId) }
+            }
+            return emptyList()
+        }
+
+        private fun rememberVersions(rows: List<Map<String, Any?>>) {
+            rows.forEach { row ->
+                val id = (row["id"] ?: row.entries.firstOrNull { it.key.equals("id", true) }?.value) as? Int
+                    ?: return@forEach
+                val status = (row["status"] ?: row.entries.firstOrNull { it.key.equals("status", true) }?.value) as? Int
+                if (status != null) versionStatuses[id] = status
+                val checkpoint = row["retryCheckpoint"]
+                    ?: row.entries.firstOrNull { it.key.equals("retry_checkpoint", true) }?.value
+                    ?: row.entries.firstOrNull { it.key.equals("retryCheckpoint", true) }?.value
+                if (checkpoint == null || checkpoint is String) versionCheckpoints[id] = checkpoint as? String
             }
         }
 
@@ -3171,6 +5588,28 @@ class MigrationRunServiceTest {
             }
         }
 
+        /** Mimics the database filtering and descending selection used by the state-reader CTE. */
+        private fun selectVersionRows(
+            sql: String,
+            rows: List<Map<String, Any?>>,
+            parameters: List<Any?>,
+        ): List<Map<String, Any?>> {
+            var selected = rows
+            if (Regex("status\\s*(?:<>|!=)\\s*\\?").containsMatchIn(sql)) {
+                val completedStatus = parameters.firstOrNull() as? Int
+                selected = selected.filter { (it["status"] as? Number)?.toInt() != completedStatus }
+            }
+            if (Regex("smv\\.id\\s*=\\s*\\?").containsMatchIn(sql)) {
+                val selectedId = parameters.firstOrNull() as? Int
+                selected = selected.filter { (it["id"] as? Number)?.toInt() == selectedId }
+            }
+            return if ("order by" in sql && "limit 1" in sql) {
+                selected.sortedByDescending { (it["id"] as? Number)?.toInt() ?: Int.MIN_VALUE }.take(1)
+            } else {
+                selected
+            }
+        }
+
         @Suppress("UNCHECKED_CAST")
         private fun <T> proxy(type: Class<T>, invocation: (java.lang.reflect.Method, Array<out Any?>) -> Any?): T =
             Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { _, method, args ->
@@ -3190,11 +5629,13 @@ class MigrationRunServiceTest {
         }
 
         data class DmlCall(val sql: String, val parameters: List<Any?>)
+        private data class FakeTag(val id: Int, val name: String, val type: Int)
+        private data class FakeHistory(val id: Int, val tagId: Int, val versionId: Int)
     }
 
     private companion object {
-        const val STATUS_ROLLBACK_STARTED = 4
-        const val STATUS_MIGRATE_COMPLETED = 3
+        const val STATUS_ROLLBACK_STARTED = MigrationVersionState.STATUS_ROLLBACK_STARTED
+        const val STATUS_MIGRATE_COMPLETED = MigrationVersionState.STATUS_MIGRATE_COMPLETED
         const val VERSION_ID = 7
         const val VERSION_TAG_TYPE = 0
         const val MIGRATION_TAG_ID = 21

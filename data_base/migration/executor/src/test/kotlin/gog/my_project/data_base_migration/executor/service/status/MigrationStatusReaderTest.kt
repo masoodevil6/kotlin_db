@@ -1,5 +1,6 @@
 package gog.my_project.data_base_migration.executor.service.status
 
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
@@ -38,7 +39,9 @@ class MigrationStatusReaderTest {
         )
         val invocation = invoke(
             rows = listOf(row),
-            versionRows = listOf(mapOf("id" to 41, "tagId" to 7, "status" to 3)),
+            versionRows = listOf(
+                mapOf("id" to 41, "tagId" to 7, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED),
+            ),
         )
 
         val snapshot = assertIs<ExecuteResult.Success<MigrationStatusSnapshot>>(invocation.result).result
@@ -48,7 +51,7 @@ class MigrationStatusReaderTest {
         )
         assertEquals(2, invocation.jdbc.queryCount)
         assertEquals(
-            listOf(MigrationHistoryVersion(41, 7, 3)),
+            listOf(MigrationHistoryVersion(41, 7, MigrationVersionState.STATUS_MIGRATE_COMPLETED)),
             assertIs<MigrationStatusSnapshot>(snapshot).historyVersions,
         )
         val sql = invocation.jdbc.sql.first().lowercase()
@@ -63,13 +66,18 @@ class MigrationStatusReaderTest {
     fun `reads persisted version status through the supplied scope`() {
         val invocation = invoke(
             rows = listOf(statusRow(tagId = 7, tagName = "release-1", tagVersionId = 41)),
-            versionRows = listOf(mapOf("id" to 41, "tagId" to 7, "status" to 3)),
+            versionRows = listOf(
+                mapOf("id" to 41, "tagId" to 7, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED),
+            ),
         )
 
         val snapshot = assertIs<MigrationStatusSnapshot>(
             assertIs<ExecuteResult.Success<MigrationStatusSnapshot>>(invocation.result).result,
         )
-        assertEquals(listOf(MigrationHistoryVersion(41, 7, 3)), snapshot.historyVersions)
+        assertEquals(
+            listOf(MigrationHistoryVersion(41, 7, MigrationVersionState.STATUS_MIGRATE_COMPLETED)),
+            snapshot.historyVersions,
+        )
         assertEquals(2, invocation.jdbc.queryCount)
         assertEquals(2, invocation.jdbc.sql.size)
     }
@@ -113,7 +121,7 @@ class MigrationStatusReaderTest {
 
     @Test
     fun `snapshot defensively copies and protects persisted version status rows`() {
-        val version = MigrationHistoryVersion(7, 3, 3)
+        val version = MigrationHistoryVersion(7, 3, MigrationVersionState.STATUS_MIGRATE_COMPLETED)
         val source = mutableListOf(version)
         val snapshot = MigrationStatusSnapshot.withHistoryVersions(emptyList(), source)
         source.clear()

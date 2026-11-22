@@ -11,6 +11,8 @@ import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailure
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusWriteResult
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStatusCapability
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCapability
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCommand
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
@@ -345,6 +347,18 @@ class OperationExecutionScope private constructor(
                 }
             }
         }
+    }
+
+    /** Lends the additive Checkpoint-aware capability under the same Migration lock and lease. */
+    fun <T> withMigrationFailureCheckpointCapability(
+        timeoutSeconds: Int,
+        block: (capability: MigrationFailureCheckpointWriteCapability) -> ExecuteResult<T>,
+    ): ExecuteResult<T> = withMigrationFailureStatusCapability(timeoutSeconds) { capability ->
+        val checkpointCapability = capability as? MigrationFailureCheckpointWriteCapability
+            ?: return@withMigrationFailureStatusCapability failed(
+                UnsupportedOperationException("Checkpoint-aware Migration failure writes are not supported"),
+            )
+        block(checkpointCapability)
     }
 
     /**
@@ -980,6 +994,12 @@ class OperationExecutionScope private constructor(
     }
 
     private companion object {
+        const val MIGRATION_UP_STARTED_STATUS = 100
+        const val MIGRATION_UP_FAILED_RECORD_STATUS = 102
+        const val MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS = 110
+        const val MIGRATION_DOWN_STARTED_STATUS = 200
+        const val MIGRATION_DOWN_FAILED_RECORD_STATUS = 202
+        const val MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS = 210
         const val MAX_SESSION_ADVISORY_LOCK_NAME_LENGTH = 64
         const val MAX_SESSION_ADVISORY_LOCK_TIMEOUT_SECONDS = 300
         const val MIN_PRINTABLE_ASCII = 0x20
@@ -1175,10 +1195,14 @@ class OperationExecutionScope private constructor(
 
         return try {
             val (expectedStatus, targetStatus) = when (command) {
-                is MigrationFailureStatusCommand.UpExecutionFailure -> 0 to 1
-                is MigrationFailureStatusCommand.UpRecordingFailure -> 0 to 2
-                is MigrationFailureStatusCommand.DownExecutionFailure -> 4 to 5
-                is MigrationFailureStatusCommand.DownRecordingFailure -> 4 to 6
+                is MigrationFailureStatusCommand.UpExecutionFailure ->
+                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+                is MigrationFailureStatusCommand.UpRecordingFailure ->
+                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+                is MigrationFailureStatusCommand.DownExecutionFailure ->
+                    MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS
+                is MigrationFailureStatusCommand.DownRecordingFailure ->
+                    MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS
             }
             val diagnosticMessage = try {
                 diagnostic?.toStorageMessage(command.versionId)
@@ -1248,6 +1272,85 @@ class OperationExecutionScope private constructor(
         }
     }
 
+    /** Performs one fixed-purpose Status/Diagnostic/Checkpoint CAS without interpreting either JSON value. */
+    private fun writeMigrationCheckpointFailure(
+        lease: MigrationFailureStatusLease,
+        consumed: AtomicBoolean,
+        command: MigrationFailureCheckpointWriteCommand,
+    ): MigrationFailureStatusWriteResult {
+        synchronized(this) {
+            check(active) { "Execution scope has ended; Migration failure status cannot be written" }
+            check(Thread.currentThread() === ownerThread) {
+                "Migration failure status must be written on the scope callback thread"
+            }
+            check(activeChildScope == null) {
+                "Migration failure status cannot be written while a child transaction is active"
+            }
+            check(lease.active && activeMigrationFailureStatusLease === lease) {
+                "The Migration failure capability is outside its issuing lock lease"
+            }
+            check(command.versionId > 0) { "Migration Version id must be positive" }
+            failureOwner.admitPostFailureWrite(consumed)
+        }
+
+        val (expectedStatus, targetStatus) = when (command) {
+            is MigrationFailureCheckpointWriteCommand.UpExecutionUncertain,
+            is MigrationFailureCheckpointWriteCommand.UpReconciliationInconsistent,
+            -> MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+            is MigrationFailureCheckpointWriteCommand.UpRecordingFailure,
+            is MigrationFailureCheckpointWriteCommand.UpFinalizationFailure,
+            -> MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_FAILED_RECORD_STATUS
+            is MigrationFailureCheckpointWriteCommand.DownExecutionUncertain,
+            is MigrationFailureCheckpointWriteCommand.DownReconciliationInconsistent,
+            -> MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS
+            is MigrationFailureCheckpointWriteCommand.DownRecordingFailure,
+            is MigrationFailureCheckpointWriteCommand.DownFinalizationFailure,
+            -> MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_FAILED_RECORD_STATUS
+        }
+        val query = BoundQuery(
+            "UPDATE system_migration_version SET status = ?, message = ?, retry_checkpoint = ? " +
+                "WHERE id = ? AND status = ? AND CAST(retry_checkpoint AS BINARY) = CAST(? AS BINARY)",
+            listOf(
+                QueryParameterBinding("targetStatus", targetStatus, Types.INTEGER),
+                QueryParameterBinding("diagnosticMessage", command.diagnosticMessage, Types.VARCHAR),
+                QueryParameterBinding("updatedCheckpoint", command.updatedCheckpoint, Types.VARCHAR),
+                QueryParameterBinding("versionId", command.versionId, Types.INTEGER),
+                QueryParameterBinding("expectedStatus", expectedStatus, Types.INTEGER),
+                QueryParameterBinding("expectedCheckpoint", command.expectedCheckpoint, Types.VARCHAR),
+            ),
+        )
+
+        return try {
+            val execution = observeSql(query.jdbcSql) {
+                var callbackCount = 0
+                var result: ExecuteResult<Int>? = null
+                typedQueryExecutor.executeUpdate(query) { delivered ->
+                    callbackCount++
+                    if (callbackCount != 1) {
+                        throw IllegalStateException("Migration Checkpoint failure UPDATE returned more than one result")
+                    }
+                    result = delivered
+                    if (delivered is ExecuteResult.Failure) {
+                        recordMigrationFailureStatusWriteFailure(delivered.exception)
+                    }
+                }
+                result ?: ExecuteResult.Failure(
+                    IllegalStateException("Migration Checkpoint failure UPDATE completed without a result"),
+                )
+            }
+            when (execution) {
+                is ExecuteResult.Failure -> MigrationFailureStatusWriteResult.INDETERMINATE
+                is ExecuteResult.Success -> when (execution.result) {
+                    0 -> MigrationFailureStatusWriteResult.NOT_APPLIED
+                    1 -> MigrationFailureStatusWriteResult.APPLIED
+                    else -> MigrationFailureStatusWriteResult.INDETERMINATE
+                }
+            }
+        } catch (failure: Throwable) {
+            recordMigrationFailureStatusWriteFailure(failure)
+        }
+    }
+
     private fun recordMigrationFailureStatusWriteFailure(
         failure: Throwable,
     ): MigrationFailureStatusWriteResult {
@@ -1266,7 +1369,7 @@ class OperationExecutionScope private constructor(
     private class MigrationFailureStatusCapabilityImpl(
         private val scope: OperationExecutionScope,
         private val lease: MigrationFailureStatusLease,
-    ) : MigrationFailureDiagnosticStatusCapability {
+    ) : MigrationFailureDiagnosticStatusCapability, MigrationFailureCheckpointWriteCapability {
         private val consumed = AtomicBoolean()
 
         override fun write(
@@ -1279,6 +1382,11 @@ class OperationExecutionScope private constructor(
             diagnostic: MigrationFailureDiagnostic,
         ): MigrationFailureStatusWriteResult =
             scope.writeMigrationFailureStatus(lease, consumed, command, diagnostic)
+
+        override fun writeCheckpoint(
+            command: MigrationFailureCheckpointWriteCommand,
+        ): MigrationFailureStatusWriteResult =
+            scope.writeMigrationCheckpointFailure(lease, consumed, command)
     }
 
     override fun <T> executeRead(

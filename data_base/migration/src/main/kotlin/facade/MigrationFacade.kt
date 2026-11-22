@@ -3,10 +3,14 @@ package gog.my_project.data_base_migration.facade
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionSelection
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryTarget
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_migration.executor.controller.MigrationController
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusReport
+import kotlin.jvm.JvmOverloads
 
 /**
  * Consumer-facing commands for one Migration Configuration and one caller-owned Operation scope.
@@ -30,9 +34,35 @@ class MigrationFacade internal constructor(
     fun rollback(version: MigrationVersionTag): ExecuteResult<Boolean> =
         controller.rollback(version, scope)
 
+    /** Retries the validated UP activity for one Version, optionally continuing within that Version. */
+    fun retryUp(
+        target: MigrationRecoveryTarget,
+        toCompleteVersion: Boolean,
+    ): ExecuteResult<Boolean> = controller.retryUp(target, toCompleteVersion, scope)
+
+    /** Retries the validated DOWN activity for one Version, optionally continuing within that Version. */
+    fun retryDown(
+        target: MigrationRecoveryTarget,
+        toCompleteVersion: Boolean,
+    ): ExecuteResult<Boolean> = controller.retryDown(target, toCompleteVersion, scope)
+
     fun status(): ExecuteResult<MigrationStatusReport> = controller.status(scope)
 
     fun current(): ExecuteResult<MigrationVersion?> = controller.current(scope)
+
+    /** Reads the latest persisted Version state without running or changing any Migration. */
+    @JvmOverloads
+    @Deprecated("Use state(MigrationVersionSelection) or state(versionId) for a typed recovery target")
+    fun state(lastIncompleteVersion: Boolean = false): ExecuteResult<MigrationVersionState?> =
+        controller.state(scope, lastIncompleteVersion)
+
+    /** Reads the latest Version selected by an explicit policy without executing any Migration. */
+    fun state(selection: MigrationVersionSelection): ExecuteResult<MigrationRecoveryTarget?> =
+        controller.state(scope, selection)
+
+    /** Reads one persisted Version by ID without executing any Migration. */
+    fun state(versionId: Int): ExecuteResult<MigrationRecoveryTarget?> =
+        controller.state(scope, versionId)
 }
 
 /**

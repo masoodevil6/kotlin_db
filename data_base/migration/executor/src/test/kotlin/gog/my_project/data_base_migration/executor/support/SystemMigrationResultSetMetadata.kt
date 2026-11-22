@@ -7,6 +7,11 @@ import java.sql.ResultSetMetaData
 internal fun systemMigrationResultSetMetadata(sql: String): ResultSetMetaData {
     val normalizedSql = sql.lowercase()
     val labels = when {
+        "retry_checkpoint" in normalizedSql && "message" in normalizedSql ->
+            listOf("id", "tagId", "status", "message", "retryCheckpoint")
+        "retry_checkpoint" in normalizedSql -> listOf("id", "tagId", "status", "retryCheckpoint")
+        "system_migration_version" in normalizedSql && "message" in normalizedSql ->
+            listOf("id", "tagId", "status", "message")
         ("system_migration_status_query" in normalizedSql ||
             ("system_migration_tag_query" in normalizedSql &&
                 "system_migration_version_query" in normalizedSql &&

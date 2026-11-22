@@ -12,6 +12,8 @@ import model.migration_status.MigrationStatusSnapshot
 import model.migration_status.MigrationVersionStatus
 import model.prepared.PreparedMigrationVersion
 import model.version_history.MigrationHistoryVersion
+import gog.my_project.data_base_migration.executor.service.version.MigrationCheckpointStatusKind
+import gog.my_project.data_base_migration.executor.service.version.MigrationCheckpointStatusValidator
 import service.version.MigrationVersionPreparationService
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
@@ -21,6 +23,8 @@ internal class MigrationStatusAnalyzer(
     private val prepareVersion: (MigrationVersion) -> PreparedMigrationVersion =
         MigrationVersionPreparationService()::prepare,
 ) {
+    private val checkpointStatusValidator = MigrationCheckpointStatusValidator()
+
     fun analyze(
         configuration: MigrationConfiguration,
         snapshot: MigrationStatusSnapshot,
@@ -69,7 +73,17 @@ internal class MigrationStatusAnalyzer(
             }
             val versionIssues = issues.forVersion(name)
             val invalid = versionIssues.isNotEmpty() || itemEntries.any { it.status == MigrationItemStatus.INVALID }
+            val manualRecoveryStatus = if (versionIds.size == 1) {
+                facts.persistedVersionRows
+                    .filter { it.id == versionIds.single() }
+                    .mapNotNull { manualRecoveryStatus(it.status, it.retryCheckpoint) }
+                    .distinct()
+                    .singleOrNull()
+            } else {
+                null
+            }
             val status = when {
+                manualRecoveryStatus != null -> manualRecoveryStatus
                 invalid -> MigrationVersionStatus.INVALID
                 versionIds.isEmpty() -> MigrationVersionStatus.PENDING
                 itemEntries.all { it.status == MigrationItemStatus.APPLIED } -> MigrationVersionStatus.APPLIED
@@ -110,14 +124,25 @@ internal class MigrationStatusAnalyzer(
             tagVariants.getOrPut(row.tagId, ::linkedSetOf).add(TagFact(row.tagId, row.tagName, row.tagType))
 
             row.tagVersionId?.let { versionId ->
-                val status = snapshot.historyVersions.singleOrNull { it.id == versionId && it.tagId == row.tagId }?.status
+                val persistedVersion = snapshot.historyVersions.singleOrNull {
+                    it.id == versionId && it.tagId == row.tagId
+                }
                 versionVariants.getOrPut(versionId, ::linkedSetOf)
-                    .add(VersionFact(versionId, row.tagId, row.tagName, row.tagType, status))
+                    .add(
+                        VersionFact(
+                            versionId,
+                            row.tagId,
+                            row.tagName,
+                            row.tagType,
+                            persistedVersion?.status,
+                            persistedVersion?.retryCheckpoint,
+                        ),
+                    )
             }
             row.appliedVersionId?.let { versionId ->
-                val status = snapshot.historyVersions.singleOrNull {
+                val persistedVersion = snapshot.historyVersions.singleOrNull {
                     it.id == versionId && it.tagId == row.appliedVersionTagId
-                }?.status
+                }
                 versionVariants.getOrPut(versionId, ::linkedSetOf)
                     .add(
                         VersionFact(
@@ -125,7 +150,8 @@ internal class MigrationStatusAnalyzer(
                             row.appliedVersionTagId,
                             row.appliedVersionTagName,
                             row.appliedVersionTagType,
-                            status,
+                            persistedVersion?.status,
+                            persistedVersion?.retryCheckpoint,
                         ),
                     )
             }
@@ -167,11 +193,29 @@ internal class MigrationStatusAnalyzer(
             val versionTags = tagVariants[version.tagId].orEmpty()
             if (versionTags.isEmpty()) {
                 versionVariants.getOrPut(version.id, ::linkedSetOf)
-                    .add(VersionFact(version.id, version.tagId, null, null, version.status))
+                    .add(
+                        VersionFact(
+                            version.id,
+                            version.tagId,
+                            null,
+                            null,
+                            version.status,
+                            version.retryCheckpoint,
+                        ),
+                    )
             } else {
                 versionTags.forEach { tag ->
                     versionVariants.getOrPut(version.id, ::linkedSetOf)
-                        .add(VersionFact(version.id, version.tagId, tag.name, tag.typeCode, version.status))
+                        .add(
+                            VersionFact(
+                                version.id,
+                                version.tagId,
+                                tag.name,
+                                tag.typeCode,
+                                version.status,
+                                version.retryCheckpoint,
+                            ),
+                        )
                 }
             }
         }
@@ -351,15 +395,45 @@ internal class MigrationStatusAnalyzer(
             val relatedMigrationIds = associatedTagNames.filter(migrationOwners::containsKey)
             val affectedVersionNames =
                 (relatedVersionNames + relatedMigrationIds.mapNotNull(migrationOwners::get)).distinct()
-            if (version.status != MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED) {
-                issues.add(
-                    MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY,
-                    "Persisted Migration Version ${version.id} has non-completed status ${version.status}",
+            val assessment = version.status?.let {
+                checkpointStatusValidator.assess(it, version.retryCheckpoint)
+            }
+            when (assessment?.kind) {
+                MigrationCheckpointStatusKind.UP_MANUAL_RECOVERY -> issues.add(
+                    MigrationStatusReport.Issue.Code.MANUAL_RECOVERY_REQUIRED_UP,
+                    "Persisted Migration Version ${version.id} requires manual UP recovery; automatic Migration execution is blocked" +
+                        assessment?.reason?.let { ": $it" }.orEmpty(),
                     affectedVersionNames = affectedVersionNames,
                     affectedMigrationIds = relatedMigrationIds,
                     tagIds = listOfNotNull(version.tagId),
                     versionIds = listOf(version.id),
                 )
+                MigrationCheckpointStatusKind.DOWN_MANUAL_RECOVERY -> issues.add(
+                    MigrationStatusReport.Issue.Code.MANUAL_RECOVERY_REQUIRED_DOWN,
+                    "Persisted Migration Version ${version.id} requires manual DOWN recovery; automatic Migration execution is blocked" +
+                        assessment?.reason?.let { ": $it" }.orEmpty(),
+                    affectedVersionNames = affectedVersionNames,
+                    affectedMigrationIds = relatedMigrationIds,
+                    tagIds = listOfNotNull(version.tagId),
+                    versionIds = listOf(version.id),
+                )
+                MigrationCheckpointStatusKind.COMPLETED -> Unit
+                else -> if (version.status != MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED ||
+                    assessment?.kind == MigrationCheckpointStatusKind.INVALID
+                ) {
+                    val checkpointReason = assessment?.reason
+                        ?.takeIf { assessment?.kind == MigrationCheckpointStatusKind.INVALID }
+                        ?.let { "; invalid Status/Checkpoint: $it" }
+                        .orEmpty()
+                    issues.add(
+                        MigrationStatusReport.Issue.Code.INCOMPLETE_VERSION_HISTORY,
+                        "Persisted Migration Version ${version.id} has non-completed status ${version.status}$checkpointReason",
+                        affectedVersionNames = affectedVersionNames,
+                        affectedMigrationIds = relatedMigrationIds,
+                        tagIds = listOfNotNull(version.tagId),
+                        versionIds = listOf(version.id),
+                    )
+                }
             }
             if (version.id <= 0) {
                 issues.add(
@@ -760,9 +834,14 @@ internal class MigrationStatusAnalyzer(
                 it.versionReferenceId in versionIds || it.versionTagName == name
             }
             val versionIssues = issues.forVersion(name)
+            val manualRecoveryStatus = versionFacts
+                .mapNotNull(::manualRecoveryStatus)
+                .distinct()
+                .singleOrNull()
             MigrationStatusReport.UnknownVersion(
                 name = name,
-                status = if (hasStructuralIssues(versionIssues)) MigrationVersionStatus.INVALID else MigrationVersionStatus.UNKNOWN,
+                status = manualRecoveryStatus
+                    ?: if (hasStructuralIssues(versionIssues)) MigrationVersionStatus.INVALID else MigrationVersionStatus.UNKNOWN,
                 tagIds = tagIds,
                 versionIds = versionIds,
                 historyRecordIds = histories.map(HistoryFact::id).distinct(),
@@ -778,7 +857,7 @@ internal class MigrationStatusAnalyzer(
             )
             result += MigrationStatusReport.UnknownVersion(
                 name = null,
-                status = MigrationVersionStatus.INVALID,
+                status = manualRecoveryStatus(version) ?: MigrationVersionStatus.INVALID,
                 tagIds = listOfNotNull(version.tagId),
                 versionIds = listOf(version.id),
                 historyRecordIds = facts.histories.filter { it.versionReferenceId == version.id }
@@ -845,6 +924,16 @@ internal class MigrationStatusAnalyzer(
     private fun hasStructuralIssues(issues: List<MigrationStatusReport.Issue>): Boolean =
         issues.any { it.code !in NON_STRUCTURAL_ISSUES }
 
+    private fun manualRecoveryStatus(version: VersionFact): MigrationVersionStatus? =
+        manualRecoveryStatus(version.status, version.retryCheckpoint)
+
+    private fun manualRecoveryStatus(status: Int?, retryCheckpoint: String?): MigrationVersionStatus? =
+        when (status?.let { checkpointStatusValidator.assess(it, retryCheckpoint).kind }) {
+            MigrationCheckpointStatusKind.UP_MANUAL_RECOVERY -> MigrationVersionStatus.UP_MANUAL_RECOVERY_REQUIRED
+            MigrationCheckpointStatusKind.DOWN_MANUAL_RECOVERY -> MigrationVersionStatus.DOWN_MANUAL_RECOVERY_REQUIRED
+            else -> null
+        }
+
     private data class TagFact(val id: Int, val name: String, val typeCode: Int)
 
     private data class VersionFact(
@@ -853,6 +942,7 @@ internal class MigrationStatusAnalyzer(
         val tagName: String?,
         val tagTypeCode: Int?,
         val status: Int?,
+        val retryCheckpoint: String? = null,
     )
 
     private data class HistoryFact(

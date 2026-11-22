@@ -1,6 +1,7 @@
 package gog.my_project.data_base_migration.executor.service.version_selection
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.group.SingleMigration
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
@@ -16,6 +17,9 @@ import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfi
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
+import model.retry.MigrationRetryCheckpoint
+import model.retry.MigrationRetryCheckpointCodec
+import model.retry.MigrationRetryPhase
 import model.version_history.MigrationHistoryVersion
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -112,11 +116,31 @@ class MigrationCurrentVersionServiceTest {
     @Test
     fun incompleteVersionStatusIsRejectedInsteadOfBecomingCurrent() {
         val valid = history(appliedVersionCount = 1)
-        val incomplete = valid.copy(versions = valid.versions.map { it + ("status" to 0) })
+        val incomplete = valid.copy(
+            versions = valid.versions.map {
+                it + mapOf(
+                    "status" to MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    "retryCheckpoint" to MigrationRetryCheckpointCodec.encode(
+                        MigrationRetryCheckpoint(
+                            formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                            revision = 0,
+                            originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+                            originalMessage = null,
+                            cursorMigrationId = "migration_one",
+                            phase = MigrationRetryPhase.EXECUTION_PENDING,
+                        ),
+                    ),
+                )
+            },
+        )
         val invocation = invoke(incomplete)
 
         val failure = assertIs<ExecuteResult.Failure>(invocation.result)
-        assertTrue(failure.exception.message.orEmpty().contains("non-completed status 0"))
+        assertTrue(
+            failure.exception.message.orEmpty().contains(
+                "non-completed status ${MigrationVersionState.STATUS_MIGRATE_STARTED}",
+            ),
+        )
         assertSame(failure.exception, invocation.scope.firstFailure)
         assertEquals(3, invocation.jdbc.queryCount)
     }

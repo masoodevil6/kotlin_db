@@ -1,6 +1,7 @@
 package gog.my_project.data_base_migration.executor.service.version
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
@@ -19,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -130,6 +132,201 @@ class MigrationVersionHistoryReaderTest {
     }
 
     @Test
+    fun `latest version query orders descending limits to one and preserves status and message`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":41,"stage":"UP_EXECUTION"}"""
+        val jdbc = FakeJdbc(
+            tags = emptyList(),
+            versions = listOf(
+                row("id" to 41, "tagId" to 12, "status" to 87, "message" to diagnostic),
+                row("id" to 18, "tagId" to 7, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED, "message" to null),
+            ),
+            migrations = emptyList(),
+        )
+
+        val result = reader.readLatestVersion(scope(jdbc.connection))
+        val latest = assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(
+            result,
+            (result as? ExecuteResult.Failure)?.exception?.stackTraceToString().orEmpty(),
+        ).result
+
+        assertEquals(MigrationHistoryVersion(41, 12, 87, diagnostic), latest)
+        val sql = jdbc.executedSql.single().lowercase()
+        assertTrue(sql.contains("order by"))
+        assertTrue(sql.contains("desc"))
+        assertTrue(sql.contains("limit 1"))
+        assertTrue("insert" !in sql && "update" !in sql && "delete" !in sql)
+    }
+
+    @Test
+    fun `latest version query returns null when no version exists`() {
+        val jdbc = FakeJdbc(emptyList(), emptyList(), emptyList())
+
+        val result = reader.readLatestVersion(scope(jdbc.connection))
+
+        assertNull(assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result)
+        assertEquals(1, jdbc.executedSql.size)
+    }
+
+    @Test
+    fun `explicit version id query selects the matching row and preserves its diagnostic`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":41,"migrationId":"create_users"}"""
+        val jdbc = FakeJdbc(
+            tags = emptyList(),
+            versions = listOf(
+                row("id" to 88, "tagId" to 22, "status" to MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, "message" to "other"),
+                row("id" to 41, "tagId" to 12, "status" to MigrationVersionState.STATUS_MIGRATE_FAILED_UP, "message" to diagnostic),
+            ),
+            migrations = emptyList(),
+        )
+
+        val result = reader.readVersionById(scope(jdbc.connection), versionId = 41)
+
+        assertEquals(
+            MigrationHistoryVersion(41, 12, MigrationVersionState.STATUS_MIGRATE_FAILED_UP, diagnostic),
+            assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result,
+        )
+        val sql = jdbc.executedSql.single().lowercase()
+        assertTrue(Regex("smv\\.id\\s*=\\s*\\?").containsMatchIn(sql), sql)
+        assertTrue(sql.contains("limit 1"), sql)
+        assertEquals(listOf(41), jdbc.executedParameters.single())
+    }
+
+    @Test
+    fun `explicit version id query returns null when the id is absent`() {
+        val jdbc = FakeJdbc(emptyList(), emptyList(), emptyList())
+
+        val result = reader.readVersionById(scope(jdbc.connection), versionId = 999)
+
+        assertNull(assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result)
+        assertEquals(1, jdbc.executedSql.size)
+        assertEquals(listOf(999), jdbc.executedParameters.single())
+    }
+
+    @Test
+    fun `explicit false keeps selecting the latest version regardless of status`() {
+        val jdbc = FakeJdbc(
+            tags = emptyList(),
+            versions = listOf(
+                row("id" to 11, "tagId" to 2, "status" to MigrationVersionState.STATUS_MIGRATE_FAILED_UP, "message" to null),
+                row("id" to 25, "tagId" to 3, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED, "message" to null),
+            ),
+            migrations = emptyList(),
+        )
+
+        val result = reader.readLatestVersion(scope(jdbc.connection), lastIncompleteVersion = false)
+        val latest = assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result
+
+        assertEquals(MigrationHistoryVersion(25, 3, MigrationVersionState.STATUS_MIGRATE_COMPLETED, null), latest)
+        val sql = jdbc.executedSql.single().lowercase()
+        assertTrue("status" !in sql.substringAfter("where", ""), sql)
+        assertTrue(sql.contains("order by"))
+        assertTrue(sql.contains("desc"))
+        assertTrue(sql.contains("limit 1"))
+    }
+
+    @Test
+    fun `incomplete version query skips newer completed row and includes unknown status`() {
+        val diagnostic = """{"schemaVersion":1,"versionId":88,"stage":"UP_EXECUTION"}"""
+        val jdbc = FakeJdbc(
+            tags = emptyList(),
+            versions = listOf(
+                row("id" to 100, "tagId" to 10, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED, "message" to null),
+                row("id" to 72, "tagId" to 7, "status" to MigrationVersionState.STATUS_MIGRATE_FAILED_UP, "message" to null),
+                row("id" to 88, "tagId" to 8, "status" to 9876, "message" to diagnostic),
+            ),
+            migrations = emptyList(),
+        )
+
+        val result = reader.readLatestVersion(scope(jdbc.connection), lastIncompleteVersion = true)
+        val latest = assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result
+
+        assertEquals(MigrationHistoryVersion(88, 8, 9876, diagnostic), latest)
+        val sql = jdbc.executedSql.single().lowercase()
+        assertTrue(Regex("status\\s*(?:<>|!=)\\s*\\?").containsMatchIn(sql), sql)
+        assertTrue(sql.contains("order by"))
+        assertTrue(sql.contains("desc"))
+        assertTrue(sql.contains("limit 1"))
+        assertTrue("insert" !in sql && "update" !in sql && "delete" !in sql)
+    }
+
+    @Test
+    fun `incomplete version query selects the highest id among multiple incomplete rows`() {
+        val jdbc = FakeJdbc(
+            tags = emptyList(),
+            versions = listOf(
+                row("id" to 3, "tagId" to 1, "status" to MigrationVersionState.STATUS_MIGRATE_STARTED, "message" to null),
+                row("id" to 19, "tagId" to 4, "status" to MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD, "message" to "recording"),
+                row("id" to 11, "tagId" to 3, "status" to MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN, "message" to null),
+            ),
+            migrations = emptyList(),
+        )
+
+        val result = reader.readLatestVersion(scope(jdbc.connection), lastIncompleteVersion = true)
+
+        assertEquals(
+            MigrationHistoryVersion(19, 4, MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD, "recording"),
+            assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result,
+        )
+    }
+
+    @Test
+    fun `incomplete version query returns null when every version is completed`() {
+        val jdbc = FakeJdbc(
+            tags = emptyList(),
+            versions = listOf(
+                row("id" to 8, "tagId" to 2, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED, "message" to null),
+                row("id" to 20, "tagId" to 7, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED, "message" to null),
+            ),
+            migrations = emptyList(),
+        )
+
+        val result = reader.readLatestVersion(scope(jdbc.connection), lastIncompleteVersion = true)
+
+        assertNull(assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(result).result)
+    }
+
+    @Test
+    fun `latest version query preserves every known and unknown raw status`() {
+        listOf(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+            MigrationVersionState.STATUS_MIGRATE_COMPLETED,
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+            9876,
+        ).forEach { status ->
+            val jdbc = FakeJdbc(
+                tags = emptyList(),
+                versions = listOf(row("id" to 1, "tagId" to 2, "status" to status, "message" to null)),
+                migrations = emptyList(),
+            )
+
+            val result = reader.readLatestVersion(scope(jdbc.connection))
+            val latest = assertIs<ExecuteResult.Success<MigrationHistoryVersion?>>(
+                result,
+                (result as? ExecuteResult.Failure)?.exception?.stackTraceToString().orEmpty(),
+            ).result
+
+            assertEquals(status, latest?.status)
+        }
+    }
+
+    @Test
+    fun `latest version read failure remains recorded by the supplied operation scope`() {
+        val failure = SQLException("latest version read failed")
+        val jdbc = FakeJdbc(emptyList(), emptyList(), emptyList(), failTable = "version", failure = failure)
+        val scope = scope(jdbc.connection)
+
+        val result = reader.readLatestVersion(scope)
+
+        assertSame(failure, assertIs<ExecuteResult.Failure>(result).exception)
+        assertSame(failure, scope.firstFailure)
+        assertEquals(1, jdbc.executedSql.size)
+    }
+
+    @Test
     fun `empty tables produce an empty snapshot`() {
         val snapshot = success(FakeJdbc(emptyList(), emptyList(), emptyList()))
 
@@ -220,6 +417,7 @@ class MigrationVersionHistoryReaderTest {
         var transactionControlCount = 0
             private set
         val executedSql = mutableListOf<String>()
+        val executedParameters = mutableListOf<List<Any?>>()
 
         val connection: Connection = proxy(Connection::class.java) { method, args ->
             when (method.name) {
@@ -242,24 +440,32 @@ class MigrationVersionHistoryReaderTest {
             }
         }
 
-        private fun statement(sql: String): PreparedStatement = proxy(PreparedStatement::class.java) { method, _ ->
-            when (method.name) {
-                "executeQuery" -> {
-                    val table = tableFor(sql)
-                    if (table == failTable) throw requireNotNull(failure)
-                    val rows = when (table) {
-                        "tag" -> tags
-                        "version" -> versions
-                        else -> migrations
+        private fun statement(sql: String): PreparedStatement {
+            val parameters = sortedMapOf<Int, Any?>()
+            return proxy(PreparedStatement::class.java) { method, args ->
+                when (method.name) {
+                    "setObject", "setInt", "setString", "setLong" -> {
+                        parameters[args[0] as Int] = args[1]
+                        null
                     }
-                    resultSet(sql, rows)
+                    "executeQuery" -> {
+                        executedParameters += parameters.values.toList()
+                        val table = tableFor(sql)
+                        if (table == failTable) throw requireNotNull(failure)
+                        val rows = when (table) {
+                            "tag" -> tags
+                            "version" -> versions
+                            else -> migrations
+                        }
+                        resultSet(sql, if (table == "version") selectVersionRows(sql, rows, parameters.values.toList()) else rows)
+                    }
+                    "close" -> {
+                        statementCloseCount++
+                        null
+                    }
+                    "isClosed" -> false
+                    else -> defaultValue(method.returnType)
                 }
-                "close" -> {
-                    statementCloseCount++
-                    null
-                }
-                "isClosed" -> false
-                else -> defaultValue(method.returnType)
             }
         }
 
@@ -292,6 +498,33 @@ class MigrationVersionHistoryReaderTest {
                 "system_migration_tag" in lower -> "tag"
                 "system_migration_version" in lower -> "version"
                 else -> "migration"
+            }
+        }
+
+        /** Mimics the Version SELECT's database filtering, ordering, and LIMIT semantics. */
+        private fun selectVersionRows(
+            sql: String,
+            rows: List<Map<String, Any?>>,
+            parameters: List<Any?>,
+        ): List<Map<String, Any?>> {
+            val lower = sql.lowercase()
+            val incompleteOnly = Regex("status\\s*(?:<>|!=)\\s*\\?").containsMatchIn(lower)
+            val idFilter = Regex("smv\\.id\\s*=\\s*\\?").containsMatchIn(lower)
+            var selected = if (incompleteOnly) {
+                rows.filter {
+                    (it["status"] as? Number)?.toInt() != MigrationVersionState.STATUS_MIGRATE_COMPLETED
+                }
+            } else {
+                rows
+            }
+            if (idFilter) {
+                val selectedId = parameters.firstOrNull() as? Int
+                selected = selected.filter { (it["id"] as? Number)?.toInt() == selectedId }
+            }
+            return if ("order by" in lower && "limit 1" in lower) {
+                selected.sortedByDescending { (it["id"] as? Number)?.toInt() ?: Int.MIN_VALUE }.take(1)
+            } else {
+                selected
             }
         }
     }

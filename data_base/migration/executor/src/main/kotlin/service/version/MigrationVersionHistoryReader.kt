@@ -5,6 +5,7 @@ import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrat
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationVersionQuery
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.ast.enums.DataType
+import gog.my_project.data_base_query.api.tools.enums.SqlOrderType
 import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.QueryRow
@@ -38,7 +39,7 @@ internal class MigrationVersionHistoryReader {
         )
     }
 
-    private fun readTags(scope: OperationExecutionScope): ExecuteResult<List<MigrationHistoryTag>> {
+    fun readTags(scope: OperationExecutionScope): ExecuteResult<List<MigrationHistoryTag>> {
         val cte = SystemMigrationTagQuery().createCte(SystemMigrationTagQuery.RelationFilters())
         return read(scope, cte.definition.ast) { row ->
             MigrationHistoryTag(
@@ -52,13 +53,63 @@ internal class MigrationVersionHistoryReader {
     fun readVersions(scope: OperationExecutionScope): ExecuteResult<List<MigrationHistoryVersion>> {
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
-        val cte = SystemMigrationVersionQuery().createCte(SystemMigrationVersionQuery.RelationFilters())
+        val cte = SystemMigrationVersionQuery().createExecutionStateCte()
         return read(scope, cte.definition.ast) { row ->
-            MigrationHistoryVersion(
-                id = row.requiredInt("id", "Migration Version query returned a null id"),
-                tagId = row.requiredInt("tagId", "Migration Version query returned a null tagId"),
-                status = row.requiredInt("status", "Migration Version query returned a null status"),
-            )
+            row.toMigrationHistoryVersion(includeMessage = false, includeCheckpoint = true)
+        }
+    }
+
+    /** Reads only the latest persisted Version using the shared Version CTE and query path. */
+    fun readLatestVersion(
+        scope: OperationExecutionScope,
+        lastIncompleteVersion: Boolean = false,
+    ): ExecuteResult<MigrationHistoryVersion?> {
+        scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
+
+        val cte = SystemMigrationVersionQuery().createStateCte(lastIncompleteVersion)
+        return readSelectedVersion(scope, cte)
+    }
+
+    /** Reads one Version by its persisted primary key, retaining its raw status and message. */
+    fun readVersionById(
+        scope: OperationExecutionScope,
+        versionId: Int,
+    ): ExecuteResult<MigrationHistoryVersion?> {
+        scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
+
+        val cte = SystemMigrationVersionQuery().createStateCte(versionId)
+        return readSelectedVersion(scope, cte)
+    }
+
+    private fun readSelectedVersion(
+        scope: OperationExecutionScope,
+        cte: gog.my_project.data_base_query.api.interfaces.relations.Cte,
+    ): ExecuteResult<MigrationHistoryVersion?> {
+        val query = QueryRenderSelectBuilder(ast = cte.definition.ast)
+            .order {
+                addColumn { columnSelector("id") }
+                // orderDesc() currently renders ASC; use the explicit enum until that builder is fixed.
+                orderType(SqlOrderType.Desc)
+            }
+            .limit { setOptionLimit(1) }
+
+        return when (
+            val result = read(scope, query.ast) { row ->
+                row.toMigrationHistoryVersion(includeMessage = true, includeCheckpoint = true)
+            }
+        ) {
+            is ExecuteResult.Failure -> result
+            is ExecuteResult.Success -> try {
+                ExecuteResult.Success(
+                    requireNotNull(result.result) { "System Migration Version query returned no rows collection" }
+                        .firstOrNull(),
+                )
+            } catch (error: Error) {
+                scope.recordFatal(error)
+                throw error
+            } catch (failure: Throwable) {
+                scope.failed(failure)
+            }
         }
     }
 
@@ -128,4 +179,28 @@ internal class MigrationVersionHistoryReader {
 
     private fun QueryRow.requiredString(alias: String, failureMessage: String): String =
         requireNotNull(this[alias] as? String) { failureMessage }
+
+    private fun QueryRow.toMigrationHistoryVersion(
+        includeMessage: Boolean,
+        includeCheckpoint: Boolean = false,
+    ): MigrationHistoryVersion =
+        MigrationHistoryVersion(
+            id = requiredInt("id", "Migration Version query returned a null id"),
+            tagId = requiredInt("tagId", "Migration Version query returned a null tagId"),
+            status = requiredInt("status", "Migration Version query returned a null status"),
+            message = if (includeMessage) {
+                this["message"]?.let { value ->
+                    value as? String ?: throw IllegalArgumentException("Migration Version message was not a String")
+                }
+            } else {
+                null
+            },
+            retryCheckpoint = if (includeCheckpoint) {
+                this["retryCheckpoint"]?.let { value ->
+                    value as? String ?: throw IllegalArgumentException("Migration Version checkpoint was not a String")
+                }
+            } else {
+                null
+            },
+        )
 }

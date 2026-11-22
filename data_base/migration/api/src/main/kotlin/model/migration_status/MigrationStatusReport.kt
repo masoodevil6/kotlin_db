@@ -137,6 +137,8 @@ class MigrationStatusReport(
             UNKNOWN_PERSISTED_TAG,
             VERSION_ORDER_MISMATCH,
             UNEXPECTED_HISTORY_FOR_VERSION,
+            MANUAL_RECOVERY_REQUIRED_UP,
+            MANUAL_RECOVERY_REQUIRED_DOWN,
         }
     }
 }

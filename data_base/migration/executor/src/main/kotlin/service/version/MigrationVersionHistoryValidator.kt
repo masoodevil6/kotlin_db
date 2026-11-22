@@ -1,5 +1,6 @@
 package gog.my_project.data_base_migration.executor.service.version
 
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
@@ -20,6 +21,7 @@ import java.util.Collections
 internal class MigrationVersionHistoryValidator(
     private val preparationService: MigrationVersionPreparationService = MigrationVersionPreparationService(),
 ) {
+    private val checkpointStatusValidator = MigrationCheckpointStatusValidator()
     fun validateConfiguration(
         configuration: MigrationConfiguration,
         snapshot: MigrationVersionHistorySnapshot,
@@ -193,9 +195,22 @@ internal class MigrationVersionHistoryValidator(
         val duplicateVersionTags = snapshot.versions.groupBy(MigrationHistoryVersion::tagId).filterValues { it.size > 1 }
         if (duplicateVersionTags.isNotEmpty()) invalid("More than one persisted Version references the same Version Tag")
         snapshot.versions.forEach { version ->
-            if (version.status != MigrationHistoryVersion.STATUS_MIGRATE_COMPLETED) {
-                invalid(
-                    "Persisted Migration Version ${version.id} has non-completed status ${version.status}",
+            val checkpointAssessment = checkpointStatusValidator.assess(version.status, version.retryCheckpoint)
+            when (checkpointAssessment.kind) {
+                MigrationCheckpointStatusKind.UP_MANUAL_RECOVERY -> invalid(
+                    "Persisted Migration Version ${version.id} requires manual UP recovery; automatic Migration execution is blocked",
+                )
+                MigrationCheckpointStatusKind.DOWN_MANUAL_RECOVERY -> invalid(
+                    "Persisted Migration Version ${version.id} requires manual DOWN recovery; automatic Migration execution is blocked",
+                )
+                MigrationCheckpointStatusKind.COMPLETED -> Unit
+                MigrationCheckpointStatusKind.INVALID -> invalid(
+                    "Persisted Migration Version ${version.id} has invalid Status/Checkpoint: " +
+                        checkpointAssessment.reason,
+                )
+                else -> invalid(
+                    "Persisted Migration Version ${version.id} has non-completed status ${version.status}; " +
+                        "normal Migration execution is blocked",
                 )
             }
             val tag = tagsById[version.tagId]

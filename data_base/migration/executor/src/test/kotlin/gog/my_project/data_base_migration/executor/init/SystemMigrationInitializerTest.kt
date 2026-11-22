@@ -11,6 +11,7 @@ import gog.my_project.data_base_operation.executor.transaction.OperationExecutio
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
+import java.sql.ResultSet
 import java.sql.SQLException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -31,10 +32,14 @@ class SystemMigrationInitializerTest {
         val result = initializer.init(testScope(connection))
 
         assertEquals(ExecuteResult.Success(true), result)
-        assertEquals(3, statements.size)
+        assertEquals(4, statements.size)
         assertTrue(statements[0].contains(SystemMigrationTagTable.NAME))
         assertTrue(statements[1].contains(SystemMigrationVersionTable.NAME))
-        assertTrue(statements[2].contains(SystemMigrationTable.NAME))
+        assertTrue(statements[2].contains("information_schema.COLUMNS", ignoreCase = true))
+        assertTrue(statements[2].contains("TABLE_NAME", ignoreCase = true))
+        assertTrue(statements[2].contains("COLUMN_NAME", ignoreCase = true))
+        assertTrue(statements[3].contains(SystemMigrationTable.NAME))
+        assertTrue(statements.none { it.contains("ALTER TABLE", ignoreCase = true) })
         assertTrue(statementConnections.all { it === connection })
         assertEquals(0, events.count { it.startsWith("autoCommit:") })
         assertEquals(0, events.count { it == "commit" })
@@ -92,7 +97,7 @@ class SystemMigrationInitializerTest {
 
         assertSame(originalFailure, assertIs<ExecuteResult.Failure>(result).exception)
         assertSame(originalFailure, scope.firstFailure)
-        assertEquals(3, statements.size)
+        assertEquals(4, statements.size)
         assertEquals(0, events.count { it == "autoCommit:false" })
         assertEquals(0, events.count { it == "commit" })
         assertEquals(0, events.count { it == "rollback" })
@@ -111,12 +116,35 @@ class SystemMigrationInitializerTest {
         assertEquals(ExecuteResult.Success(true), initializer.init(scope))
         assertEquals(ExecuteResult.Success(true), initializer.init(scope))
 
-        assertEquals(6, statements.size)
-        assertTrue(statements.all { it.contains("IF NOT EXISTS", ignoreCase = true) })
+        assertEquals(8, statements.size)
+        assertEquals(6, statements.count { it.contains("CREATE TABLE", ignoreCase = true) })
+        assertTrue(statements.filter { it.contains("CREATE TABLE", ignoreCase = true) }
+            .all { it.contains("IF NOT EXISTS", ignoreCase = true) })
         assertEquals(0, events.count { it == "autoCommit:false" })
         assertEquals(0, events.count { it == "commit" })
         assertEquals(0, events.count { it == "rollback" })
         assertEquals(0, events.count { it == "connection-close" })
+    }
+
+    @Test
+    fun `missing checkpoint column fails unmanaged scope before history creation`() {
+        val events = mutableListOf<String>()
+        val statements = mutableListOf<String>()
+        val statementConnections = mutableListOf<Connection>()
+        val connection = fakeConnection(
+            events,
+            statements,
+            statementConnections,
+            checkpointColumnPresent = false,
+        )
+        val scope = testScope(connection)
+
+        val result = SystemMigrationInitializer().init(scope)
+
+        val failure = assertIs<ExecuteResult.Failure>(result).exception
+        assertTrue(failure.message.orEmpty().contains("canonical DatabaseIdentity"))
+        assertTrue(statements.none { it.contains(tableReference(SystemMigrationTable.NAME)) })
+        assertTrue(statements.none { it.contains("ALTER TABLE", ignoreCase = true) })
     }
 
     private fun testScope(connection: Connection) =
@@ -130,6 +158,7 @@ class SystemMigrationInitializerTest {
         statementConnections: MutableList<Connection>,
         failWhenSqlContains: String? = null,
         failure: SQLException? = null,
+        checkpointColumnPresent: Boolean = true,
     ): Connection {
         lateinit var connection: Connection
         connection = Proxy.newProxyInstance(
@@ -145,7 +174,7 @@ class SystemMigrationInitializerTest {
                     val sql = args!![0] as String
                     statements += sql
                     statementConnections += connection
-                    fakeStatement(events, sql, failWhenSqlContains, failure)
+                    fakeStatement(events, sql, failWhenSqlContains, failure, checkpointColumnPresent)
                 }
                 "commit" -> {
                     events += "commit"
@@ -171,6 +200,7 @@ class SystemMigrationInitializerTest {
         sql: String,
         failWhenSqlContains: String?,
         failure: SQLException?,
+        checkpointColumnPresent: Boolean,
     ): PreparedStatement = Proxy.newProxyInstance(
         javaClass.classLoader,
         arrayOf(PreparedStatement::class.java),
@@ -183,6 +213,10 @@ class SystemMigrationInitializerTest {
                 }
                 true
             }
+            "executeQuery" -> {
+                events += "execute-query"
+                fakeColumnProbeResultSet(if (checkpointColumnPresent) 1L else 0L)
+            }
             "close" -> {
                 events += "statement-close"
                 null
@@ -191,6 +225,23 @@ class SystemMigrationInitializerTest {
             else -> defaultValue(method.returnType)
         }
     } as PreparedStatement
+
+    private fun fakeColumnProbeResultSet(columnCount: Long): ResultSet {
+        var index = -1
+        return Proxy.newProxyInstance(
+            javaClass.classLoader,
+            arrayOf(ResultSet::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "next" -> ++index == 0
+                "getString" -> if (args?.firstOrNull() == "selected_schema") "test_db" else null
+                "getLong" -> if (args?.firstOrNull() == "column_count") columnCount else 0L
+                "close" -> null
+                "isClosed" -> false
+                else -> defaultValue(method.returnType)
+            }
+        } as ResultSet
+    }
 
     private fun defaultValue(type: Class<*>): Any? = when (type) {
         java.lang.Boolean.TYPE -> false

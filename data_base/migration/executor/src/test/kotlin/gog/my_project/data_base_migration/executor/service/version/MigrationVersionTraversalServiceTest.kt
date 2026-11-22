@@ -1,6 +1,7 @@
 package gog.my_project.data_base_migration.executor.service.version
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.group.MigrationGroup
 import gog.my_project.data_base_migration.api.registration.group.SingleMigration
@@ -21,6 +22,9 @@ import model.version_history.MigrationHistoryTag
 import model.version_history.MigrationHistoryVersion
 import model.version_history.MigrationVersionHistorySnapshot
 import model.prepared.PreparedMigrationVersion
+import model.retry.MigrationRetryCheckpoint
+import model.retry.MigrationRetryCheckpointCodec
+import model.retry.MigrationRetryPhase
 import service.version.MigrationVersionPreparationService
 import kotlin.reflect.KClass
 import java.lang.reflect.Proxy
@@ -139,18 +143,54 @@ class MigrationVersionTraversalServiceTest {
             .prepare(configuration.registrations.single { it.name == "v1" })
             .migrations
 
-        listOf(0, 1, 2, 4, 5, 6, 99).forEach { status ->
+        listOf(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+            MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN,
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+            99,
+        ).forEach { status ->
+            val retryCheckpoint = checkpointForStatus(status)
+            val invalid = MigrationVersionHistorySnapshot(
+                base.tags,
+                base.versions.map { it.copy(status = status, retryCheckpoint = retryCheckpoint) },
+                base.migrations,
+            )
+
+            val expectedMessage = if (status == 99) {
+                "Unknown Migration Version status $status"
+            } else {
+                "non-completed status $status"
+            }
+            assertInvalid(invalid, expectedMessage)
+            val rollbackFailure = assertFailsWith<IllegalStateException> {
+                historyValidator.validateVersion(invalid, VERSION_ID_1, migrations)
+            }
+            assertTrue(rollbackFailure.message.orEmpty().contains(expectedMessage))
+        }
+    }
+
+    @Test
+    fun manualRecoveryStatusesHaveExplicitValidatorRejections() {
+        val base = snapshot(1)
+        listOf(
+            MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED to "manual UP recovery",
+            MigrationVersionState.STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED to "manual DOWN recovery",
+        ).forEach { (status, expectedMessage) ->
             val invalid = MigrationVersionHistorySnapshot(
                 base.tags,
                 base.versions.map { it.copy(status = status) },
                 base.migrations,
             )
 
-            assertInvalid(invalid, "non-completed status $status")
-            val rollbackFailure = assertFailsWith<IllegalStateException> {
-                historyValidator.validateVersion(invalid, VERSION_ID_1, migrations)
+            assertInvalid(invalid, expectedMessage)
+            val failure = assertFailsWith<IllegalStateException> {
+                historyValidator.validateVersion(invalid, VERSION_ID_1, emptyList())
             }
-            assertTrue(rollbackFailure.message.orEmpty().contains("non-completed status $status"))
+            assertTrue(failure.message.orEmpty().contains(expectedMessage))
+            assertTrue(failure.message.orEmpty().contains("automatic Migration execution is blocked"))
         }
     }
 
@@ -486,6 +526,31 @@ class MigrationVersionTraversalServiceTest {
             historyValidator.validateConfiguration(configuration, snapshot)
         }
         assertTrue(failure.message.orEmpty().contains(messagePart, ignoreCase = true), failure.message)
+    }
+
+    private fun checkpointForStatus(status: Int): String? {
+        val up = status == MigrationVersionState.STATUS_MIGRATE_STARTED ||
+            status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+        val down = status == MigrationVersionState.STATUS_ROLLBACK_STARTED ||
+            status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+        if (!up && !down) return null
+        val recordingFailure = status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD ||
+            status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+        return MigrationRetryCheckpointCodec.encode(
+            MigrationRetryCheckpoint(
+                formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+                revision = 0,
+                originalStatus = if (up) {
+                    MigrationVersionState.STATUS_MIGRATE_STARTED
+                } else {
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED
+                },
+                originalMessage = if (recordingFailure) "original diagnostic" else null,
+                cursorMigrationId = "migration_one",
+                phase = if (recordingFailure) MigrationRetryPhase.RECORD_PENDING
+                else MigrationRetryPhase.EXECUTION_PENDING,
+            ),
+        )
     }
 
     private fun traversalVersion(name: String) =

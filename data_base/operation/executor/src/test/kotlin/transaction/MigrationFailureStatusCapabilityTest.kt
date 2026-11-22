@@ -11,6 +11,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfi
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCommand
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCapability
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCommand
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusWriteResult
@@ -62,10 +63,10 @@ class MigrationFailureStatusCapabilityTest {
         )
 
         val transitions = listOf(
-            Transition(MigrationFailureStatusCommand.UpExecutionFailure(11), 1, 0, MigrationFailureDiagnosticStage.UP_EXECUTION),
-            Transition(MigrationFailureStatusCommand.UpRecordingFailure(12), 2, 0, MigrationFailureDiagnosticStage.UP_RECORDING),
-            Transition(MigrationFailureStatusCommand.DownExecutionFailure(13), 5, 4, MigrationFailureDiagnosticStage.DOWN_EXECUTION),
-            Transition(MigrationFailureStatusCommand.DownRecordingFailure(14), 6, 4, MigrationFailureDiagnosticStage.DOWN_RECORDING),
+            Transition(MigrationFailureStatusCommand.UpExecutionFailure(11), 110, 100, MigrationFailureDiagnosticStage.UP_EXECUTION),
+            Transition(MigrationFailureStatusCommand.UpRecordingFailure(12), 110, 100, MigrationFailureDiagnosticStage.UP_RECORDING),
+            Transition(MigrationFailureStatusCommand.DownExecutionFailure(13), 210, 200, MigrationFailureDiagnosticStage.DOWN_EXECUTION),
+            Transition(MigrationFailureStatusCommand.DownRecordingFailure(14), 210, 200, MigrationFailureDiagnosticStage.DOWN_RECORDING),
         )
 
         transitions.forEach { transition ->
@@ -110,6 +111,184 @@ class MigrationFailureStatusCapabilityTest {
     }
 
     @Test
+    fun `checkpoint capability emits each closed status and checkpoint CAS on the owning Connection`() {
+        data class Transition(
+            val command: MigrationFailureCheckpointWriteCommand,
+            val targetStatus: Int,
+            val expectedStatus: Int,
+        )
+
+        val diagnostic = MigrationFailureDiagnostic(
+            stage = MigrationFailureDiagnosticStage.UP_RECORDING,
+            exceptionClassName = "java.sql.SQLException",
+            sqlState = "42000",
+            vendorErrorCode = 1064,
+            message = "migration metadata write failed",
+            migrationId = "create_tables",
+        ).toStorageMessage(71)
+        val expectedCheckpoint = "{\"version\":\"expected\"}"
+        val updatedCheckpoint = "{\"version\":\"updated\"}"
+        val transitions = listOf(
+            Transition(
+                MigrationFailureCheckpointWriteCommand.UpExecutionUncertain(71, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                110,
+                100,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.UpReconciliationInconsistent(72, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                110,
+                100,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.UpRecordingFailure(73, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                102,
+                100,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.UpFinalizationFailure(74, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                102,
+                100,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.DownExecutionUncertain(75, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                210,
+                200,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.DownReconciliationInconsistent(76, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                210,
+                200,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.DownRecordingFailure(77, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                202,
+                200,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.DownFinalizationFailure(78, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                202,
+                200,
+            ),
+        )
+
+        transitions.forEach { transition ->
+            val script = JdbcScript()
+            val primary = IllegalStateException("latched Migration failure")
+            var writeResult: MigrationFailureStatusWriteResult? = null
+
+            val result = runManaged(script) { scope ->
+                scope.withMigrationFailureCheckpointCapability(1) { capability ->
+                    scope.recordFailure(primary)
+                    writeResult = capability.writeCheckpoint(transition.command)
+                    ExecuteResult.Success(Unit)
+                }
+            }
+
+            assertSame(primary, assertIs<ExecuteResult.Failure>(result).exception)
+            assertEquals(MigrationFailureStatusWriteResult.APPLIED, writeResult)
+            val update = script.updates.single()
+            assertEquals(
+                "UPDATE system_migration_version SET status = ?, message = ?, retry_checkpoint = ? " +
+                    "WHERE id = ? AND status = ? AND CAST(retry_checkpoint AS BINARY) = CAST(? AS BINARY)",
+                update.statement.sql,
+            )
+            assertEquals(
+                listOf(
+                    transition.targetStatus,
+                    diagnostic,
+                    updatedCheckpoint,
+                    transition.command.versionId,
+                    transition.expectedStatus,
+                    expectedCheckpoint,
+                ),
+                update.bindings.map { it.value },
+            )
+            assertEquals(listOf(1, 2, 3, 4, 5, 6), update.bindings.map { it.index })
+            assertEquals(
+                listOf(Types.INTEGER, Types.VARCHAR, Types.VARCHAR, Types.INTEGER, Types.INTEGER, Types.VARCHAR),
+                update.bindings.map { it.sqlType },
+            )
+            assertTrue(script.usedConnections.all { it === script.connection })
+        }
+    }
+
+    @Test
+    fun `legacy and checkpoint capability methods consume one shared one shot state`() {
+        listOf(true, false).forEach { checkpointFirst ->
+            val script = JdbcScript()
+            val primary = IllegalStateException("latched failure")
+            var firstResult: MigrationFailureStatusWriteResult? = null
+            var duplicateFailure: Throwable? = null
+
+            val result = runManaged(script) { scope ->
+                scope.withMigrationFailureCheckpointCapability(1) { capability ->
+                    scope.recordFailure(primary)
+                    firstResult = if (checkpointFirst) {
+                        capability.writeCheckpoint(checkpointCommand())
+                    } else {
+                        capability.write(MigrationFailureStatusCommand.UpExecutionFailure(81))
+                    }
+                    duplicateFailure = runCatching {
+                        if (checkpointFirst) {
+                            capability.write(MigrationFailureStatusCommand.UpExecutionFailure(81))
+                        } else {
+                            capability.writeCheckpoint(checkpointCommand())
+                        }
+                    }.exceptionOrNull()
+                    ExecuteResult.Success(Unit)
+                }
+            }
+
+            assertSame(primary, assertIs<ExecuteResult.Failure>(result).exception)
+            assertEquals(MigrationFailureStatusWriteResult.APPLIED, firstResult)
+            assertIs<IllegalStateException>(duplicateFailure)
+            assertEquals(1, script.updates.size)
+        }
+    }
+
+    @Test
+    fun `checkpoint write failure remains secondary to the original failure`() {
+        val statusWriteFailure = SQLException("checkpoint UPDATE failed")
+        val script = JdbcScript(updateFailure = statusWriteFailure)
+        val primary = IllegalStateException("original failure")
+        var writeResult: MigrationFailureStatusWriteResult? = null
+
+        val result = runManaged(script) { scope ->
+            scope.withMigrationFailureCheckpointCapability(1) { capability ->
+                scope.recordFailure(primary)
+                writeResult = capability.writeCheckpoint(checkpointCommand())
+                ExecuteResult.Success(Unit)
+            }
+        }
+
+        assertSame(primary, assertIs<ExecuteResult.Failure>(result).exception)
+        assertEquals(MigrationFailureStatusWriteResult.INDETERMINATE, writeResult)
+        assertTrue(primary.suppressed.any { it === statusWriteFailure })
+        assertEquals(1, script.updates.size)
+    }
+
+    @Test
+    fun `fatal checkpoint UPDATE error preserves exact identity and original failure`() {
+        val fatal = AssertionError("fatal checkpoint UPDATE")
+        val script = JdbcScript(updateFailure = fatal)
+        val primary = IllegalStateException("original failure")
+
+        val thrown = assertFailsWith<AssertionError> {
+            runManaged(script) { scope ->
+                scope.withMigrationFailureCheckpointCapability(1) { capability ->
+                    scope.recordFailure(primary)
+                    capability.writeCheckpoint(checkpointCommand())
+                    ExecuteResult.Success(Unit)
+                }
+            }
+        }
+
+        assertSame(fatal, thrown)
+        assertTrue(fatal.suppressed.any { it === primary })
+        assertEquals(1, script.updates.size)
+    }
+
+    @Test
     fun `diagnostic with absent message retains structured fields and legacy write stays status only`() {
         val diagnostic = MigrationFailureDiagnostic(
             stage = MigrationFailureDiagnosticStage.UP_EXECUTION,
@@ -146,7 +325,7 @@ class MigrationFailureStatusCapabilityTest {
 
         assertSame(primary, assertIs<ExecuteResult.Failure>(result).exception)
         assertEquals("UPDATE system_migration_version SET status = ? WHERE id = ? AND status = ?", script.updates.single().statement.sql)
-        assertEquals(listOf(1, 21, 0), script.updates.single().bindings.map { it.value })
+        assertEquals(listOf(110, 21, 100), script.updates.single().bindings.map { it.value })
     }
 
     @Test
@@ -415,7 +594,7 @@ class MigrationFailureStatusCapabilityTest {
         assertIs<IllegalStateException>(staleFailure)
         assertSame(newPrimary, assertIs<ExecuteResult.Failure>(result).exception)
         assertTrue(oldScript.updates.isEmpty())
-        assertEquals(listOf(1, 51, 0), newScript.updates.single().bindings.map { it.value })
+        assertEquals(listOf(110, 51, 100), newScript.updates.single().bindings.map { it.value })
     }
 
     @Test
@@ -617,6 +796,13 @@ class MigrationFailureStatusCapabilityTest {
             context.close()
         }
     }
+
+    private fun checkpointCommand() = MigrationFailureCheckpointWriteCommand.UpRecordingFailure(
+        versionId = 81,
+        expectedCheckpoint = "{\"phase\":\"RECORD_PENDING\"}",
+        updatedCheckpoint = "{\"phase\":\"RECORD_PENDING\",\"revision\":1}",
+        diagnosticMessage = "{\"schemaVersion\":1,\"message\":\"failure\"}",
+    )
 
     private data class Binding(val index: Int, val value: Any?, val sqlType: Int)
     private data class UpdateCall(val statement: PreparedCall, val bindings: List<Binding>)

@@ -3,6 +3,7 @@ package gog.my_project.data_base_migration.facade
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionSelection
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
@@ -19,10 +20,23 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class MigrationFacadeTest {
     private val migrationVersionTag = object : MigrationVersionTag {
         override val value: String = "v1"
+    }
+
+    @Test
+    fun `state keeps legacy JVM methods and adds typed selection overloads`() {
+        val stateMethods = MigrationFacade::class.java.declaredMethods.filter { it.name == "state" }
+
+        assertTrue(stateMethods.any { it.parameterCount == 0 })
+        assertTrue(stateMethods.any { it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType)) })
+        assertTrue(stateMethods.any {
+            it.parameterTypes.contentEquals(arrayOf(MigrationVersionSelection::class.java))
+        })
+        assertTrue(stateMethods.any { it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType)) })
     }
 
     @Test

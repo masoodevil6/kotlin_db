@@ -1,6 +1,7 @@
 package gog.my_project.data_base_migration.executor.service.status
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.group.SingleMigration
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
@@ -49,7 +50,9 @@ class MigrationStatusServiceTest {
         CallbackProbeMigration.callbackCount.set(0)
         val jdbc = FakeJdbc(
             appliedV1Rows(),
-            versionRows = listOf(mapOf("id" to 10, "tagId" to 1, "status" to 3)),
+            versionRows = listOf(
+                mapOf("id" to 10, "tagId" to 1, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED),
+            ),
         )
         val scope = newScope(jdbc.connection)
 
@@ -69,7 +72,9 @@ class MigrationStatusServiceTest {
     fun `non-completed persisted version is reported invalid`() {
         val jdbc = FakeJdbc(
             appliedV1Rows(),
-            versionRows = listOf(mapOf("id" to 10, "tagId" to 1, "status" to 0)),
+            versionRows = listOf(
+                mapOf("id" to 10, "tagId" to 1, "status" to MigrationVersionState.STATUS_MIGRATE_STARTED),
+            ),
         )
         val result = MigrationStatusService(configuration).status(newScope(jdbc.connection))
 

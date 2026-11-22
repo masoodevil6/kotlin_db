@@ -1,6 +1,7 @@
 package gog.my_project.data_base_migration.executor.controller
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
 import gog.my_project.data_base_migration.core.tags.MigrationTagTypeCodes
@@ -90,7 +91,9 @@ class MigrationControllerTest {
     @Test
     fun `current propagates invalid History failure`() {
         val invalid = history(appliedVersionCount = 1).copy(
-            versions = listOf(mapOf("id" to 100, "tagId" to 999, "status" to 3)),
+            versions = listOf(
+                mapOf("id" to 100, "tagId" to 999, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED),
+            ),
         )
         val jdbc = historyConnection(invalid)
         val scope = testScope(jdbc.connection)
@@ -180,6 +183,7 @@ class MigrationControllerTest {
                 arrayOf(PreparedStatement::class.java),
             ) { _, statementMethod, _ ->
                 when (statementMethod.name) {
+                    "executeQuery" -> columnExistsResultSet()
                     "execute" -> {
                         if (failure != null) throw failure
                         true
@@ -206,6 +210,23 @@ class MigrationControllerTest {
         }
     } as Connection
 
+    private fun columnExistsResultSet(): ResultSet {
+        var returned = false
+        return Proxy.newProxyInstance(
+            javaClass.classLoader,
+            arrayOf(ResultSet::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "next" -> if (!returned) { returned = true; true } else false
+                "getString" -> "test_schema"
+                "getLong" -> 1L
+                "wasNull" -> false
+                "close" -> null
+                else -> defaultValue(method.returnType)
+            }
+        } as ResultSet
+    }
+
     private fun history(appliedVersionCount: Int): HistoryRows {
         val versions = listOf(
             Triple("v1", 10, 100),
@@ -220,7 +241,7 @@ class MigrationControllerTest {
             )
         }
         val persistedVersions = versions.take(appliedVersionCount).map { (_, tagId, versionId) ->
-            mapOf("id" to versionId, "tagId" to tagId, "status" to 3)
+            mapOf("id" to versionId, "tagId" to tagId, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED)
         }
         return HistoryRows(tags, persistedVersions, emptyList())
     }

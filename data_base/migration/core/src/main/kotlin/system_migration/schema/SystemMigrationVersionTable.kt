@@ -1,5 +1,6 @@
 package gog.my_project.data_base_migration.core.system_migration.schema
 
+import gog.my_project.data_base_migration.core.system_migration.model.SystemMigrationVersionModel
 import gog.my_project.data_base_schema.Schema
 import gog.my_project.data_base_schema.SchemaDataType
 import gog.my_project.data_base_schema.SchemaOperation
@@ -28,10 +29,15 @@ object SystemMigrationVersionTable {
             name("status")
             dataType(SchemaDataType.IntType)
             notNull()
-            default(0)
+            default(SystemMigrationVersionModel.STATUS_MIGRATE_STARTED)
         }
         addColumn {
             name("message")
+            dataType(SchemaDataType.TextType)
+            nullable()
+        }
+        addColumn {
+            name("retry_checkpoint")
             dataType(SchemaDataType.TextType)
             nullable()
         }

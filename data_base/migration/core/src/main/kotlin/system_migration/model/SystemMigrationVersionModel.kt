@@ -18,17 +18,22 @@ internal class SystemMigrationVersionModel : IModelBase {
     @QBColumn(name = "message", alias = "system_migration_version_message")
     val message: String? = null
 
+    @QBColumn(name = "retry_checkpoint", alias = "system_migration_version_retry_checkpoint")
+    val retryCheckpoint: String? = null
+
     @QBColumn(name = "created_at", alias = "system_migration_version_created_at")
     val createdAt: String? = null
 
     companion object {
-        const val STATUS_MIGRATE_STARTED = 0
-        const val STATUS_MIGRATE_FAILED_UP = 1
-        const val STATUS_MIGRATE_FAILED_RECORD = 2
-        const val STATUS_MIGRATE_COMPLETED = 3
+        const val STATUS_MIGRATE_STARTED = 100
+        const val STATUS_MIGRATE_FAILED_UP = 101
+        const val STATUS_MIGRATE_FAILED_RECORD = 102
+        const val STATUS_MIGRATE_COMPLETED = 103
+        const val STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED = 110
 
-        const val STATUS_ROLLBACK_STARTED = 4
-        const val STATUS_ROLLBACK_FAILED_DOWN = 5
-        const val STATUS_ROLLBACK_FAILED_RECORD = 6
+        const val STATUS_ROLLBACK_STARTED = 200
+        const val STATUS_ROLLBACK_FAILED_DOWN = 201
+        const val STATUS_ROLLBACK_FAILED_RECORD = 202
+        const val STATUS_ROLLBACK_MANUAL_RECOVERY_REQUIRED = 210
     }
 }

@@ -2,28 +2,29 @@ package gog.my_project.data_base_migration.executor.service.version
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.item.RegisteredMigration
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationTagQuery
 import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrationVersionQuery
 import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationTagInsertQuery
-import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationVersionDeleteQuery
-import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationVersionInsertQuery
-import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationVersionUpdateQuery
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_migration.executor.service.run.PreparedMigration
 import gog.my_project.data_base_migration.executor.service.run.MigrationRunService
 import gog.my_project.data_base_migration.executor.service.run.MigrationRunOutcome
 import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
+import model.retry.MigrationRetryCheckpoint
+import model.retry.MigrationRetryCheckpointCodec
+import model.retry.MigrationRetryPhase
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCapability
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCommand
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCapability
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCommand
 import gog.my_project.data_base_operation.migration.failure.spi.write
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
-import gog.my_project.data_base_query.api.interfaces.api.delete_api.query_render_delete.IQueryRenderDeleteApi
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
-import gog.my_project.data_base_query.api.interfaces.api.update_api.query_render_update.IQueryRenderUpdateApi
 import gog.my_project.data_base_query.builder.ast.select_builder.query_render_select.QueryRenderSelectBuilder
 import gog.my_project.data_base_query.executor.manager.QueryBuilderExecutor
 import gog.my_project.data_base_query.executor.result.QueryRow
@@ -41,6 +42,7 @@ internal class MigrationVersionTransactionService(
     private val migrationRunService = MigrationRunService()
     private val historyReader = MigrationVersionHistoryReader()
     private val historyValidator = MigrationVersionHistoryValidator(preparationService)
+    private val checkpointPersistence = MigrationVersionCheckpointPersistence()
 
     /** Applies one registered Version directly on the supplied Operation scope. */
     fun transactionUp(
@@ -115,13 +117,131 @@ internal class MigrationVersionTransactionService(
         val tagId = resolveVersionTagForUp(scope, versionTag)
             ?: return@safely failureResult(scope)
 
-        val versionId = insertVersion(scope, tagId)
+        val orderedMigrations = prepared.migrations
+        var checkpoint = initialCheckpoint(
+            MigrationVersionState.STATUS_MIGRATE_STARTED,
+            orderedMigrations.firstOrNull()?.id?.value,
+        )
+        val initialCheckpointJson = MigrationRetryCheckpointCodec.encode(checkpoint)
+        val versionId = checkpointPersistence.insertUpVersion(scope, tagId, initialCheckpointJson)
+            .valueOrNull(scope)
             ?: return@safely failureResult(scope)
+        when (val flow = runUpVersionFlow(
+            scope = scope,
+            versionTag = versionTag,
+            versionId = versionId,
+            orderedMigrations = orderedMigrations,
+            preparedMigrations = preparedMigrations,
+            startIndex = 0,
+            initialCheckpoint = checkpoint,
+            failureStatusCapability = failureStatusCapability,
+            prepareBeforeSchemaBoundary = false,
+            pauseAfterOneBoundary = false,
+        )) {
+            is ExecuteResult.Failure -> ExecuteResult.Failure(flow.exception)
+            is ExecuteResult.Success -> when (requireNotNull(flow.result)) {
+                MigrationVersionFlowOutcome.Completed -> ExecuteResult.Success(true)
+                MigrationVersionFlowOutcome.Paused -> fail(scope, "Normal UP flow cannot pause")
+            }
+        }
+    }
 
-        for ((index, migration) in prepared.migrations.withIndex()) {
-            val runOutcome = preparedMigrations?.let { runtimeMigrations ->
-                migrationRunService.runUpAttempt(versionTag, versionId, scope, runtimeMigrations[index])
-            } ?: migrationRunService.runUpAttempt(versionTag, versionId, scope, migration)
+    /** Shared normal/Retry UP cursor flow; the recording-only branch cannot dispatch Schema. */
+    private fun runUpVersionFlow(
+        scope: OperationExecutionScope,
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        orderedMigrations: List<RegisteredMigration>,
+        preparedMigrations: List<PreparedMigration>?,
+        startIndex: Int,
+        initialCheckpoint: MigrationRetryCheckpoint,
+        failureStatusCapability: MigrationFailureStatusCapability?,
+        prepareBeforeSchemaBoundary: Boolean,
+        pauseAfterOneBoundary: Boolean,
+    ): ExecuteResult<MigrationVersionFlowOutcome> {
+        var checkpoint = initialCheckpoint
+        var index = startIndex
+        var completedBoundaries = 0
+
+        while (checkpoint.phase != MigrationRetryPhase.FINALIZATION_PENDING) {
+            val migration = orderedMigrations.getOrNull(index)
+                ?: return fail(scope, "UP Checkpoint cursor is outside the selected Version")
+            if (checkpoint.cursorMigrationId != migration.id.value) {
+                return fail(scope, "UP Checkpoint cursor does not match the selected Migration")
+            }
+
+            val runOutcome = when (checkpoint.phase) {
+                MigrationRetryPhase.RECORD_PENDING -> migrationRunService.recordUpAttempt(
+                    versionTag,
+                    versionId,
+                    scope,
+                    migration,
+                )
+                MigrationRetryPhase.EXECUTION_PENDING,
+                MigrationRetryPhase.PAUSED_NEXT,
+                -> {
+                    val runtimeMigration = when {
+                        preparedMigrations != null -> preparedMigrations.getOrNull(index)
+                            ?: return fail(scope, "Prepared UP Migration is missing for the Checkpoint cursor")
+                        prepareBeforeSchemaBoundary -> migrationRunService.prepareMigration(scope, migration)
+                            .valueOrNull(scope) ?: return failureResult(scope)
+                        else -> null
+                    }
+                    val beforeSchema = {
+                        val next = nextCheckpoint(
+                            checkpoint,
+                            checkpoint.cursorMigrationId,
+                            MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+                        )
+                        persistCheckpointTransition(
+                            scope,
+                            versionId,
+                            MigrationVersionState.STATUS_MIGRATE_STARTED,
+                            checkpoint,
+                            next,
+                        ).also {
+                            if (it is ExecuteResult.Success && it.result == true) checkpoint = next
+                        }
+                    }
+                    val afterSchema = {
+                        val next = nextCheckpoint(
+                            checkpoint,
+                            checkpoint.cursorMigrationId,
+                            MigrationRetryPhase.RECORD_PENDING,
+                        )
+                        persistCheckpointTransition(
+                            scope,
+                            versionId,
+                            MigrationVersionState.STATUS_MIGRATE_STARTED,
+                            checkpoint,
+                            next,
+                        ).also {
+                            if (it is ExecuteResult.Success && it.result == true) checkpoint = next
+                        }
+                    }
+                    if (runtimeMigration != null) {
+                        migrationRunService.runUpAttempt(
+                            versionTag,
+                            versionId,
+                            scope,
+                            runtimeMigration,
+                            beforeSchema,
+                            afterSchema,
+                        )
+                    } else {
+                        migrationRunService.runUpAttempt(
+                            versionTag,
+                            versionId,
+                            scope,
+                            migration,
+                            beforeSchema,
+                            afterSchema,
+                        )
+                    }
+                }
+                else -> return fail(scope, "UP Checkpoint phase cannot enter the shared execution flow")
+            }
+
             val result = when (runOutcome) {
                 is MigrationRunOutcome.PreflightFailure -> runOutcome.toExecuteResult()
                 is MigrationRunOutcome.Attempt -> when (val attempt = runOutcome.result) {
@@ -131,6 +251,7 @@ internal class MigrationVersionTransactionService(
                             failureStatusCapability,
                             versionId,
                             attempt,
+                            checkpoint,
                         )
                         ExecuteResult.Failure(attempt.cause)
                     }
@@ -138,44 +259,168 @@ internal class MigrationVersionTransactionService(
                     is MigrationExecutionResult.Success -> ExecuteResult.Success(true)
                 }
             }
-            if (result is ExecuteResult.Failure) return@safely result
+            if (result is ExecuteResult.Failure) return result
             if ((result as ExecuteResult.Success).result != true) {
-                return@safely fail(
+                return fail(scope, "Migration '${migration.id.value}' did not complete successfully")
+            }
+
+            val nextMigrationId = orderedMigrations.getOrNull(index + 1)?.id?.value
+            val nextPhase = when {
+                nextMigrationId == null -> MigrationRetryPhase.FINALIZATION_PENDING
+                pauseAfterOneBoundary && completedBoundaries == 0 -> MigrationRetryPhase.PAUSED_NEXT
+                else -> MigrationRetryPhase.EXECUTION_PENDING
+            }
+            val next = nextCheckpoint(checkpoint, nextMigrationId, nextPhase)
+            val advanced = persistCheckpointTransition(
+                scope,
+                versionId,
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+                checkpoint,
+                next,
+            )
+            if (advanced !is ExecuteResult.Success || advanced.result != true) {
+                recordCheckpointFailure(
                     scope,
-                    "Migration '${migration.id.value}' did not complete successfully",
+                    failureStatusCapability,
+                    versionId,
+                    checkpoint,
+                    MigrationFailureStatusCommand.UpRecordingFailure(versionId),
+                    expectedFailure = (advanced as? ExecuteResult.Failure)?.exception,
+                ) { expected, updated, diagnostic ->
+                    MigrationFailureCheckpointWriteCommand.UpRecordingFailure(
+                        versionId,
+                        expected,
+                        updated,
+                        diagnostic,
+                    )
+                }
+                return failureResult(scope)
+            }
+            checkpoint = next
+            completedBoundaries++
+            if (pauseAfterOneBoundary && completedBoundaries == 1) {
+                return ExecuteResult.Success(MigrationVersionFlowOutcome.Paused)
+            }
+            index++
+        }
+
+        return finalizeUpVersion(scope, versionTag, versionId, checkpoint, failureStatusCapability)
+    }
+
+    private fun finalizeUpVersion(
+        scope: OperationExecutionScope,
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        checkpoint: MigrationRetryCheckpoint,
+        failureStatusCapability: MigrationFailureStatusCapability?,
+    ): ExecuteResult<MigrationVersionFlowOutcome> {
+        val finalized = checkpointPersistence.finalizeUp(
+            scope,
+            versionId,
+            MigrationRetryCheckpointCodec.encode(checkpoint),
+        ).valueOrNull(scope)
+        if (finalized != MigrationCheckpointWriteResult.APPLIED) {
+            if (scope.firstFailure == null) {
+                scope.failed<Unit>(IllegalStateException(
+                    "Could not finalize UP Migration Version '${versionTag.validatedValue}' from its Checkpoint",
+                ))
+            }
+            recordCheckpointFailure(
+                scope,
+                failureStatusCapability,
+                versionId,
+                checkpoint,
+                MigrationFailureStatusCommand.UpRecordingFailure(versionId),
+                expectedFailure = scope.firstFailure,
+            ) { expected, updated, diagnostic ->
+                MigrationFailureCheckpointWriteCommand.UpFinalizationFailure(
+                    versionId,
+                    expected,
+                    updated,
+                    diagnostic,
                 )
             }
+            return failureResult(scope)
+        }
+        return ExecuteResult.Success(MigrationVersionFlowOutcome.Completed)
+    }
+
+    /** Resumes one validated UP Version through the same cursor flow used by normal execution. */
+    internal fun retryUp(
+        scope: OperationExecutionScope,
+        validated: ValidatedMigrationRecoveryTarget,
+        failureStatusCapability: MigrationFailureStatusCapability,
+        toCompleteVersion: Boolean,
+    ): ExecuteResult<MigrationVersionFlowOutcome> = safely(scope) {
+        if (validated.status != MigrationVersionState.STATUS_MIGRATE_STARTED &&
+            validated.status != MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD
+        ) return@safely fail(scope, "Status ${validated.status} is not eligible for UP Retry")
+        if (validated.checkpoint.originalStatus != MigrationVersionState.STATUS_MIGRATE_STARTED) {
+            return@safely fail(scope, "UP Retry Checkpoint has a direction mismatch")
+        }
+        val versionTag = validated.preparedVersion.version.tag
+            ?: return@safely fail(scope, "Retry Version has no registered MigrationVersionTag")
+        if (versionTag.validatedValue != validated.preparedVersion.version.name) {
+            return@safely fail(scope, "Retry Version Tag does not match its Configuration registration")
         }
 
-        val updated = executeUpdate(
-            scope,
-            SystemMigrationVersionUpdateQuery(versionId, STATUS_MIGRATE_COMPLETED).query(),
-        ) ?: run {
-            recordLatchedFailureStatus(
-                scope,
-                failureStatusCapability,
-                versionId,
-                MigrationFailureStatusCommand.UpRecordingFailure(versionId),
-                migrationId = null,
-            )
-            return@safely failureResult(scope)
-        }
-        if (updated != 1) {
-            val failure = fail(
-                scope,
-                "Expected to update one Migration Version '${versionTag.validatedValue}' to COMPLETED, but updated $updated rows",
-            )
-            recordLatchedFailureStatus(
-                scope,
-                failureStatusCapability,
-                versionId,
-                MigrationFailureStatusCommand.UpRecordingFailure(versionId),
-                migrationId = null,
-            )
-            return@safely failure
+        val orderedMigrations = validated.preparedVersion.migrations
+        val checkpoint = validated.checkpoint
+        val startIndex = when (checkpoint.phase) {
+            MigrationRetryPhase.FINALIZATION_PENDING -> orderedMigrations.size
+            MigrationRetryPhase.EXECUTION_PENDING,
+            MigrationRetryPhase.PAUSED_NEXT,
+            MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+            MigrationRetryPhase.RECORD_PENDING,
+            -> orderedMigrations.indexOfFirst { it.id.value == checkpoint.cursorMigrationId }
+                .takeIf { it >= 0 }
+                ?: return@safely fail(scope, "UP Retry cursor is not registered in its Version")
         }
 
-        ExecuteResult.Success(true)
+        if (validated.status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD &&
+            !normalizeRecordingFailure(scope, validated, up = true)
+        ) return@safely failureResult(scope)
+
+        runUpVersionFlow(
+            scope = scope,
+            versionTag = versionTag,
+            versionId = validated.target.version.versionId,
+            orderedMigrations = orderedMigrations,
+            preparedMigrations = null,
+            startIndex = startIndex,
+            initialCheckpoint = checkpoint,
+            failureStatusCapability = failureStatusCapability,
+            prepareBeforeSchemaBoundary = true,
+            pauseAfterOneBoundary = !toCompleteVersion && checkpoint.phase != MigrationRetryPhase.FINALIZATION_PENDING,
+        )
+    }
+
+    private fun normalizeRecordingFailure(
+        scope: OperationExecutionScope,
+        validated: ValidatedMigrationRecoveryTarget,
+        up: Boolean,
+    ): Boolean {
+        val result = if (up) {
+            checkpointPersistence.normalizeUpRecordingFailure(
+                scope,
+                validated.target.version.versionId,
+                MigrationRetryCheckpointCodec.encode(validated.checkpoint),
+            )
+        } else {
+            checkpointPersistence.normalizeDownRecordingFailure(
+                scope,
+                validated.target.version.versionId,
+                MigrationRetryCheckpointCodec.encode(validated.checkpoint),
+            )
+        }
+        val write = result.valueOrNull(scope) ?: return false
+        if (write != MigrationCheckpointWriteResult.APPLIED) {
+            scope.failed<Unit>(IllegalStateException(
+                "Could not normalize ${if (up) "UP" else "DOWN"} recording-failure Status before Retry",
+            ))
+            return false
+        }
+        return true
     }
 
     private fun recordUpAttemptFailure(
@@ -183,25 +428,53 @@ internal class MigrationVersionTransactionService(
         capability: MigrationFailureStatusCapability?,
         versionId: Int,
         failure: MigrationExecutionResult.Failure,
+        checkpoint: MigrationRetryCheckpoint,
     ) {
         if (failure.direction != MigrationExecutionResult.Direction.UP ||
             failure.versionRecordId != versionId
         ) return
 
-        val command = when (failure.stage) {
-            MigrationExecutionResult.FailureStage.EXECUTION ->
-                MigrationFailureStatusCommand.UpExecutionFailure(versionId)
-            MigrationExecutionResult.FailureStage.HISTORY_RECORD ->
-                MigrationFailureStatusCommand.UpRecordingFailure(versionId)
-            MigrationExecutionResult.FailureStage.VERSION_RECORD -> return
+        val (diagnosticCommand, buildCheckpointCommand) = when {
+            failure.stage == MigrationExecutionResult.FailureStage.RECONCILIATION ->
+                MigrationFailureStatusCommand.UpRecordingFailure(versionId) to
+                    { expected: String, updated: String, diagnostic: String ->
+                        MigrationFailureCheckpointWriteCommand.UpReconciliationInconsistent(
+                            versionId,
+                            expected,
+                            updated,
+                            diagnostic,
+                        )
+                    }
+            checkpoint.phase == MigrationRetryPhase.RECORD_PENDING ||
+                checkpoint.phase == MigrationRetryPhase.FINALIZATION_PENDING ->
+                MigrationFailureStatusCommand.UpRecordingFailure(versionId) to
+                    { expected: String, updated: String, diagnostic: String ->
+                        MigrationFailureCheckpointWriteCommand.UpRecordingFailure(
+                            versionId,
+                            expected,
+                            updated,
+                            diagnostic,
+                        )
+                    }
+            else -> MigrationFailureStatusCommand.UpExecutionFailure(versionId) to
+                { expected: String, updated: String, diagnostic: String ->
+                    MigrationFailureCheckpointWriteCommand.UpExecutionUncertain(
+                        versionId,
+                        expected,
+                        updated,
+                        diagnostic,
+                    )
+                }
         }
-        recordLatchedFailureStatus(
+        recordCheckpointFailure(
             scope,
             capability,
             versionId,
-            command,
-            migrationId = failure.migrationId?.value,
+            checkpoint,
+            diagnosticCommand,
             expectedFailure = failure.cause,
+            migrationId = failure.migrationId?.value,
+            buildCheckpointCommand = buildCheckpointCommand,
         )
     }
 
@@ -210,48 +483,175 @@ internal class MigrationVersionTransactionService(
         capability: MigrationFailureStatusCapability?,
         versionId: Int,
         failure: MigrationExecutionResult.Failure,
+        checkpoint: MigrationRetryCheckpoint,
     ) {
         if (failure.direction != MigrationExecutionResult.Direction.DOWN ||
             failure.versionRecordId != versionId
         ) return
 
-        val command = when (failure.stage) {
-            MigrationExecutionResult.FailureStage.EXECUTION ->
-                MigrationFailureStatusCommand.DownExecutionFailure(versionId)
-            MigrationExecutionResult.FailureStage.HISTORY_RECORD ->
-                MigrationFailureStatusCommand.DownRecordingFailure(versionId)
-            MigrationExecutionResult.FailureStage.VERSION_RECORD -> return
+        val (diagnosticCommand, buildCheckpointCommand) = when {
+            failure.stage == MigrationExecutionResult.FailureStage.RECONCILIATION ->
+                MigrationFailureStatusCommand.DownRecordingFailure(versionId) to
+                    { expected: String, updated: String, diagnostic: String ->
+                        MigrationFailureCheckpointWriteCommand.DownReconciliationInconsistent(
+                            versionId,
+                            expected,
+                            updated,
+                            diagnostic,
+                        )
+                    }
+            checkpoint.phase == MigrationRetryPhase.RECORD_PENDING ||
+                checkpoint.phase == MigrationRetryPhase.FINALIZATION_PENDING ->
+                MigrationFailureStatusCommand.DownRecordingFailure(versionId) to
+                    { expected: String, updated: String, diagnostic: String ->
+                        MigrationFailureCheckpointWriteCommand.DownRecordingFailure(
+                            versionId,
+                            expected,
+                            updated,
+                            diagnostic,
+                        )
+                    }
+            else -> MigrationFailureStatusCommand.DownExecutionFailure(versionId) to
+                { expected: String, updated: String, diagnostic: String ->
+                    MigrationFailureCheckpointWriteCommand.DownExecutionUncertain(
+                        versionId,
+                        expected,
+                        updated,
+                        diagnostic,
+                    )
+                }
         }
-        recordLatchedFailureStatus(
+        recordCheckpointFailure(
             scope,
             capability,
             versionId,
-            command,
-            migrationId = failure.migrationId?.value,
+            checkpoint,
+            diagnosticCommand,
             expectedFailure = failure.cause,
+            migrationId = failure.migrationId?.value,
+            buildCheckpointCommand = buildCheckpointCommand,
         )
     }
 
-    /** Writes only after the ordinary Operation failure has already become authoritative. */
-    private fun recordLatchedFailureStatus(
+    /**
+     * Uses the existing one-shot capability after Operation has latched the Failure. The Checkpoint
+     * and Diagnostic are supplied together, while Operation remains agnostic to their JSON content.
+     */
+    private fun recordCheckpointFailure(
         scope: OperationExecutionScope,
         capability: MigrationFailureStatusCapability?,
         versionId: Int,
-        command: MigrationFailureStatusCommand,
-        migrationId: String?,
+        checkpoint: MigrationRetryCheckpoint,
+        diagnosticCommand: MigrationFailureStatusCommand,
         expectedFailure: Throwable? = null,
+        migrationId: String? = null,
+        buildCheckpointCommand: (String, String, String) -> MigrationFailureCheckpointWriteCommand,
     ) {
         if (capability == null || versionId <= 0 || scope.fatalError != null) return
         val primaryFailure = scope.firstFailure ?: return
         if (primaryFailure is Error || (expectedFailure != null && primaryFailure !== expectedFailure)) return
 
-        // The capability is one-shot. Its result is terminal: no retry, fallback, or recursive write.
-        val failure = expectedFailure ?: primaryFailure
-        val diagnostic = failureDiagnosticSafely(scope, command, failure, migrationId)
-        if (diagnostic == null) {
-            capability.write(command)
+        val diagnostic = failureDiagnosticSafely(
+            scope,
+            diagnosticCommand,
+            expectedFailure ?: primaryFailure,
+            migrationId,
+        )
+        val diagnosticMessage = try {
+            diagnostic?.toStorageMessage(versionId)
+        } catch (fatal: Error) {
+            propagateDiagnosticFatal(scope, fatal)
+        } catch (serializationFailure: Throwable) {
+            recordDiagnosticConstructionFailure(scope, serializationFailure)
+            null
+        }
+        if (diagnostic == null || diagnosticMessage == null) {
+            capability.write(diagnosticCommand)
+            return
+        }
+
+        val checkpointCapability = capability as? MigrationFailureCheckpointWriteCapability
+        if (checkpointCapability == null) {
+            // Older/custom capability implementations retain their status-only contract. The
+            // Operation implementation used by managed execution supports the atomic Checkpoint write.
+            capability.write(diagnosticCommand, diagnostic)
+            return
+        }
+
+        val command = try {
+            val expectedCheckpoint = MigrationRetryCheckpointCodec.encode(checkpoint)
+            val updatedCheckpoint = MigrationRetryCheckpointCodec.encode(
+                checkpoint.copy(
+                    revision = MigrationRetryCheckpointCodec.nextRevision(checkpoint),
+                    originalMessage = checkpoint.originalMessage ?: diagnosticMessage,
+                ),
+            )
+            buildCheckpointCommand(expectedCheckpoint, updatedCheckpoint, diagnosticMessage)
+        } catch (fatal: Error) {
+            propagateDiagnosticFatal(scope, fatal)
+        } catch (constructionFailure: Throwable) {
+            recordDiagnosticConstructionFailure(scope, constructionFailure)
+            capability.write(diagnosticCommand, diagnostic)
+            return
+        }
+        checkpointCapability.writeCheckpoint(command)
+    }
+
+    private fun initialCheckpoint(
+        originalStatus: Int,
+        firstMigrationId: String?,
+    ): MigrationRetryCheckpoint = MigrationRetryCheckpoint(
+        formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+        revision = 0,
+        originalStatus = originalStatus,
+        originalMessage = null,
+        cursorMigrationId = firstMigrationId,
+        phase = if (firstMigrationId == null) {
+            MigrationRetryPhase.FINALIZATION_PENDING
         } else {
-            capability.write(command, diagnostic)
+            MigrationRetryPhase.EXECUTION_PENDING
+        },
+    )
+
+    private fun nextCheckpoint(
+        current: MigrationRetryCheckpoint,
+        cursorMigrationId: String?,
+        phase: MigrationRetryPhase,
+    ): MigrationRetryCheckpoint = current.copy(
+        revision = MigrationRetryCheckpointCodec.nextRevision(current),
+        cursorMigrationId = cursorMigrationId,
+        phase = phase,
+    )
+
+    /** Persists one expected Checkpoint transition; any non-APPLIED CAS is terminal for this run. */
+    private fun persistCheckpointTransition(
+        scope: OperationExecutionScope,
+        versionId: Int,
+        expectedStatus: Int,
+        expected: MigrationRetryCheckpoint,
+        updated: MigrationRetryCheckpoint,
+    ): ExecuteResult<Boolean> = when (
+        val result = checkpointPersistence.advanceCheckpoint(
+            scope,
+            versionId,
+            expectedStatus,
+            MigrationRetryCheckpointCodec.encode(expected),
+            MigrationRetryCheckpointCodec.encode(updated),
+        )
+    ) {
+        is ExecuteResult.Failure -> {
+            scope.recordResult(result)
+            ExecuteResult.Failure(scope.firstFailure ?: result.exception)
+        }
+        is ExecuteResult.Success -> when (result.result) {
+            MigrationCheckpointWriteResult.APPLIED -> ExecuteResult.Success(true)
+            MigrationCheckpointWriteResult.NOT_APPLIED -> scope.failed(
+                IllegalStateException("Migration Checkpoint compare-and-set was not applied"),
+            )
+            MigrationCheckpointWriteResult.INDETERMINATE -> scope.failed(
+                IllegalStateException("Migration Checkpoint compare-and-set outcome is indeterminate"),
+            )
+            null -> scope.failed(IllegalStateException("Migration Checkpoint compare-and-set returned no result"))
         }
     }
 
@@ -449,22 +849,142 @@ internal class MigrationVersionTransactionService(
         validateHistory(scope, snapshot, versionId, prepared.migrations)
             ?.let { return@safely it }
 
-        val updated = executeUpdate(
-            scope,
-            SystemMigrationVersionUpdateQuery(versionId, STATUS_ROLLBACK_STARTED).query(),
-        ) ?: return@safely failureResult(scope)
-        if (updated != 1) {
-            return@safely fail(
-                scope,
-                "Expected to update one Migration Version '${versionTag.validatedValue}' to ROLLBACK_STARTED, but updated $updated rows",
-            )
+        val orderedMigrations = prepared.migrations.indices.reversed().map { index ->
+            index to prepared.migrations[index]
+        }
+        var checkpoint = initialCheckpoint(
+            MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            orderedMigrations.firstOrNull()?.second?.id?.value,
+        )
+        val initialCheckpointJson = MigrationRetryCheckpointCodec.encode(checkpoint)
+        val started = checkpointPersistence.startDown(scope, versionId, initialCheckpointJson)
+            .valueOrNull(scope)
+        if (started != MigrationCheckpointWriteResult.APPLIED) {
+            if (scope.firstFailure == null) {
+                scope.failed<Unit>(IllegalStateException(
+                    "Could not establish DOWN Checkpoint for Migration Version '${versionTag.validatedValue}'",
+                ))
+            }
+            return@safely failureResult(scope)
         }
 
-        for (index in prepared.migrations.indices.reversed()) {
-            val migration = prepared.migrations[index]
-            val runOutcome = preparedMigrations?.let { runtimeMigrations ->
-                migrationRunService.runDownAttempt(versionTag, versionId, scope, runtimeMigrations[index])
-            } ?: migrationRunService.runDownAttempt(versionTag, versionId, scope, migration)
+        when (val flow = runDownVersionFlow(
+            scope = scope,
+            versionTag = versionTag,
+            versionId = versionId,
+            orderedMigrations = orderedMigrations,
+            preparedMigrations = preparedMigrations,
+            startIndex = 0,
+            initialCheckpoint = checkpoint,
+            failureStatusCapability = failureStatusCapability,
+            prepareBeforeSchemaBoundary = false,
+            pauseAfterOneBoundary = false,
+        )) {
+            is ExecuteResult.Failure -> ExecuteResult.Failure(flow.exception)
+            is ExecuteResult.Success -> when (requireNotNull(flow.result)) {
+                MigrationVersionFlowOutcome.Completed -> ExecuteResult.Success(true)
+                MigrationVersionFlowOutcome.Paused -> fail(scope, "Normal DOWN flow cannot pause")
+            }
+        }
+    }
+
+    /** Shared normal/Retry DOWN cursor flow; RECORD_PENDING uses only the metadata reconciler. */
+    private fun runDownVersionFlow(
+        scope: OperationExecutionScope,
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        orderedMigrations: List<Pair<Int, RegisteredMigration>>,
+        preparedMigrations: List<PreparedMigration>?,
+        startIndex: Int,
+        initialCheckpoint: MigrationRetryCheckpoint,
+        failureStatusCapability: MigrationFailureStatusCapability?,
+        prepareBeforeSchemaBoundary: Boolean,
+        pauseAfterOneBoundary: Boolean,
+    ): ExecuteResult<MigrationVersionFlowOutcome> {
+        var checkpoint = initialCheckpoint
+        var position = startIndex
+        var completedBoundaries = 0
+
+        while (checkpoint.phase != MigrationRetryPhase.FINALIZATION_PENDING) {
+            val indexedMigration = orderedMigrations.getOrNull(position)
+                ?: return fail(scope, "DOWN Checkpoint cursor is outside the selected Version")
+            val (index, migration) = indexedMigration
+            if (checkpoint.cursorMigrationId != migration.id.value) {
+                return fail(scope, "DOWN Checkpoint cursor does not match the selected Migration")
+            }
+
+            val runOutcome = when (checkpoint.phase) {
+                MigrationRetryPhase.RECORD_PENDING -> migrationRunService.reconcileDownRecording(
+                    versionTag,
+                    versionId,
+                    scope,
+                    migration,
+                )
+                MigrationRetryPhase.EXECUTION_PENDING,
+                MigrationRetryPhase.PAUSED_NEXT,
+                -> {
+                    val runtimeMigration = when {
+                        preparedMigrations != null -> preparedMigrations.getOrNull(index)
+                            ?: return fail(scope, "Prepared DOWN Migration is missing for the Checkpoint cursor")
+                        prepareBeforeSchemaBoundary -> migrationRunService.prepareMigration(scope, migration)
+                            .valueOrNull(scope) ?: return failureResult(scope)
+                        else -> null
+                    }
+                    val beforeSchema = {
+                        val next = nextCheckpoint(
+                            checkpoint,
+                            checkpoint.cursorMigrationId,
+                            MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+                        )
+                        persistCheckpointTransition(
+                            scope,
+                            versionId,
+                            STATUS_ROLLBACK_STARTED,
+                            checkpoint,
+                            next,
+                        ).also {
+                            if (it is ExecuteResult.Success && it.result == true) checkpoint = next
+                        }
+                    }
+                    val afterSchema = {
+                        val next = nextCheckpoint(
+                            checkpoint,
+                            checkpoint.cursorMigrationId,
+                            MigrationRetryPhase.RECORD_PENDING,
+                        )
+                        persistCheckpointTransition(
+                            scope,
+                            versionId,
+                            STATUS_ROLLBACK_STARTED,
+                            checkpoint,
+                            next,
+                        ).also {
+                            if (it is ExecuteResult.Success && it.result == true) checkpoint = next
+                        }
+                    }
+                    if (runtimeMigration != null) {
+                        migrationRunService.runDownAttempt(
+                            versionTag,
+                            versionId,
+                            scope,
+                            runtimeMigration,
+                            beforeSchema,
+                            afterSchema,
+                        )
+                    } else {
+                        migrationRunService.runDownAttempt(
+                            versionTag,
+                            versionId,
+                            scope,
+                            migration,
+                            beforeSchema,
+                            afterSchema,
+                        )
+                    }
+                }
+                else -> return fail(scope, "DOWN Checkpoint phase cannot enter the shared execution flow")
+            }
+
             val result = when (runOutcome) {
                 is MigrationRunOutcome.PreflightFailure -> runOutcome.toExecuteResult()
                 is MigrationRunOutcome.Attempt -> when (val attempt = runOutcome.result) {
@@ -474,6 +994,7 @@ internal class MigrationVersionTransactionService(
                             failureStatusCapability,
                             versionId,
                             attempt,
+                            checkpoint,
                         )
                         ExecuteResult.Failure(attempt.cause)
                     }
@@ -481,44 +1002,142 @@ internal class MigrationVersionTransactionService(
                     is MigrationExecutionResult.Success -> ExecuteResult.Success(true)
                 }
             }
-            if (result is ExecuteResult.Failure) return@safely result
+            if (result is ExecuteResult.Failure) return result
             if ((result as ExecuteResult.Success).result != true) {
-                return@safely fail(
+                return fail(scope, "Migration '${migration.id.value}' did not roll back successfully")
+            }
+
+            val nextMigrationId = orderedMigrations.getOrNull(position + 1)?.second?.id?.value
+            val nextPhase = when {
+                nextMigrationId == null -> MigrationRetryPhase.FINALIZATION_PENDING
+                pauseAfterOneBoundary && completedBoundaries == 0 -> MigrationRetryPhase.PAUSED_NEXT
+                else -> MigrationRetryPhase.EXECUTION_PENDING
+            }
+            val next = nextCheckpoint(checkpoint, nextMigrationId, nextPhase)
+            val advanced = persistCheckpointTransition(
+                scope,
+                versionId,
+                STATUS_ROLLBACK_STARTED,
+                checkpoint,
+                next,
+            )
+            if (advanced !is ExecuteResult.Success || advanced.result != true) {
+                recordCheckpointFailure(
                     scope,
-                    "Migration '${migration.id.value}' did not roll back successfully",
+                    failureStatusCapability,
+                    versionId,
+                    checkpoint,
+                    MigrationFailureStatusCommand.DownRecordingFailure(versionId),
+                    expectedFailure = (advanced as? ExecuteResult.Failure)?.exception,
+                ) { expected, updated, diagnostic ->
+                    MigrationFailureCheckpointWriteCommand.DownRecordingFailure(
+                        versionId,
+                        expected,
+                        updated,
+                        diagnostic,
+                    )
+                }
+                return failureResult(scope)
+            }
+            checkpoint = next
+            completedBoundaries++
+            if (pauseAfterOneBoundary && completedBoundaries == 1) {
+                return ExecuteResult.Success(MigrationVersionFlowOutcome.Paused)
+            }
+            position++
+        }
+
+        return finalizeDownVersion(scope, versionTag, versionId, checkpoint, failureStatusCapability)
+    }
+
+    private fun finalizeDownVersion(
+        scope: OperationExecutionScope,
+        versionTag: MigrationVersionTag,
+        versionId: Int,
+        checkpoint: MigrationRetryCheckpoint,
+        failureStatusCapability: MigrationFailureStatusCapability?,
+    ): ExecuteResult<MigrationVersionFlowOutcome> {
+        val finalized = checkpointPersistence.finalizeDown(
+            scope,
+            versionId,
+            MigrationRetryCheckpointCodec.encode(checkpoint),
+        ).valueOrNull(scope)
+        if (finalized != MigrationCheckpointWriteResult.APPLIED) {
+            if (scope.firstFailure == null) {
+                scope.failed<Unit>(IllegalStateException(
+                    "Could not finalize DOWN Migration Version '${versionTag.validatedValue}' from its Checkpoint",
+                ))
+            }
+            recordCheckpointFailure(
+                scope,
+                failureStatusCapability,
+                versionId,
+                checkpoint,
+                MigrationFailureStatusCommand.DownRecordingFailure(versionId),
+                expectedFailure = scope.firstFailure,
+            ) { expected, updated, diagnostic ->
+                MigrationFailureCheckpointWriteCommand.DownFinalizationFailure(
+                    versionId,
+                    expected,
+                    updated,
+                    diagnostic,
                 )
             }
+            return failureResult(scope)
+        }
+        return ExecuteResult.Success(MigrationVersionFlowOutcome.Completed)
+    }
+
+    /** Resumes one validated DOWN Version through the same reverse cursor flow as normal rollback. */
+    internal fun retryDown(
+        scope: OperationExecutionScope,
+        validated: ValidatedMigrationRecoveryTarget,
+        failureStatusCapability: MigrationFailureStatusCapability,
+        toCompleteVersion: Boolean,
+    ): ExecuteResult<MigrationVersionFlowOutcome> = safely(scope) {
+        if (validated.status != MigrationVersionState.STATUS_ROLLBACK_STARTED &&
+            validated.status != MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
+        ) return@safely fail(scope, "Status ${validated.status} is not eligible for DOWN Retry")
+        if (validated.checkpoint.originalStatus != MigrationVersionState.STATUS_ROLLBACK_STARTED) {
+            return@safely fail(scope, "DOWN Retry Checkpoint has a direction mismatch")
+        }
+        val versionTag = validated.preparedVersion.version.tag
+            ?: return@safely fail(scope, "Retry Version has no registered MigrationVersionTag")
+        if (versionTag.validatedValue != validated.preparedVersion.version.name) {
+            return@safely fail(scope, "Retry Version Tag does not match its Configuration registration")
         }
 
-        val deleted = executeDelete(
-            scope,
-            SystemMigrationVersionDeleteQuery(versionId).query(),
-        ) ?: run {
-            recordLatchedFailureStatus(
-                scope,
-                failureStatusCapability,
-                versionId,
-                MigrationFailureStatusCommand.DownRecordingFailure(versionId),
-                migrationId = null,
-            )
-            return@safely failureResult(scope)
+        val orderedMigrations = validated.preparedVersion.migrations.indices.reversed().map { index ->
+            index to validated.preparedVersion.migrations[index]
         }
-        if (deleted != 1) {
-            val failure = fail(
-                scope,
-                "Expected to delete one Migration Version '${versionTag.validatedValue}', but deleted $deleted",
-            )
-            recordLatchedFailureStatus(
-                scope,
-                failureStatusCapability,
-                versionId,
-                MigrationFailureStatusCommand.DownRecordingFailure(versionId),
-                migrationId = null,
-            )
-            return@safely failure
+        val checkpoint = validated.checkpoint
+        val startIndex = when (checkpoint.phase) {
+            MigrationRetryPhase.FINALIZATION_PENDING -> orderedMigrations.size
+            MigrationRetryPhase.EXECUTION_PENDING,
+            MigrationRetryPhase.PAUSED_NEXT,
+            MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+            MigrationRetryPhase.RECORD_PENDING,
+            -> orderedMigrations.indexOfFirst { it.second.id.value == checkpoint.cursorMigrationId }
+                .takeIf { it >= 0 }
+                ?: return@safely fail(scope, "DOWN Retry cursor is not registered in its Version")
         }
 
-        ExecuteResult.Success(true)
+        if (validated.status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD &&
+            !normalizeRecordingFailure(scope, validated, up = false)
+        ) return@safely failureResult(scope)
+
+        runDownVersionFlow(
+            scope = scope,
+            versionTag = versionTag,
+            versionId = validated.target.version.versionId,
+            orderedMigrations = orderedMigrations,
+            preparedMigrations = null,
+            startIndex = startIndex,
+            initialCheckpoint = checkpoint,
+            failureStatusCapability = failureStatusCapability,
+            prepareBeforeSchemaBoundary = true,
+            pauseAfterOneBoundary = !toCompleteVersion && checkpoint.phase != MigrationRetryPhase.FINALIZATION_PENDING,
+        )
     }
 
     private fun <T> safely(
@@ -682,11 +1301,6 @@ internal class MigrationVersionTransactionService(
             )
         }.valueOrNull(scope)
 
-    private fun insertVersion(scope: OperationExecutionScope, tagId: Int): Int? {
-        val generatedId = executeInsert(scope, SystemMigrationVersionInsertQuery(tagId).query()) ?: return null
-        return generatedId.toPositiveIntId(scope, "Generated Migration Version id")
-    }
-
     private fun <T> read(
         scope: OperationExecutionScope,
         ast: gog.my_project.data_base_query.ast.interfaces.select_interface.query_render_select.IQueryRenderSelectAst,
@@ -718,22 +1332,6 @@ internal class MigrationVersionTransactionService(
         scope: OperationExecutionScope,
         query: IQueryRenderInsertApi,
     ): Long? = QueryBuilderExecutor.scopeBound(scope)
-        .queryBuilder(query)
-        .execute()
-        .valueOrNull(scope)
-
-    private fun executeDelete(
-        scope: OperationExecutionScope,
-        query: IQueryRenderDeleteApi,
-    ): Int? = QueryBuilderExecutor.scopeBound(scope)
-        .queryBuilder(query)
-        .execute()
-        .valueOrNull(scope)
-
-    private fun executeUpdate(
-        scope: OperationExecutionScope,
-        query: IQueryRenderUpdateApi,
-    ): Int? = QueryBuilderExecutor.scopeBound(scope)
         .queryBuilder(query)
         .execute()
         .valueOrNull(scope)
@@ -781,7 +1379,7 @@ internal class MigrationVersionTransactionService(
     private companion object {
         // SystemMigrationVersionModel is internal to migration:core, so its status code cannot
         // be referenced from this module without changing Core visibility.
-        const val STATUS_ROLLBACK_STARTED = 4
-        const val STATUS_MIGRATE_COMPLETED = 3
+        const val STATUS_ROLLBACK_STARTED = MigrationVersionState.STATUS_ROLLBACK_STARTED
+        const val STATUS_MIGRATE_COMPLETED = MigrationVersionState.STATUS_MIGRATE_COMPLETED
     }
 }

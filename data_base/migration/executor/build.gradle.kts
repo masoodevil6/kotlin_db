@@ -19,6 +19,7 @@ dependencies {
     implementation(project(":data_base:operation:schema"))
     implementation(project(":data_base:operation:query:executor"))
     implementation(project(":data_base:operation:query:builder"))
+    implementation(libs.kotlinxSerialization)
 
     testImplementation(kotlin("test"))
     testImplementation(project(":data_base:manager"))

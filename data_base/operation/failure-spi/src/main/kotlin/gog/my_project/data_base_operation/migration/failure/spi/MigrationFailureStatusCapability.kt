@@ -35,6 +35,77 @@ public interface MigrationFailureStatusCapability {
     ): MigrationFailureStatusWriteResult
 }
 
+/** Closed failure writes that atomically replace Status, latest Diagnostic, and Retry Checkpoint. */
+public sealed interface MigrationFailureCheckpointWriteCommand {
+    public val versionId: Int
+    public val expectedCheckpoint: String
+    public val updatedCheckpoint: String
+    public val diagnosticMessage: String
+
+    public data class UpExecutionUncertain(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class UpRecordingFailure(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class UpReconciliationInconsistent(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class UpFinalizationFailure(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class DownExecutionUncertain(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class DownRecordingFailure(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class DownReconciliationInconsistent(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    public data class DownFinalizationFailure(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+}
+
+/** Additive, bounded Checkpoint write available only while the existing Failure capability lease is active. */
+public interface MigrationFailureCheckpointWriteCapability : MigrationFailureStatusCapability {
+    public fun writeCheckpoint(
+        command: MigrationFailureCheckpointWriteCommand,
+    ): MigrationFailureStatusWriteResult
+}
+
 /**
  * Additive diagnostic-aware form implemented by managed Operation scopes. Existing capability
  * implementations can keep implementing [MigrationFailureStatusCapability] unchanged.

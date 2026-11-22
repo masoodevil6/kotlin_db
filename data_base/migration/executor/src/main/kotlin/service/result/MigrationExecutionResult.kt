@@ -18,6 +18,7 @@ internal sealed interface MigrationExecutionResult {
     enum class FailureStage {
         EXECUTION,
         HISTORY_RECORD,
+        RECONCILIATION,
         VERSION_RECORD,
     }
 

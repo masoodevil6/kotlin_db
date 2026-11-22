@@ -22,9 +22,49 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
     var tagId: Int = 0
 
     @QBQuerySelect(name = "status", alias = "status")
-    var status: Int = 0
+    var status: Int = SystemMigrationVersionModel.STATUS_MIGRATE_STARTED
 
-    override fun createCte(params: RelationFilters): Cte = buildCte {
+    @QBQuerySelect(name = "message", alias = "message")
+    var message: String? = null
+
+    @QBQuerySelect(name = "retry_checkpoint", alias = "retryCheckpoint")
+    var retryCheckpoint: String? = null
+
+    override fun createCte(params: RelationFilters): Cte =
+        createCte(params, includeMessage = false, excludeCompletedStatus = false)
+
+    /** Builds the Version relation with its persisted diagnostic message for state inspection. */
+    fun createStateCte(): Cte = createStateCte(lastIncompleteVersion = false)
+
+    /** Builds a state relation that can exclude only the completed status, retaining unknowns. */
+    fun createStateCte(lastIncompleteVersion: Boolean): Cte = createCte(
+        RelationFilters(),
+        includeMessage = true,
+        excludeCompletedStatus = lastIncompleteVersion,
+    )
+
+    /** Builds a state relation for one persisted Version ID, including its diagnostic message. */
+    fun createStateCte(versionId: Int): Cte = createCte(
+        RelationFilters(id = versionId),
+        includeMessage = true,
+        excludeCompletedStatus = false,
+        includeRetryCheckpoint = true,
+    )
+
+    /** Builds a full internal Version relation including the private Retry checkpoint column. */
+    fun createExecutionStateCte(): Cte = createCte(
+        RelationFilters(),
+        includeMessage = false,
+        excludeCompletedStatus = false,
+        includeRetryCheckpoint = true,
+    )
+
+    private fun createCte(
+        params: RelationFilters,
+        includeMessage: Boolean,
+        excludeCompletedStatus: Boolean,
+        includeRetryCheckpoint: Boolean = includeMessage,
+    ): Cte = buildCte {
         select {
             addColumn {
                 column {
@@ -47,10 +87,28 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
                 }
                 alias(SystemMigrationVersionQuery::status)
             }
+            if (includeMessage) {
+                addColumn {
+                    column {
+                        tableSelector(SystemMigrationVersionModel::class)
+                        columnSelector(SystemMigrationVersionModel::message)
+                    }
+                    alias(SystemMigrationVersionQuery::message)
+                }
+            }
+            if (includeRetryCheckpoint) {
+                addColumn {
+                    column {
+                        tableSelector(SystemMigrationVersionModel::class)
+                        columnSelector(SystemMigrationVersionModel::retryCheckpoint)
+                    }
+                    alias(SystemMigrationVersionQuery::retryCheckpoint)
+                }
+            }
         }
         from { model(SystemMigrationVersionModel::class) }
 
-        if (params.id != null || params.tagId != null || params.status != null) {
+        if (params.id != null || params.tagId != null || params.status != null || excludeCompletedStatus) {
             where {
                 conditions {
                     params.id?.let { value ->
@@ -92,6 +150,20 @@ class SystemMigrationVersionQuery : ICteDeclaration<SystemMigrationVersionQuery.
                             sideValueParam {
                                 paramName("system_migration_version_status")
                                 paramValue(value)
+                            }
+                        }
+                    }
+                    if (excludeCompletedStatus) {
+                        addCondition {
+                            logicalAnd()
+                            sideSelector {
+                                tableSelector(SystemMigrationVersionModel::class)
+                                columnSelector(SystemMigrationVersionModel::status)
+                            }
+                            operationNotEqual()
+                            sideValueParam {
+                                paramName("system_migration_version_completed_status")
+                                paramValue(SystemMigrationVersionModel.STATUS_MIGRATE_COMPLETED)
                             }
                         }
                     }

@@ -1,5 +1,6 @@
 package model.version_history
 
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import java.util.ArrayList
 import java.util.Collections
 
@@ -32,10 +33,12 @@ internal data class MigrationHistoryVersion(
     val id: Int,
     val tagId: Int,
     val status: Int,
+    val message: String? = null,
+    val retryCheckpoint: String? = null,
 ) {
     companion object {
         /** Persisted code for a Version whose migration and history writes completed. */
-        const val STATUS_MIGRATE_COMPLETED = 3
+        const val STATUS_MIGRATE_COMPLETED = MigrationVersionState.STATUS_MIGRATE_COMPLETED
     }
 }
 
