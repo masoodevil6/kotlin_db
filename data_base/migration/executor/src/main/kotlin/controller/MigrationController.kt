@@ -12,6 +12,7 @@ import gog.my_project.data_base_migration.executor.service.run.MigrationRunOrche
 import gog.my_project.data_base_migration.executor.service.status.MigrationStatusService
 import gog.my_project.data_base_migration.executor.service.version_selection.MigrationCurrentVersionService
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionStateService
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusReport
 import kotlin.jvm.JvmOverloads
@@ -30,7 +31,12 @@ class MigrationController(
     /** Initializes the System Migration storage tables in the caller's Operation scope. */
     fun init(scope: OperationExecutionScope): ExecuteResult<Boolean> = initializer.init(scope)
 
-    /** Returns the currently applied public Migration Version, or `Success(null)` if none is applied. */
+    /**
+     * Returns the currently applied public Migration Version, or `Success(null)` if none is applied.
+     * The supplied Scope must be an active managed root Connection Scope with a canonical
+     * [DatabaseIdentity], a MySQL or MariaDB dialect, and no active session advisory lock.
+     * Unsupported Scopes fail through the existing Operation system-lock contract.
+     */
     fun current(scope: OperationExecutionScope): ExecuteResult<MigrationVersion?> =
         when (val result = currentVersionService.currentVersion(scope)) {
             is ExecuteResult.Failure -> result
@@ -57,7 +63,12 @@ class MigrationController(
         versionId: Int,
     ): ExecuteResult<MigrationRecoveryTarget?> = stateService.state(scope, versionId)
 
-    /** Reads and analyzes persisted migration status in the caller's Operation scope. */
+    /**
+     * Reads and analyzes persisted Migration status under one Migration system lock.
+     * The supplied Scope must be an active managed root Connection Scope with a canonical
+     * [DatabaseIdentity], a MySQL or MariaDB dialect, and no active session advisory lock.
+     * Unsupported Scopes fail through the existing Operation system-lock contract.
+     */
     fun status(scope: OperationExecutionScope): ExecuteResult<MigrationStatusReport> =
         statusService.status(scope)
 
@@ -90,5 +101,11 @@ class MigrationController(
         toCompleteVersion: Boolean,
         scope: OperationExecutionScope,
     ): ExecuteResult<Boolean> = runOrchestrationService.retryDown(target, toCompleteVersion, scope)
+
+    /** Selects and dispatches recovery for the latest incomplete Version. */
+    fun recovery(
+        scope: OperationExecutionScope,
+        toCompleteVersion: Boolean = true,
+    ): ExecuteResult<Boolean> = runOrchestrationService.recovery(scope, toCompleteVersion)
 
 }

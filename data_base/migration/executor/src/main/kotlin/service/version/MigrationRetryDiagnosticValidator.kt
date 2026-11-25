@@ -8,8 +8,58 @@ import model.retry.MigrationRetryCheckpoint
 import model.retry.MigrationRetryCheckpointCodec
 import model.retry.MigrationRetryPhase
 
-/** Strictly validates the persisted diagnostic pair needed to resume a recording-only failure. */
+/** Strictly validates the persisted diagnostic pair required for an explicit Retry. */
 internal class MigrationRetryDiagnosticValidator {
+    fun validateExecutionFailure(
+        status: Int,
+        versionId: Int,
+        checkpoint: MigrationRetryCheckpoint,
+        currentMessage: String?,
+        registeredMigrationIds: Set<String>,
+    ) {
+        val expectedStage = when (status) {
+            MigrationVersionState.STATUS_MIGRATE_FAILED_UP -> MigrationFailureDiagnosticStage.UP_EXECUTION
+            MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN -> MigrationFailureDiagnosticStage.DOWN_EXECUTION
+            else -> throw IllegalArgumentException("Status $status is not an execution failure")
+        }
+        val expectedOriginalStatus = if (status == MigrationVersionState.STATUS_MIGRATE_FAILED_UP) {
+            MigrationVersionState.STATUS_MIGRATE_STARTED
+        } else {
+            MigrationVersionState.STATUS_ROLLBACK_STARTED
+        }
+        require(checkpoint.originalStatus == expectedOriginalStatus) {
+            "Execution Failure Status and Checkpoint directions disagree"
+        }
+        require(checkpoint.phase == MigrationRetryPhase.EXECUTION_IN_FLIGHT) {
+            "Execution Failure Checkpoint must remain EXECUTION_IN_FLIGHT"
+        }
+        val cursor = requireNotNull(checkpoint.cursorMigrationId) {
+            "Execution Failure requires a Migration cursor"
+        }
+        require(cursor in registeredMigrationIds) {
+            "Execution Failure cursor '$cursor' is not registered for Version $versionId"
+        }
+
+        val current = parse(
+            currentMessage,
+            expectedVersionId = versionId,
+            expectedStage = expectedStage,
+            registeredMigrationIds = registeredMigrationIds,
+        )
+        require(current.migrationId == cursor) {
+            "Execution Diagnostic Migration ID does not match the Checkpoint cursor"
+        }
+        val original = parse(
+            checkpoint.originalMessage,
+            expectedVersionId = versionId,
+            expectedStage = expectedStage,
+            registeredMigrationIds = registeredMigrationIds,
+        )
+        require(original.migrationId == cursor) {
+            "Original Execution Diagnostic Migration ID does not match the Checkpoint cursor"
+        }
+    }
+
     fun validateRecordingFailure(
         status: Int,
         versionId: Int,

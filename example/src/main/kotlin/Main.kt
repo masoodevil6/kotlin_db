@@ -10,6 +10,8 @@ import gog.my_project.data_base_manager.facade.watch
 import gog.my_project.data_base_migration.api.builder.migrationConfig
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryTarget
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionSelection
 import gog.my_project.data_base_migration.core.events.MigrationEvent
 import gog.my_project.data_base_migration.facade.migration
 import gog.my_project.data_base_migration.facade.migrationConfiguration
@@ -32,12 +34,87 @@ private const val EVENT_TABLE = "manager_events"
 private const val SAMPLE_CUSTOMER = "Example Customer"
 private const val SAMPLE_EVENT = "Example Event"
 
+internal data class ExampleDatabaseAttempt(
+    val database: String,
+    val failure: Throwable?,
+)
+
+internal fun runIndependentDatabaseAttempts(
+    onAttempt: (ExampleDatabaseAttempt) -> Unit,
+    main: () -> Unit,
+    analytics: () -> Unit,
+) {
+    val mainAttempt = captureDatabaseAttempt("MAIN", main)
+    onAttempt(mainAttempt)
+    (mainAttempt.failure as? Error)?.let { throw it }
+
+    val analyticsAttempt = captureDatabaseAttempt("ANALYTICS", analytics)
+    onAttempt(analyticsAttempt)
+    (analyticsAttempt.failure as? Error)?.let { throw it }
+}
+
+private fun captureDatabaseAttempt(database: String, action: () -> Unit): ExampleDatabaseAttempt = try {
+    action()
+    ExampleDatabaseAttempt(database, null)
+} catch (failure: Exception) {
+    ExampleDatabaseAttempt(database, failure)
+} catch (failure: Error) {
+    ExampleDatabaseAttempt(database, failure)
+}
+
+internal fun combinedDatabaseFailure(attempts: List<ExampleDatabaseAttempt>): Throwable? {
+    val failedAttempts = attempts.filter { it.failure != null }
+    if (failedAttempts.isEmpty()) return null
+
+    val fatalFailure = failedAttempts.firstNotNullOfOrNull { it.failure as? Error }
+    if (fatalFailure != null) {
+        failedAttempts.forEach { attempt ->
+            val error = requireNotNull(attempt.failure)
+            if (error !== fatalFailure) {
+                fatalFailure.addSuppressed(
+                    ExampleFailure("${attempt.database} database run failed", error),
+                )
+            }
+        }
+        return fatalFailure
+    }
+
+    val first = failedAttempts.first()
+    val combined = ExampleFailure("${first.database} database run failed", requireNotNull(first.failure))
+    failedAttempts.drop(1).forEach { attempt ->
+        combined.addSuppressed(
+            ExampleFailure("${attempt.database} database run failed", requireNotNull(attempt.failure)),
+        )
+    }
+    return combined
+}
+
+internal fun combineFailures(primary: Throwable?, secondary: Throwable?): Throwable? {
+    if (primary == null) return secondary
+    if (secondary == null || primary === secondary) return primary
+
+    if (secondary is Error && primary !is Error) {
+        secondary.addSuppressed(primary)
+        return secondary
+    }
+
+    primary.addSuppressed(secondary)
+    return primary
+}
+
 
 /*
     migrate()
     .\gradlew.bat :example:run --project-prop "database.example.run=true"
     rollback()
     .\gradlew.bat :example:run --project-prop "database.example.run=true"  --project-prop "database.example.rollback=true"
+    recovery()
+    .\gradlew.bat :example:run --project-prop "database.example.run=true" --project-prop "database.example.recovery=true"
+
+    .\gradlew.bat :example:run --project-prop "database.example.run=true" --project-prop "database.example.status=true"
+    .\gradlew.bat :example:run --project-prop "database.example.run=true" --project-prop "database.example.state=true"
+    .\gradlew.bat :example:run --project-prop "database.example.run=true" --project-prop "database.example.retryUp=true"
+    .\gradlew.bat :example:run --project-prop "database.example.run=true" --project-prop "database.example.retryDown=true"
 */
 
 
@@ -48,6 +125,26 @@ fun main() {
         return
     }
     val rollbackEnabled = System.getProperty("database.example.rollback", "false").toBooleanStrict()
+    val recoveryEnabled = System.getProperty("database.example.recovery", "false").toBooleanStrict()
+    val statusEnabled = System.getProperty("database.example.status", "false").toBooleanStrict()
+    val stateEnabled = System.getProperty("database.example.state", "false").toBooleanStrict()
+    val retryUpEnabled = System.getProperty("database.example.retryUp", "false").toBooleanStrict()
+    val retryDownEnabled = System.getProperty("database.example.retryDown", "false").toBooleanStrict()
+    val retryToCompleteVersion = System.getProperty(
+        "database.example.retry.toCompleteVersion",
+        "false",
+    ).toBooleanStrict()
+    val enabledModes = listOf(
+        rollbackEnabled,
+        recoveryEnabled,
+        statusEnabled,
+        stateEnabled,
+        retryUpEnabled,
+        retryDownEnabled,
+    ).count { it }
+    require(enabledModes <= 1) {
+        "Enable at most one of database.example.rollback, recovery, status, state, retryUp, or retryDown"
+    }
     val mainConfig = databaseConfig("MAIN", "main_example")
     val analyticsConfig = databaseConfig("ANALYTICS", "analytics_example")
 
@@ -70,56 +167,125 @@ fun main() {
     }
 
     var failure: Throwable? = null
+    val databaseAttempts = mutableListOf<ExampleDatabaseAttempt>()
     var mainWatch: DatabaseWatchSubscription? = null
     //var analyticsWatch: DatabaseWatchSubscription? = null
     try {
-        val main = manager[mainDatabase]
-        val analytics = manager[analyticsDatabase]
+        runIndependentDatabaseAttempts(
+            onAttempt = databaseAttempts::add,
+            main = {
+                val main = manager[mainDatabase]
+                mainWatch = main.watch { event -> reportDatabaseEvent("MAIN", event) }
 
-        mainWatch = main.watch { event -> reportDatabaseEvent("MAIN", event) }
-        //analyticsWatch = analytics.watch { event -> reportDatabaseEvent("ANALYTICS", event) }
+                if (rollbackEnabled) {
+                    println("Rollback opt-in is enabled.")
+                    // Rollback removes the application tables, so exercise them before rolling back.
+                    insertAndReadMainExamples(main)
+                }
 
-        if (rollbackEnabled) {
-            println("Rollback opt-in is enabled.")
-            // Rollback removes the application tables, so exercise them before rolling back.
-            insertAndReadExamples(main, analytics)
-        }
+                requireValue("Main migration block", main.migration {
+                    requireMigrationSuccess("Main init", init())
 
-        requireValue("Main migration block", main.migration {
-            requireMigrationSuccess("Main init", init())
+                    if (statusEnabled) {
+                        reportMigrationState("Main status", status(), current())
+                    } else if (stateEnabled) {
+                        reportVersionState("Main latest state", state(MigrationVersionSelection.LATEST))
+                        reportVersionState(
+                            "Main latest incomplete state",
+                            state(MigrationVersionSelection.LATEST_INCOMPLETE),
+                        )
+                    } else if (retryUpEnabled) {
+                        retryFromLatestState(
+                            "Main retryUp",
+                            state(MigrationVersionSelection.LATEST_INCOMPLETE),
+                            retryToCompleteVersion,
+                        ) { target, toCompleteVersion -> retryUp(target, toCompleteVersion) }
+                    } else if (retryDownEnabled) {
+                        retryFromLatestState(
+                            "Main retryDown",
+                            state(MigrationVersionSelection.LATEST_INCOMPLETE),
+                            retryToCompleteVersion,
+                        ) { target, toCompleteVersion -> retryDown(target, toCompleteVersion) }
+                    } else if (rollbackEnabled) {
+                        println("Starting Main rollback...")
+                        requireMigrationSuccess("Main rollback", rollback())
+                        reportMigrationState("Main after rollback", status(), current())
+                    } else if (recoveryEnabled) {
+                        println("Starting Main recovery...")
+                        reportRecovery("Main recovery", recovery(true))
+                        reportMigrationState("Main after recovery", status(), current())
+                    } else {
+                        requireMigrationSuccess("Main migrate", migrate())
+                        reportMigrationState("Main", status(), current())
 
-            if (rollbackEnabled) {
-                println("Starting Main rollback...")
-                requireMigrationSuccess("Main rollback", rollback())
-                reportMigrationState("Main after rollback", status(), current())
-            } else {
-                requireMigrationSuccess("Main migrate", migrate())
-                reportMigrationState("Main", status(), current())
+                        requireMigrationSuccess("Main repeated migrate", migrate())
+                        reportMigrationState("Main after repeated migrate", status(), current())
+                    }
+                })
 
-                requireMigrationSuccess("Main repeated migrate", migrate())
-                reportMigrationState("Main after repeated migrate", status(), current())
-            }
-        })
+                if (!rollbackEnabled && !recoveryEnabled && !statusEnabled && !stateEnabled &&
+                    !retryUpEnabled && !retryDownEnabled
+                ) {
+                    insertAndReadMainExamples(main)
+                }
+            },
+            analytics = {
+                val analytics = manager[analyticsDatabase]
+                //analyticsWatch = analytics.watch { event -> reportDatabaseEvent("ANALYTICS", event) }
 
-        requireValue("Analytics migration block", analytics.migration {
-            requireMigrationSuccess("Analytics init", init())
+                if (rollbackEnabled) {
+                    println("Rollback opt-in is enabled.")
+                    // Rollback removes the application tables, so exercise them before rolling back.
+                    insertAndReadAnalyticsExamples(analytics)
+                }
 
-            if (rollbackEnabled) {
-                println("Starting Analytics rollback...")
-                requireMigrationSuccess("Analytics rollback", rollback())
-                reportMigrationState("Analytics after rollback", status(), current())
-            } else {
-                requireMigrationSuccess("Analytics migrate", migrate())
-                reportMigrationState("Analytics", status(), current())
+                requireValue("Analytics migration block", analytics.migration {
+                    requireMigrationSuccess("Analytics init", init())
 
-                requireMigrationSuccess("Analytics repeated migrate", migrate())
-                reportMigrationState("Analytics after repeated migrate", status(), current())
-            }
-        })
+                    if (statusEnabled) {
+                        reportMigrationState("Analytics status", status(), current())
+                    } else if (stateEnabled) {
+                        reportVersionState("Analytics latest state", state(MigrationVersionSelection.LATEST))
+                        reportVersionState(
+                            "Analytics latest incomplete state",
+                            state(MigrationVersionSelection.LATEST_INCOMPLETE),
+                        )
+                    } else if (retryUpEnabled) {
+                        retryFromLatestState(
+                            "Analytics retryUp",
+                            state(MigrationVersionSelection.LATEST_INCOMPLETE),
+                            retryToCompleteVersion,
+                        ) { target, toCompleteVersion -> retryUp(target, toCompleteVersion) }
+                    } else if (retryDownEnabled) {
+                        retryFromLatestState(
+                            "Analytics retryDown",
+                            state(MigrationVersionSelection.LATEST_INCOMPLETE),
+                            retryToCompleteVersion,
+                        ) { target, toCompleteVersion -> retryDown(target, toCompleteVersion) }
+                    } else if (rollbackEnabled) {
+                        println("Starting Analytics rollback...")
+                        requireMigrationSuccess("Analytics rollback", rollback())
+                        reportMigrationState("Analytics after rollback", status(), current())
+                    } else if (recoveryEnabled) {
+                        println("Starting Analytics recovery...")
+                        reportRecovery("Analytics recovery", recovery(true))
+                        reportMigrationState("Analytics after recovery", status(), current())
+                    } else {
+                        requireMigrationSuccess("Analytics migrate", migrate())
+                        reportMigrationState("Analytics", status(), current())
 
-        if (!rollbackEnabled) {
-            insertAndReadExamples(main, analytics)
-        }
+                        requireMigrationSuccess("Analytics repeated migrate", migrate())
+                        reportMigrationState("Analytics after repeated migrate", status(), current())
+                    }
+                })
+
+                if (!rollbackEnabled && !recoveryEnabled && !statusEnabled && !stateEnabled &&
+                    !retryUpEnabled && !retryDownEnabled
+                ) {
+                    insertAndReadAnalyticsExamples(analytics)
+                }
+            },
+        )
 
 
     } catch (error: Throwable) {
@@ -130,18 +296,12 @@ fun main() {
         try {
             manager.shutdown()
         } catch (cleanupFailure: Throwable) {
-            val primary = failure
-            if (primary == null) {
-                failure = cleanupFailure
-            } else if (cleanupFailure is Error && primary !is Error) {
-                cleanupFailure.addSuppressed(primary)
-                failure = cleanupFailure
-            } else if (primary !== cleanupFailure) {
-                primary.addSuppressed(cleanupFailure)
-            }
+            failure = combineFailures(failure, cleanupFailure)
         }
     }
 
+    reportDatabaseAttempts(databaseAttempts)
+    failure = combineFailures(failure, combinedDatabaseFailure(databaseAttempts))
     failure?.let(::reportAndFail)
     println("Database lifecycle example completed successfully.")
 }
@@ -164,6 +324,20 @@ private fun reportDatabaseEvent(label: String, event: DatabaseEvent) {
     println("[$label] $details")
 }
 
+private fun reportDatabaseAttempts(attempts: List<ExampleDatabaseAttempt>) {
+    attempts.forEach { attempt ->
+        val error = attempt.failure
+        if (error == null) {
+            println("[${attempt.database}] migration result: SUCCESS")
+        } else {
+            println(
+                "[${attempt.database}] migration result: FAILURE " +
+                    "(${error::class.qualifiedName}: ${error.message})",
+            )
+        }
+    }
+}
+
 private fun closeWatchSubscription(
     subscription: DatabaseWatchSubscription?,
     primaryFailure: Throwable?,
@@ -173,18 +347,7 @@ private fun closeWatchSubscription(
         subscription.close()
         primaryFailure
     } catch (cleanupFailure: Throwable) {
-        if (primaryFailure == null) {
-            cleanupFailure
-        } else {
-            if (primaryFailure !== cleanupFailure) {
-                try {
-                    primaryFailure.addSuppressed(cleanupFailure)
-                } catch (_: Throwable) {
-                    // Preserve the primary failure even if cleanup diagnostics cannot be attached.
-                }
-            }
-            primaryFailure
-        }
+        combineFailures(primaryFailure, cleanupFailure)
     }
 }
 
@@ -209,6 +372,77 @@ private fun requireMigrationSuccess(label: String, result: ExecuteResult<Boolean
     println("$label: completed")
 }
 
+private fun reportRecovery(label: String, result: ExecuteResult<Boolean>) {
+    when (result) {
+        is ExecuteResult.Failure -> throwResultFailure(label, result.exception)
+        is ExecuteResult.Success -> when (result.result) {
+            null -> println("$label: no incomplete Migration Version; nothing to recover")
+            true -> println("$label: completed")
+            false -> println("$label: stopped before completing the Version")
+        }
+    }
+}
+
+private fun reportVersionState(
+    label: String,
+    result: ExecuteResult<MigrationRecoveryTarget?>,
+) {
+    when (result) {
+        is ExecuteResult.Failure -> throwResultFailure(label, result.exception)
+        is ExecuteResult.Success -> {
+            val target = result.result
+            if (target == null) {
+                println("$label: no Version selected")
+                return
+            }
+
+            val state = target.version
+            println(
+                "$label: versionId=${state.versionId}, tagId=${state.tagId}, status=${state.status}, " +
+                    "operation=${target.operation}, migrationId=${target.migration?.id?.value ?: "unresolved"}, " +
+                    "checkpointRevision=${target.checkpointRevision ?: "unknown"}",
+            )
+            state.message?.let { println("$label diagnostic: $it") }
+        }
+    }
+}
+
+private fun retryFromLatestState(
+    label: String,
+    stateResult: ExecuteResult<MigrationRecoveryTarget?>,
+    toCompleteVersion: Boolean,
+    retry: (MigrationRecoveryTarget, Boolean) -> ExecuteResult<Boolean>,
+) {
+    when (stateResult) {
+        is ExecuteResult.Failure -> throwResultFailure("$label state", stateResult.exception)
+        is ExecuteResult.Success -> {
+            val target = stateResult.result
+            if (target == null) {
+                println("$label: no incomplete Version; Retry was not invoked")
+                return
+            }
+
+            println(
+                "$label target: versionId=${target.version.versionId}, status=${target.version.status}, " +
+                    "operation=${target.operation}, migrationId=${target.migration?.id?.value ?: "unresolved"}, " +
+                    "checkpointRevision=${target.checkpointRevision ?: "unknown"}",
+            )
+            reportRetryResult(label, retry(target, toCompleteVersion))
+        }
+    }
+}
+
+private fun reportRetryResult(label: String, result: ExecuteResult<Boolean>) {
+    when (result) {
+        is ExecuteResult.Failure -> throwResultFailure(label, result.exception)
+        is ExecuteResult.Success -> when (result.result) {
+            null -> println("$label: no result value")
+            true -> println("$label: Version completed")
+            false -> println("$label: stopped at the next Version boundary")
+        }
+    }
+}
+
 private fun reportMigrationState(
     label: String,
     statusResult: ExecuteResult<MigrationStatusReport>,
@@ -216,7 +450,7 @@ private fun reportMigrationState(
 ) {
     val status = requireValue("$label status", statusResult)
     val current = when (val result = currentResult) {
-        is ExecuteResult.Failure -> throw ExampleFailure("$label current version", result.exception)
+        is ExecuteResult.Failure -> throwResultFailure("$label current version", result.exception)
         is ExecuteResult.Success -> result.result?.name ?: "none"
     }
     val versions = status.versions.joinToString { "${it.name}:${it.status}" }.ifEmpty { "none" }
@@ -227,24 +461,26 @@ private fun reportMigrationState(
     )
 }
 
-private fun insertAndReadExamples(main: DatabaseHandleApi, analytics: DatabaseHandleApi) {
+private fun insertAndReadMainExamples(main: DatabaseHandleApi) {
     val customerRows = requireValue("Main connection queries", main.connection { executor ->
         ensureCustomer(executor)
         selectRows(executor, CUSTOMER_TABLE, "customer_id", "display_name")
     })
     reportRows("Main connection SELECT", customerRows, "customer_id", "display_name")
 
-    val eventRows = requireValue("Analytics connection queries", analytics.connection { executor ->
-        ensureEvent(executor)
-        selectRows(executor, EVENT_TABLE, "event_id", "event_name")
-    })
-    reportRows("Analytics connection SELECT", eventRows, "event_id", "event_name")
-
     val customerTransactionRows = requireValue(
         "Main transaction SELECT",
         main.transaction { executor -> selectRows(executor, CUSTOMER_TABLE, "customer_id", "display_name") },
     )
     reportRows("Main transaction SELECT", customerTransactionRows, "customer_id", "display_name")
+}
+
+private fun insertAndReadAnalyticsExamples(analytics: DatabaseHandleApi) {
+    val eventRows = requireValue("Analytics connection queries", analytics.connection { executor ->
+        ensureEvent(executor)
+        selectRows(executor, EVENT_TABLE, "event_id", "event_name")
+    })
+    reportRows("Analytics connection SELECT", eventRows, "event_id", "event_name")
 
     val eventTransactionRows = requireValue(
         "Analytics transaction SELECT",
@@ -363,11 +599,16 @@ private fun requiredEnvironment(name: String, allowWhitespace: Boolean = false):
 }
 
 private fun <T : Any> requireValue(label: String, result: ExecuteResult<T>): T = when (result) {
-    is ExecuteResult.Failure -> throw ExampleFailure(label, result.exception)
+    is ExecuteResult.Failure -> throwResultFailure(label, result.exception)
     is ExecuteResult.Success -> result.result ?: throw ExampleFailure(
         label,
         IllegalStateException("Operation completed without a result value"),
     )
+}
+
+private fun throwResultFailure(label: String, failure: Throwable): Nothing {
+    if (failure is Error) throw failure
+    throw ExampleFailure(label, failure)
 }
 
 private fun reportAndFail(failure: Throwable): Nothing {

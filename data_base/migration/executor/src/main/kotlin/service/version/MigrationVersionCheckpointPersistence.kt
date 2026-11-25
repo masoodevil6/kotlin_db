@@ -109,6 +109,32 @@ internal class MigrationVersionCheckpointPersistence {
         expectedCheckpoint,
     )
 
+    /** Allows an explicitly requested UP Retry to leave status 101 while preserving its in-flight cursor. */
+    fun normalizeUpExecutionFailure(
+        scope: OperationExecutionScope,
+        versionId: Int,
+        expectedCheckpoint: String,
+    ): ExecuteResult<MigrationCheckpointWriteResult> = normalizeExecutionFailure(
+        scope,
+        versionId,
+        MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+        MigrationVersionState.STATUS_MIGRATE_STARTED,
+        expectedCheckpoint,
+    )
+
+    /** Allows an explicitly requested DOWN Retry to leave status 201 while preserving its in-flight cursor. */
+    fun normalizeDownExecutionFailure(
+        scope: OperationExecutionScope,
+        versionId: Int,
+        expectedCheckpoint: String,
+    ): ExecuteResult<MigrationCheckpointWriteResult> = normalizeExecutionFailure(
+        scope,
+        versionId,
+        MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN,
+        MigrationVersionState.STATUS_ROLLBACK_STARTED,
+        expectedCheckpoint,
+    )
+
     /** Completes UP and removes its checkpoint atomically. */
     fun finalizeUp(
         scope: OperationExecutionScope,
@@ -148,6 +174,26 @@ internal class MigrationVersionCheckpointPersistence {
     }
 
     private fun normalizeRecordingFailure(
+        scope: OperationExecutionScope,
+        versionId: Int,
+        expectedStatus: Int,
+        targetStatus: Int,
+        expectedCheckpoint: String,
+    ): ExecuteResult<MigrationCheckpointWriteResult> {
+        val checkpointPredicate = checkpointPredicate(expectedCheckpoint)
+        return update(
+            scope,
+            "UPDATE system_migration_version SET status = ? " +
+                "WHERE id = ? AND status = ? AND ${checkpointPredicate.sql}",
+            listOf(
+                intBinding("targetStatus", targetStatus),
+                intBinding("versionId", versionId),
+                intBinding("expectedStatus", expectedStatus),
+            ) + checkpointPredicate.bindings,
+        )
+    }
+
+    private fun normalizeExecutionFailure(
         scope: OperationExecutionScope,
         versionId: Int,
         expectedStatus: Int,

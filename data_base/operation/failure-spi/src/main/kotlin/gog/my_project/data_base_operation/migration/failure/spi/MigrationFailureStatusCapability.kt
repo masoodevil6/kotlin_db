@@ -1,6 +1,6 @@
 package gog.my_project.data_base_operation.migration.failure.spi
 
-/** One of the fixed Migration failure transitions supported by the Operation capability. */
+/** One of the bounded Migration failure transitions supported by the Operation capability. */
 public sealed interface MigrationFailureStatusCommand {
     public val versionId: Int
 
@@ -19,6 +19,16 @@ public sealed interface MigrationFailureStatusCommand {
     public data class DownRecordingFailure(
         override val versionId: Int,
     ) : MigrationFailureStatusCommand
+
+    /** Protective fallback for an UP metadata/reconciliation state that cannot be safely classified. */
+    public data class UpManualRecoveryRequired(
+        override val versionId: Int,
+    ) : MigrationFailureStatusCommand
+
+    /** Protective fallback for a DOWN metadata/reconciliation state that cannot be safely classified. */
+    public data class DownManualRecoveryRequired(
+        override val versionId: Int,
+    ) : MigrationFailureStatusCommand
 }
 
 /** Result of one conditional Migration failure status write. */
@@ -28,7 +38,7 @@ public enum class MigrationFailureStatusWriteResult {
     INDETERMINATE,
 }
 
-/** Narrow callback-scoped capability for the four fixed Migration failure status writes. */
+/** Narrow callback-scoped capability for the fixed Migration failure status transitions. */
 public interface MigrationFailureStatusCapability {
     public fun write(
         command: MigrationFailureStatusCommand,
@@ -43,6 +53,14 @@ public sealed interface MigrationFailureCheckpointWriteCommand {
     public val diagnosticMessage: String
 
     public data class UpExecutionUncertain(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    /** A Migration callback ran and returned an ordinary UP execution failure. */
+    public data class UpExecutionFailure(
         override val versionId: Int,
         override val expectedCheckpoint: String,
         override val updatedCheckpoint: String,
@@ -71,6 +89,14 @@ public sealed interface MigrationFailureCheckpointWriteCommand {
     ) : MigrationFailureCheckpointWriteCommand
 
     public data class DownExecutionUncertain(
+        override val versionId: Int,
+        override val expectedCheckpoint: String,
+        override val updatedCheckpoint: String,
+        override val diagnosticMessage: String,
+    ) : MigrationFailureCheckpointWriteCommand
+
+    /** A Migration callback ran and returned an ordinary DOWN execution failure. */
+    public data class DownExecutionFailure(
         override val versionId: Int,
         override val expectedCheckpoint: String,
         override val updatedCheckpoint: String,

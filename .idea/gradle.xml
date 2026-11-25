@@ -23,8 +23,8 @@
             <option value="$PROJECT_DIR$/app" />
             <option value="$PROJECT_DIR$/buildSrc" />
             <option value="$PROJECT_DIR$/collection" />
+            <option value="$PROJECT_DIR$/collection/1_examples.md" />
             <option value="$PROJECT_DIR$/collection/core" />
-            <option value="$PROJECT_DIR$/collection/examples" />
             <option value="$PROJECT_DIR$/data_base" />
             <option value="$PROJECT_DIR$/data_base/core" />
             <option value="$PROJECT_DIR$/data_base/manager" />
@@ -61,6 +61,14 @@
             <option value="$PROJECT_DIR$/data_base/operation/schema/executor" />
             <option value="$PROJECT_DIR$/data_base/operation/schema/params" />
             <option value="$PROJECT_DIR$/data_base/operation/schema/renderer" />
+            <option value="$PROJECT_DIR$/data_base/operation/session" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/api" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/ast" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/builder" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/dialect" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/example" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/executor" />
+            <option value="$PROJECT_DIR$/data_base/operation/session/renderer" />
             <option value="$PROJECT_DIR$/example" />
             <option value="$PROJECT_DIR$/tools" />
             <option value="$PROJECT_DIR$/utils" />

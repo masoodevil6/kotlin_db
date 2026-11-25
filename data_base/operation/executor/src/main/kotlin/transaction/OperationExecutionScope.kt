@@ -24,6 +24,18 @@ import gog.my_project.data_base_operation.executor.events.OperationEventType
 import gog.my_project.data_base.core.events.DatabaseEvent
 import gog.my_project.data_base_operation.executor.events.DatabaseEventPublisher
 import gog.my_project.data_base_operation.executor.events.publish
+import gog.my_project.data_base_session.api.result.AcquireSessionLockResult
+import gog.my_project.data_base_session.api.result.ReleaseSessionLockResult
+import gog.my_project.data_base_session.api.result.SessionExecutionResult
+import gog.my_project.data_base_session.api.interfaces.api.ISessionCommandApi
+import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.acquire.IAcquireSessionAdvisoryLockApi
+import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.release.IReleaseSessionAdvisoryLockApi
+import gog.my_project.data_base_session.ast.interfaces.ISessionCommandAst
+import gog.my_project.data_base_session.ast.interfaces.advisory_lock.acquire.IAcquireSessionAdvisoryLockAst
+import gog.my_project.data_base_session.ast.interfaces.advisory_lock.release.IReleaseSessionAdvisoryLockAst
+import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base_session.executor.manager.SessionExecutor
+import gog.my_project.data_base_operation.executor.session.result.SessionConsumer
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.math.BigDecimal
@@ -45,6 +57,45 @@ interface OperationExecutionContext {
         get() = DefaultDatabaseConfig.config.platform
 
     fun executeDdl(sql: String, parameters: List<OperationParameter> = emptyList()): ExecuteResult<Boolean>
+
+    /** Creates a deferred, typed Session command for execution on this Operation scope. */
+    fun <A : ISessionCommandAst, R : SessionExecutionResult> session(
+        api: ISessionCommandApi<A, R>,
+    ): SessionConsumer<R> = SessionConsumer {
+        failed(
+            UnsupportedOperationException(
+                "Session commands are not supported by this OperationExecutionContext",
+            ),
+        )
+    }
+
+    /** Acquires a session-level advisory lock on the active Operation-owned Connection. */
+    fun acquireSessionAdvisoryLock(
+        api: IAcquireSessionAdvisoryLockApi,
+    ): ExecuteResult<AcquireSessionLockResult> = acquireSessionAdvisoryLock(api.ast)
+
+    /** Acquires a session-level advisory lock on the active Operation-owned Connection. */
+    fun acquireSessionAdvisoryLock(
+        ast: IAcquireSessionAdvisoryLockAst,
+    ): ExecuteResult<AcquireSessionLockResult> = failed(
+        UnsupportedOperationException(
+            "Session advisory lock acquisition is not supported by this OperationExecutionContext",
+        ),
+    )
+
+    /** Releases a session-level advisory lock on the active Operation-owned Connection. */
+    fun releaseSessionAdvisoryLock(
+        api: IReleaseSessionAdvisoryLockApi,
+    ): ExecuteResult<ReleaseSessionLockResult> = releaseSessionAdvisoryLock(api.ast)
+
+    /** Releases a session-level advisory lock on the active Operation-owned Connection. */
+    fun releaseSessionAdvisoryLock(
+        ast: IReleaseSessionAdvisoryLockAst,
+    ): ExecuteResult<ReleaseSessionLockResult> = failed(
+        UnsupportedOperationException(
+            "Session advisory lock release is not supported by this OperationExecutionContext",
+        ),
+    )
 
     /**
      * Executes DDL with an explicit, per-failure policy. Implementations that do not support this
@@ -213,6 +264,7 @@ class OperationExecutionScope private constructor(
     private val ownerThread = Thread.currentThread()
     private val jdbcConnection = connection
     private val typedQueryExecutor = QueryExecute(jdbcConnection)
+    private val sessionExecutor = SessionExecutor()
     private val failureOwner = operationFailureOwner
 
     /** Identity bridge used only by the owning coordinator during Scope activation. */
@@ -274,6 +326,117 @@ class OperationExecutionScope private constructor(
             firstFailure
         }
         return localRejection ?: OperationScopeGuard.rejectIfNotCurrent(this)
+    }
+
+    override fun acquireSessionAdvisoryLock(
+        api: IAcquireSessionAdvisoryLockApi,
+    ): ExecuteResult<AcquireSessionLockResult> = executeSessionAdvisoryLock { dialect ->
+        sessionExecutor.acquire(api.ast, jdbcConnection, dialect)
+    }
+
+    override fun acquireSessionAdvisoryLock(
+        ast: IAcquireSessionAdvisoryLockAst,
+    ): ExecuteResult<AcquireSessionLockResult> = executeSessionAdvisoryLock { dialect ->
+        sessionExecutor.acquire(ast, jdbcConnection, dialect)
+    }
+
+    override fun releaseSessionAdvisoryLock(
+        api: IReleaseSessionAdvisoryLockApi,
+    ): ExecuteResult<ReleaseSessionLockResult> = executeSessionAdvisoryLock { dialect ->
+        sessionExecutor.release(api.ast, jdbcConnection, dialect)
+    }
+
+    override fun releaseSessionAdvisoryLock(
+        ast: IReleaseSessionAdvisoryLockAst,
+    ): ExecuteResult<ReleaseSessionLockResult> = executeSessionAdvisoryLock { dialect ->
+        sessionExecutor.release(ast, jdbcConnection, dialect)
+    }
+
+    override fun <A : ISessionCommandAst, R : SessionExecutionResult> session(
+        api: ISessionCommandApi<A, R>,
+    ): SessionConsumer<R> {
+        val consumed = AtomicBoolean(false)
+        return SessionConsumer {
+            val rejection = rejectOperation()
+            if (rejection != null) {
+                ExecuteResult.Failure(rejection)
+            } else if (!OperationScopeGuard.isManagedConnectionScope(this)) {
+                failed(
+                    IllegalStateException(
+                        "Session commands require the active Operation-managed root Connection Scope",
+                    ),
+                )
+            } else {
+                val configuredDialect = databasePlatformConfig.dialect
+                val sessionDialect = when (configuredDialect) {
+                    DialectQuery.MY_SQL -> SessionDialect.MYSQL
+                    DialectQuery.MARIA_DB -> SessionDialect.MARIA_DB
+                    else -> null
+                }
+
+                if (sessionDialect == null) {
+                    failed(
+                        UnsupportedOperationException(
+                            "Session commands are not supported for dialect " +
+                                configuredDialect::class.simpleName,
+                        ),
+                    )
+                } else if (!consumed.compareAndSet(false, true)) {
+                    failed(IllegalStateException("A Session command Consumer may execute only once"))
+                } else {
+                    observeSql(null) {
+                        try {
+                            ExecuteResult.Success(
+                                api.dispatch(
+                                    OperationSessionCommandExecutor(jdbcConnection, sessionDialect),
+                                ),
+                            )
+                        } catch (error: Error) {
+                            recordFatal(error)
+                            throw error
+                        } catch (failure: Throwable) {
+                            failed(failure)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun <T> executeSessionAdvisoryLock(
+        execute: (SessionDialect) -> T,
+    ): ExecuteResult<T> {
+        rejectOperation()?.let { return ExecuteResult.Failure(it) }
+
+        if (!OperationScopeGuard.isManagedConnectionScope(this)) {
+            return failed(
+                IllegalStateException(
+                    "Session advisory lock commands require the active Operation-managed root Connection Scope",
+                ),
+            )
+        }
+
+        val sessionDialect = when (databasePlatformConfig.dialect) {
+            DialectQuery.MY_SQL -> SessionDialect.MYSQL
+            DialectQuery.MARIA_DB -> SessionDialect.MARIA_DB
+            else -> return failed(
+                UnsupportedOperationException(
+                    "Session advisory locks are not supported for dialect " +
+                        databasePlatformConfig.dialect::class.simpleName,
+                ),
+            )
+        }
+
+        return observeSql(null) {
+            try {
+                ExecuteResult.Success(execute(sessionDialect))
+            } catch (error: Error) {
+                recordFatal(error)
+                throw error
+            } catch (failure: Throwable) {
+                failed(failure)
+            }
+        }
     }
 
     /**
@@ -995,9 +1158,11 @@ class OperationExecutionScope private constructor(
 
     private companion object {
         const val MIGRATION_UP_STARTED_STATUS = 100
+        const val MIGRATION_UP_FAILED_EXECUTION_STATUS = 101
         const val MIGRATION_UP_FAILED_RECORD_STATUS = 102
         const val MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS = 110
         const val MIGRATION_DOWN_STARTED_STATUS = 200
+        const val MIGRATION_DOWN_FAILED_EXECUTION_STATUS = 201
         const val MIGRATION_DOWN_FAILED_RECORD_STATUS = 202
         const val MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS = 210
         const val MAX_SESSION_ADVISORY_LOCK_NAME_LENGTH = 64
@@ -1196,12 +1361,16 @@ class OperationExecutionScope private constructor(
         return try {
             val (expectedStatus, targetStatus) = when (command) {
                 is MigrationFailureStatusCommand.UpExecutionFailure ->
-                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_FAILED_EXECUTION_STATUS
                 is MigrationFailureStatusCommand.UpRecordingFailure ->
-                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_FAILED_RECORD_STATUS
                 is MigrationFailureStatusCommand.DownExecutionFailure ->
-                    MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS
+                    MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_FAILED_EXECUTION_STATUS
                 is MigrationFailureStatusCommand.DownRecordingFailure ->
+                    MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_FAILED_RECORD_STATUS
+                is MigrationFailureStatusCommand.UpManualRecoveryRequired ->
+                    MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+                is MigrationFailureStatusCommand.DownManualRecoveryRequired ->
                     MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS
             }
             val diagnosticMessage = try {
@@ -1297,12 +1466,16 @@ class OperationExecutionScope private constructor(
             is MigrationFailureCheckpointWriteCommand.UpExecutionUncertain,
             is MigrationFailureCheckpointWriteCommand.UpReconciliationInconsistent,
             -> MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_MANUAL_RECOVERY_REQUIRED_STATUS
+            is MigrationFailureCheckpointWriteCommand.UpExecutionFailure ->
+                MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_FAILED_EXECUTION_STATUS
             is MigrationFailureCheckpointWriteCommand.UpRecordingFailure,
             is MigrationFailureCheckpointWriteCommand.UpFinalizationFailure,
             -> MIGRATION_UP_STARTED_STATUS to MIGRATION_UP_FAILED_RECORD_STATUS
             is MigrationFailureCheckpointWriteCommand.DownExecutionUncertain,
             is MigrationFailureCheckpointWriteCommand.DownReconciliationInconsistent,
             -> MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_MANUAL_RECOVERY_REQUIRED_STATUS
+            is MigrationFailureCheckpointWriteCommand.DownExecutionFailure ->
+                MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_FAILED_EXECUTION_STATUS
             is MigrationFailureCheckpointWriteCommand.DownRecordingFailure,
             is MigrationFailureCheckpointWriteCommand.DownFinalizationFailure,
             -> MIGRATION_DOWN_STARTED_STATUS to MIGRATION_DOWN_FAILED_RECORD_STATUS

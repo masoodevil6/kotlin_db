@@ -46,6 +46,14 @@ class MigrationFacade internal constructor(
         toCompleteVersion: Boolean,
     ): ExecuteResult<Boolean> = controller.retryDown(target, toCompleteVersion, scope)
 
+    /**
+     * Recovers the latest incomplete Version when its persisted status and Checkpoint allow it.
+     * Returns `Success(null)` when the latest-incomplete selection finds no Version.
+     * Non-retryable, unknown, and manual-recovery states return Failure.
+     */
+    fun recovery(toCompleteVersion: Boolean = true): ExecuteResult<Boolean> =
+        controller.recovery(scope, toCompleteVersion)
+
     fun status(): ExecuteResult<MigrationStatusReport> = controller.status(scope)
 
     fun current(): ExecuteResult<MigrationVersion?> = controller.current(scope)

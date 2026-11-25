@@ -184,7 +184,7 @@ class SchemaExecutorTransactionTest {
             queryExecutor = rawQueryExecutor,
             transactionExecutor = OperationTransactionExecutor { connection },
         )
-        DefaultDatabaseConfig.clsconfig = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
 
         try {
             val operation = SchemaCreateIndexBuilder()

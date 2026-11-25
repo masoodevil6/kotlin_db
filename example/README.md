@@ -26,7 +26,7 @@ val result = main.migration { migrate() }.toValue().toValue()
 
 The runnable sample initializes the system tables, applies and repeats each migration, inspects `status()` and `current()`, and optionally runs rollback and re-migration. For `migrate(target)`, the target Version is included. For `rollback(target)`, only Versions after the target are rolled back; the target remains applied. The actual sample has one Version per database, so target-based rollback has no later Version to remove.
 
-For the full command contract, status codes, Global Failure Gate, SystemLock, and failure limitations, see the [Migration execution guide](../documents/guides/migration/execution.md). The focused Schema-rendering module is [`data_base:migration:example`](../data_base/migration/example/README.md); it does not connect to a database.
+For the full command contract, status codes, Global Failure Gate, SystemLock, and failure limitations, see the [Migration execution guide](../documents/guides/migration/executor/README.md). The focused Schema-rendering module is [`data_base:migration:example`](../data_base/migration/example/README.md); it does not connect to a database.
 
 The target overloads have different boundaries:
 
@@ -89,6 +89,18 @@ Rollback is a separate destructive opt-in. It drops the two application tables a
 ```powershell
 .gradlew.bat :example:run -Pdatabase.example.run=true -Pdatabase.example.rollback=true
 ```
+
+The Migration inspection and retry modes run for both registrations. Enable only one command mode per invocation. `status` reports the status analysis, while `state` prints both the latest Version and latest incomplete Version, including the stored diagnostic. Retry modes select the latest incomplete state and pass that exact target to the corresponding public Retry API. `toCompleteVersion` defaults to `false`, so Retry stops at the next Version boundary unless explicitly enabled.
+
+```powershell
+.gradlew.bat :example:run -Pdatabase.example.run=true -Pdatabase.example.status=true
+.gradlew.bat :example:run -Pdatabase.example.run=true -Pdatabase.example.state=true
+.gradlew.bat :example:run -Pdatabase.example.run=true -Pdatabase.example.retryUp=true
+.gradlew.bat :example:run -Pdatabase.example.run=true -Pdatabase.example.retryDown=true
+.gradlew.bat :example:run -Pdatabase.example.run=true -Pdatabase.example.retryUp=true -Pdatabase.example.retry.toCompleteVersion=true
+```
+
+Retry can execute Migration code. Use these modes only with the dedicated disposable databases above, after inspecting their reported state and confirming that the requested direction is appropriate.
 
 Use only the two empty, disposable databases named above. Rollback does not drop the system migration tables. Both Watch subscriptions are closed before `manager.shutdown()`. Ordinary cleanup failures are attached as suppressed exceptions to the existing failure; a fatal cleanup `Error` remains fatal and carries the earlier failure as suppressed.
 

@@ -8,6 +8,16 @@ import gog.my_project.data_base_operation.executor.transaction.DdlFailurePolicy
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
 import gog.my_project.data_base_operation.executor.transaction.OperationParameter
 import gog.my_project.data_base_operation.executor.transaction.OperationQueryRows
+import gog.my_project.data_base_operation.executor.session.result.SessionConsumer
+import gog.my_project.data_base_session.api.interfaces.api.ISessionCommandApi
+import gog.my_project.data_base_session.api.result.SessionExecutionResult
+import gog.my_project.data_base_session.ast.interfaces.ISessionCommandAst
+import gog.my_project.data_base_session.api.result.AcquireSessionLockResult
+import gog.my_project.data_base_session.api.result.ReleaseSessionLockResult
+import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.acquire.IAcquireSessionAdvisoryLockApi
+import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.release.IReleaseSessionAdvisoryLockApi
+import gog.my_project.data_base_session.ast.interfaces.advisory_lock.acquire.IAcquireSessionAdvisoryLockAst
+import gog.my_project.data_base_session.ast.interfaces.advisory_lock.release.IReleaseSessionAdvisoryLockAst
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -68,6 +78,35 @@ class OperationPipelineStageContext<T> internal constructor(
         sql: String,
         parameters: List<OperationParameter>,
     ): ExecuteResult<Boolean> = withStageAccess { delegate.executeDdl(sql, parameters) }
+
+    override fun <A : ISessionCommandAst, R : SessionExecutionResult> session(
+        api: ISessionCommandApi<A, R>,
+    ): SessionConsumer<R> = withStageAccess {
+        val delegateConsumer = delegate.session(api)
+        SessionConsumer {
+            withStageAccess { delegateConsumer.execute() }
+        }
+    }
+
+    override fun acquireSessionAdvisoryLock(
+        api: IAcquireSessionAdvisoryLockApi,
+    ): ExecuteResult<AcquireSessionLockResult> =
+        withStageAccess { delegate.acquireSessionAdvisoryLock(api) }
+
+    override fun acquireSessionAdvisoryLock(
+        ast: IAcquireSessionAdvisoryLockAst,
+    ): ExecuteResult<AcquireSessionLockResult> =
+        withStageAccess { delegate.acquireSessionAdvisoryLock(ast) }
+
+    override fun releaseSessionAdvisoryLock(
+        api: IReleaseSessionAdvisoryLockApi,
+    ): ExecuteResult<ReleaseSessionLockResult> =
+        withStageAccess { delegate.releaseSessionAdvisoryLock(api) }
+
+    override fun releaseSessionAdvisoryLock(
+        ast: IReleaseSessionAdvisoryLockAst,
+    ): ExecuteResult<ReleaseSessionLockResult> =
+        withStageAccess { delegate.releaseSessionAdvisoryLock(ast) }
 
     override fun executeDdlWithPolicy(
         sql: String,

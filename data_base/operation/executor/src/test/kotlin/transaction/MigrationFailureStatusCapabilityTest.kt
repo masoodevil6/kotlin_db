@@ -54,7 +54,7 @@ class MigrationFailureStatusCapabilityTest {
     }
 
     @Test
-    fun `only the four fixed CAS transitions are emitted on the owning Connection`() {
+    fun `fixed failure and manual recovery transitions are emitted on the owning Connection`() {
         data class Transition(
             val command: MigrationFailureStatusCommand,
             val target: Int,
@@ -63,10 +63,12 @@ class MigrationFailureStatusCapabilityTest {
         )
 
         val transitions = listOf(
-            Transition(MigrationFailureStatusCommand.UpExecutionFailure(11), 110, 100, MigrationFailureDiagnosticStage.UP_EXECUTION),
-            Transition(MigrationFailureStatusCommand.UpRecordingFailure(12), 110, 100, MigrationFailureDiagnosticStage.UP_RECORDING),
-            Transition(MigrationFailureStatusCommand.DownExecutionFailure(13), 210, 200, MigrationFailureDiagnosticStage.DOWN_EXECUTION),
-            Transition(MigrationFailureStatusCommand.DownRecordingFailure(14), 210, 200, MigrationFailureDiagnosticStage.DOWN_RECORDING),
+            Transition(MigrationFailureStatusCommand.UpExecutionFailure(11), 101, 100, MigrationFailureDiagnosticStage.UP_EXECUTION),
+            Transition(MigrationFailureStatusCommand.UpRecordingFailure(12), 102, 100, MigrationFailureDiagnosticStage.UP_RECORDING),
+            Transition(MigrationFailureStatusCommand.DownExecutionFailure(13), 201, 200, MigrationFailureDiagnosticStage.DOWN_EXECUTION),
+            Transition(MigrationFailureStatusCommand.DownRecordingFailure(14), 202, 200, MigrationFailureDiagnosticStage.DOWN_RECORDING),
+            Transition(MigrationFailureStatusCommand.UpManualRecoveryRequired(15), 110, 100, MigrationFailureDiagnosticStage.UP_RECORDING),
+            Transition(MigrationFailureStatusCommand.DownManualRecoveryRequired(16), 210, 200, MigrationFailureDiagnosticStage.DOWN_RECORDING),
         )
 
         transitions.forEach { transition ->
@@ -135,6 +137,11 @@ class MigrationFailureStatusCapabilityTest {
                 100,
             ),
             Transition(
+                MigrationFailureCheckpointWriteCommand.UpExecutionFailure(79, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                101,
+                100,
+            ),
+            Transition(
                 MigrationFailureCheckpointWriteCommand.UpReconciliationInconsistent(72, expectedCheckpoint, updatedCheckpoint, diagnostic),
                 110,
                 100,
@@ -152,6 +159,11 @@ class MigrationFailureStatusCapabilityTest {
             Transition(
                 MigrationFailureCheckpointWriteCommand.DownExecutionUncertain(75, expectedCheckpoint, updatedCheckpoint, diagnostic),
                 210,
+                200,
+            ),
+            Transition(
+                MigrationFailureCheckpointWriteCommand.DownExecutionFailure(80, expectedCheckpoint, updatedCheckpoint, diagnostic),
+                201,
                 200,
             ),
             Transition(
@@ -325,7 +337,7 @@ class MigrationFailureStatusCapabilityTest {
 
         assertSame(primary, assertIs<ExecuteResult.Failure>(result).exception)
         assertEquals("UPDATE system_migration_version SET status = ? WHERE id = ? AND status = ?", script.updates.single().statement.sql)
-        assertEquals(listOf(110, 21, 100), script.updates.single().bindings.map { it.value })
+        assertEquals(listOf(101, 21, 100), script.updates.single().bindings.map { it.value })
     }
 
     @Test
@@ -594,7 +606,7 @@ class MigrationFailureStatusCapabilityTest {
         assertIs<IllegalStateException>(staleFailure)
         assertSame(newPrimary, assertIs<ExecuteResult.Failure>(result).exception)
         assertTrue(oldScript.updates.isEmpty())
-        assertEquals(listOf(110, 51, 100), newScript.updates.single().bindings.map { it.value })
+        assertEquals(listOf(101, 51, 100), newScript.updates.single().bindings.map { it.value })
     }
 
     @Test

@@ -16,6 +16,8 @@ dependencies {
     implementation(project(":data_base:migration:api"))
     implementation(project(":data_base:migration:executor"))
     implementation(project(":data_base:operation:query:builder"))
+
+    testImplementation(kotlin("test"))
 }
 
 application {
@@ -26,6 +28,24 @@ val runDatabaseExamples = providers.gradleProperty("database.example.run")
     .map { it.toBooleanStrict() }
     .orElse(false)
 val runDestructiveRollback = providers.gradleProperty("database.example.rollback")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+val runMigrationRecovery = providers.gradleProperty("database.example.recovery")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+val runMigrationStatus = providers.gradleProperty("database.example.status")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+val inspectMigrationState = providers.gradleProperty("database.example.state")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+val retryMigrationUp = providers.gradleProperty("database.example.retryUp")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+val retryMigrationDown = providers.gradleProperty("database.example.retryDown")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+val completeVersionOnRetry = providers.gradleProperty("database.example.retry.toCompleteVersion")
     .map { it.toBooleanStrict() }
     .orElse(false)
 
@@ -72,6 +92,16 @@ tasks.named<JavaExec>("run") {
     environment(exampleRuntimeEnvironment)
     systemProperty("database.example.run", runDatabaseExamples.get().toString())
     systemProperty("database.example.rollback", runDestructiveRollback.get().toString())
+    systemProperty("database.example.recovery", runMigrationRecovery.get().toString())
+    systemProperty("database.example.status", runMigrationStatus.get().toString())
+    systemProperty("database.example.state", inspectMigrationState.get().toString())
+    systemProperty("database.example.retryUp", retryMigrationUp.get().toString())
+    systemProperty("database.example.retryDown", retryMigrationDown.get().toString())
+    systemProperty("database.example.retry.toCompleteVersion", completeVersionOnRetry.get().toString())
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 kotlin {

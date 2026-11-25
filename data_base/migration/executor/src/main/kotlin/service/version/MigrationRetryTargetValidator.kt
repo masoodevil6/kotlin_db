@@ -80,6 +80,18 @@ internal class MigrationRetryTargetValidator(
             supplied.operation != MigrationRecoveryOperation.DOWN_MANUAL_RECOVERY_REQUIRED
         ) { "Unknown and manual-recovery Targets cannot be retried automatically" }
 
+        if (row.status == MigrationVersionState.STATUS_MIGRATE_FAILED_UP ||
+            row.status == MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN
+        ) {
+            diagnosticValidator.validateExecutionFailure(
+                status = row.status,
+                versionId = row.id,
+                checkpoint = checkpoint,
+                currentMessage = row.message,
+                registeredMigrationIds = registeredIds,
+            )
+        }
+
         if (row.status == MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD ||
             row.status == MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD
         ) {
@@ -106,6 +118,10 @@ internal class MigrationRetryTargetValidator(
         MigrationVersionState.STATUS_ROLLBACK_STARTED ->
             kind == MigrationCheckpointStatusKind.DOWN_EXECUTION_RETRYABLE ||
                 kind == MigrationCheckpointStatusKind.DOWN_RECORDING_RETRYABLE
+        MigrationVersionState.STATUS_MIGRATE_FAILED_UP ->
+            kind == MigrationCheckpointStatusKind.UP_EXECUTION_FAILURE_NOT_RETRYABLE
+        MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN ->
+            kind == MigrationCheckpointStatusKind.DOWN_EXECUTION_FAILURE_NOT_RETRYABLE
         MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD ->
             kind == MigrationCheckpointStatusKind.UP_RECORDING_RETRYABLE
         MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD ->

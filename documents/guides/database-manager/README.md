@@ -4,11 +4,12 @@
 
 هر راهنما روی بخشی از گردش کار تمرکز دارد:
 
-- [شروع به کار و نمونهٔ end-to-end](getting-started.md)
-- [Catalog، registration و کلیدها](catalog-and-keys.md)
-- [Query و Transaction](query-and-transaction.md)
-- [تعریف Schema از طریق Migration](schema-operations.md)
-- [ثبت و اجرای Migration](migrations.md)
-- [Lifecycle، نتیجه و مدیریت خطا](lifecycle-and-errors.md)
+- [تعریف اولیه و تنظیم چند پایگاه داده](database_define/README.md)
+- [کلیدهای پایگاه داده و دسترسی به Registrationها](database_keys/README.md)
+- [Attributeهای اختصاصی Registration](registration_attributes/README.md)
+- [ساخت Connection و Transaction با Handle](executor/README.md)
+- [شروع به کار](../../../README.md#شروع)
+- [ثبت Migration در Registration](database_define/migrations.md)
+- [Lifecycle، هم‌زمانی، خطا و محدودیت‌های سراسری](../limitations/lifecycle-and-errors.md)
 
 مثال‌های رسمی در [`data_base/manager/example`](../../../data_base/manager/example/README.md) قرار دارند. اجرای پیش‌فرض مثال‌ها فقط registrationها را می‌سازد؛ برای اجرای SQL باید opt-in و تنظیمات دیتابیس توسعه فراهم شوند.

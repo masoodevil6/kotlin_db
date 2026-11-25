@@ -37,9 +37,14 @@ class SystemMigrationVersionQueryTest {
             is LegacyQueryRenderResult -> requireNotNull(rendered.sql)
         }.replace(Regex("\\s+"), " ").lowercase()
 
-        assertEquals(listOf("id", "tagId", "status", "message"), ast.select?.columns?.map { it.metadata.ColumnAlias })
+        assertEquals(
+            listOf("id", "tagId", "status", "message", "retryCheckpoint"),
+            ast.select?.columns?.map { it.metadata.ColumnAlias },
+        )
         assertTrue(sql.contains("smv.message"), sql)
         assertTrue(sql.contains("as message"), sql)
+        assertTrue(sql.contains("smv.retry_checkpoint"), sql)
+        assertTrue(sql.contains("as retrycheckpoint"), sql)
     }
 
     @Test

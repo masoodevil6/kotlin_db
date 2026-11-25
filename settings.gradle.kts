@@ -31,7 +31,7 @@ include(":tools")
 // Collection package declarations use the logical root `gog.my_project.collection`;
 // they are independent of these Gradle project paths and physical directories.
 include(":collection:core")
-include(":collection:examples")
+include(":collection:1_examples.md")
 
 include(":data_base")
 include(":data_base:core")
@@ -71,6 +71,15 @@ include(":data_base:operation:query:dialect")
 include(":data_base:operation:query:renderer")
 include(":data_base:operation:query:executor")
 include(":data_base:operation:query:example")
+
+/// data_base -> operation -> session
+include(":data_base:operation:session:ast")
+include(":data_base:operation:session:api")
+include(":data_base:operation:session:builder")
+include(":data_base:operation:session:dialect")
+include(":data_base:operation:session:renderer")
+include(":data_base:operation:session:executor")
+include(":data_base:operation:session:example")
 
 
 /// data_base -> migration

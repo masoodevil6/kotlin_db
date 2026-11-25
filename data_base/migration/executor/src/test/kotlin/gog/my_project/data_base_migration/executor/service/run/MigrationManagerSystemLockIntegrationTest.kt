@@ -11,6 +11,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_migration.executor.support.systemMigrationResultSetMetadata
+import gog.my_project.data_base_operation.config.data_base.SystemLock
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.Driver
@@ -78,6 +79,96 @@ class MigrationManagerSystemLockIntegrationTest {
                 assertTrue(script.events.indexOf("release") < script.events.indexOf("connection-close"))
                 assertEquals(0, script.events.count { it == "commit" || it == "rollback" })
             }
+        } finally {
+            manager.close()
+            DriverManager.deregisterDriver(driver)
+        }
+    }
+
+    @Test
+    fun `current and status each hold one Migration lock across all read queries`() {
+        val driver = MigrationLockDriver()
+        DriverManager.registerDriver(driver)
+        val config = DatabaseConfig(
+            connection = DatabaseConnectionConfig(
+                dbDomain = "jdbc:mysql://migration-lock-test.local",
+                dbPort = 3306,
+                dbName = "migration_lock_test",
+                dbUserName = "test-user",
+                dbPassword = "test-password",
+            ),
+        )
+        val manager = DatabaseManager { database(TestDatabase) { this.config = config } }
+        val handle = manager[TestDatabase]
+        val controller = MigrationController(MigrationConfiguration(emptyList()))
+
+        try {
+            val currentResult = handle.withOperationScope { scope ->
+                assertNotNull(scope.databaseIdentity)
+                controller.current(scope)
+            }
+            val currentEvents = driver.scripts.last().events
+            assertIs<ExecuteResult.Success<*>>(currentResult)
+            assertEquals(1, currentEvents.count { it == "acquire" })
+            assertEquals(3, currentEvents.count { it == "history-read" })
+            assertEquals(1, currentEvents.count { it == "release" })
+            assertTrue(currentEvents.indexOf("acquire") < currentEvents.indexOf("history-read"))
+            assertTrue(currentEvents.lastIndexOf("history-read") < currentEvents.indexOf("release"))
+            assertTrue(currentEvents.indexOf("release") < currentEvents.indexOf("connection-close"))
+
+            val statusResult = handle.withOperationScope { scope ->
+                assertNotNull(scope.databaseIdentity)
+                controller.status(scope)
+            }
+            val statusEvents = driver.scripts.last().events
+            assertIs<ExecuteResult.Success<*>>(statusResult)
+            assertEquals(1, statusEvents.count { it == "acquire" })
+            assertEquals(2, statusEvents.count { it == "history-read" })
+            assertEquals(1, statusEvents.count { it == "release" })
+            assertTrue(statusEvents.indexOf("acquire") < statusEvents.indexOf("history-read"))
+            assertTrue(statusEvents.lastIndexOf("history-read") < statusEvents.indexOf("release"))
+            assertTrue(statusEvents.indexOf("release") < statusEvents.indexOf("connection-close"))
+        } finally {
+            manager.close()
+            DriverManager.deregisterDriver(driver)
+        }
+    }
+
+    @Test
+    fun `current and status preserve the existing non-reentrant Migration lock rejection`() {
+        val driver = MigrationLockDriver()
+        DriverManager.registerDriver(driver)
+        val config = DatabaseConfig(
+            connection = DatabaseConnectionConfig(
+                dbDomain = "jdbc:mysql://migration-lock-test.local",
+                dbPort = 3306,
+                dbName = "migration_lock_test",
+                dbUserName = "test-user",
+                dbPassword = "test-password",
+            ),
+        )
+        val manager = DatabaseManager { database(TestDatabase) { this.config = config } }
+        val handle = manager[TestDatabase]
+        val controller = MigrationController(MigrationConfiguration(emptyList()))
+
+        try {
+            val currentResult = handle.withOperationScope { scope ->
+                scope.withSystemLock(SystemLock.MIGRATION, 1) { lockedScope ->
+                    controller.current(lockedScope)
+                }
+            }
+            assertTrue(assertIs<ExecuteResult.Failure>(currentResult).exception.message.orEmpty()
+                .contains("Nested or reentrant session advisory locks"))
+            assertEquals(listOf("acquire", "release", "connection-close"), driver.scripts.last().events)
+
+            val statusResult = handle.withOperationScope { scope ->
+                scope.withSystemLock(SystemLock.MIGRATION, 1) { lockedScope ->
+                    controller.status(lockedScope)
+                }
+            }
+            assertTrue(assertIs<ExecuteResult.Failure>(statusResult).exception.message.orEmpty()
+                .contains("Nested or reentrant session advisory locks"))
+            assertEquals(listOf("acquire", "release", "connection-close"), driver.scripts.last().events)
         } finally {
             manager.close()
             DriverManager.deregisterDriver(driver)

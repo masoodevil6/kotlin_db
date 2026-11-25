@@ -8,6 +8,8 @@ import gog.my_project.data_base_migration.core.migrate.Migration
 import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
 import model.retry.MigrationRetryCheckpoint
 import model.retry.MigrationRetryCheckpointCodec
 import model.retry.MigrationRetryPhase
@@ -78,6 +80,60 @@ class MigrationRetryTargetValidatorTest {
                 assessment = resolved.assessment,
                 configuredVersionResolved = true,
                 registeredMigrations = listOf(beta),
+            )
+        }
+    }
+
+    @Test
+    fun `accepts explicit execution failure retry only with fresh target and matching diagnostics`() {
+        val status = MigrationVersionState.STATUS_MIGRATE_FAILED_UP
+        val diagnostic = MigrationFailureDiagnostic(
+            stage = MigrationFailureDiagnosticStage.UP_EXECUTION,
+            exceptionClassName = "java.sql.SQLException",
+            sqlState = "42S21",
+            vendorErrorCode = 1060,
+            message = "duplicate column",
+            migrationId = "alpha",
+        ).toStorageMessage(VERSION_ID)
+        val checkpoint = MigrationRetryCheckpoint(
+            formatVersion = MigrationRetryCheckpointCodec.FORMAT_VERSION,
+            revision = 9,
+            originalStatus = MigrationVersionState.STATUS_MIGRATE_STARTED,
+            originalMessage = diagnostic,
+            cursorMigrationId = "alpha",
+            phase = MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+        )
+        val row = MigrationHistoryVersion(VERSION_ID, TAG_ID, status, diagnostic, MigrationRetryCheckpointCodec.encode(checkpoint))
+        val assessment = MigrationCheckpointStatusValidator().assess(row.status, row.retryCheckpoint)
+        val target = MigrationRecoveryTarget(
+            row.toState(),
+            alpha,
+            MigrationRecoveryOperation.UP_EXECUTION,
+            checkpoint.revision,
+        )
+
+        assertEquals(
+            target,
+            validator.validate(target, target, row, assessment, true, registrations),
+        )
+        assertFailsWith<IllegalArgumentException> {
+            validator.validate(
+                MigrationRecoveryTarget(target.version, target.migration, target.operation, checkpoint.revision - 1),
+                target,
+                row,
+                assessment,
+                true,
+                registrations,
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            validator.validate(
+                target.copy(version = row.toState().copy(message = "different")),
+                target,
+                row,
+                assessment,
+                true,
+                registrations,
             )
         }
     }

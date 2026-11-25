@@ -13,8 +13,14 @@ import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
 import gog.my_project.data_base_migration.core.tags.MigrationTagTypeCodes
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryState
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
 import model.retry.MigrationRetryCheckpoint
@@ -157,14 +163,16 @@ class MigrationCurrentVersionServiceTest {
     }
 
     @Test
-    fun serviceDoesNotOpenTransactionCloseConnectionOrModifyHistory() {
+    fun currentVersionUsesNoTransactionAndDoesNotModifyHistory() {
         val invocation = invoke(history(appliedVersionCount = 2))
 
         assertIs<ExecuteResult.Success<PreparedMigrationVersion?>>(invocation.result)
         assertEquals(3, invocation.jdbc.queryCount)
+        assertEquals(1, invocation.jdbc.lockAcquireCount)
+        assertEquals(1, invocation.jdbc.lockReleaseCount)
         assertEquals(0, invocation.jdbc.dmlCount)
         assertEquals(0, invocation.jdbc.transactionControlCalls)
-        assertEquals(0, invocation.jdbc.connectionCloseCount)
+        assertEquals(1, invocation.jdbc.connectionCloseCount)
         assertTrue(invocation.jdbc.sql.all { sql ->
             sql.contains("SELECT", ignoreCase = true) &&
                 !Regex("\\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\\b", RegexOption.IGNORE_CASE).containsMatchIn(sql)
@@ -191,12 +199,17 @@ class MigrationCurrentVersionServiceTest {
     fun fatalReaderErrorIsRecordedAndRethrown() {
         val fatal = AssertionError("fatal history reader error")
         val jdbc = HistoryJdbc(history(appliedVersionCount = 0), queryFailure = fatal)
-        val scope = newScope(jdbc.connection)
+        var scope: OperationExecutionScope? = null
 
-        val thrown = assertFailsWith<AssertionError> { service.currentVersion(scope) }
+        val thrown = assertFailsWith<AssertionError> {
+            managedExecutor(jdbc.connection).connection { managedScope ->
+                scope = managedScope
+                service.currentVersion(managedScope)
+            }
+        }
 
         assertSame(fatal, thrown)
-        assertSame(fatal, scope.fatalError)
+        assertSame(fatal, requireNotNull(scope).fatalError)
     }
 
     private fun invoke(
@@ -204,8 +217,34 @@ class MigrationCurrentVersionServiceTest {
         queryFailure: Throwable? = null,
     ): Invocation {
         val jdbc = HistoryJdbc(history, queryFailure)
-        val scope = newScope(jdbc.connection)
-        return Invocation(service.currentVersion(scope), scope, jdbc)
+        var scope: OperationExecutionScope? = null
+        val result = managedExecutor(jdbc.connection).connection { managedScope ->
+            scope = managedScope
+            service.currentVersion(managedScope)
+        }
+        return Invocation(result, requireNotNull(scope), jdbc)
+    }
+
+    private fun managedExecutor(connection: Connection): OperationExecutionExecutor {
+        val config = DatabaseConfig(
+            connection = DatabaseConnectionConfig(
+                dbDomain = "jdbc:mysql://migration-current-test.local",
+                dbPort = 3306,
+                dbName = "migration_current_test",
+                dbUserName = "test-user",
+                dbPassword = "test-password",
+            ),
+            platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        )
+        val context = DatabaseContext(
+            name = "migration-current-test",
+            config = config,
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection = connection
+            },
+            databaseIdentity = requireNotNull(DatabaseIdentity.from(config)),
+        )
+        return OperationExecutionExecutor(context)
     }
 
     private fun newScope(connection: Connection) =
@@ -294,6 +333,10 @@ class MigrationCurrentVersionServiceTest {
         val sql = mutableListOf<String>()
         var queryCount = 0
             private set
+        var lockAcquireCount = 0
+            private set
+        var lockReleaseCount = 0
+            private set
         var dmlCount = 0
             private set
         var transactionControlCalls = 0
@@ -322,9 +365,21 @@ class MigrationCurrentVersionServiceTest {
             return proxy(PreparedStatement::class.java) { method, _ ->
                 when (method.name) {
                     "executeQuery" -> {
-                        queryCount++
-                        queryFailure?.let { throw it }
-                        resultSet(responses.removeFirst(), statementSql)
+                        when {
+                            "get_lock(" in statementSql.lowercase() -> {
+                                lockAcquireCount++
+                                resultSet(listOf(mapOf("acquired" to 1)), statementSql)
+                            }
+                            "release_lock(" in statementSql.lowercase() -> {
+                                lockReleaseCount++
+                                resultSet(listOf(mapOf("released" to 1)), statementSql)
+                            }
+                            else -> {
+                                queryCount++
+                                queryFailure?.let { throw it }
+                                resultSet(responses.removeFirst(), statementSql)
+                            }
+                        }
                     }
                     "executeUpdate" -> {
                         dmlCount++

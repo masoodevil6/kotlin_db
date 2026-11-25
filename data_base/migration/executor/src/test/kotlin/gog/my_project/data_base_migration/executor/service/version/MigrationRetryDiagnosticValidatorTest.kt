@@ -16,6 +16,61 @@ class MigrationRetryDiagnosticValidatorTest {
     private val registeredIds = setOf("alpha", "beta")
 
     @Test
+    fun `accepts execution failure diagnostics only for the exact in-flight cursor`() {
+        for ((status, stage, originalStatus) in listOf(
+            Triple(
+                MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                MigrationFailureDiagnosticStage.UP_EXECUTION,
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+            ),
+            Triple(
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN,
+                MigrationFailureDiagnosticStage.DOWN_EXECUTION,
+                MigrationVersionState.STATUS_ROLLBACK_STARTED,
+            ),
+        )) {
+            val cp = checkpoint(
+                originalStatus,
+                MigrationRetryPhase.EXECUTION_IN_FLIGHT,
+                "alpha",
+                diagnostic(stage, "alpha"),
+            )
+            validator.validateExecutionFailure(status, VERSION_ID, cp, diagnostic(stage, "alpha"), registeredIds)
+
+            assertFailsWith<IllegalArgumentException> {
+                validator.validateExecutionFailure(
+                    status,
+                    VERSION_ID,
+                    cp,
+                    diagnostic(stage, "beta", versionId = VERSION_ID + 1),
+                    registeredIds,
+                )
+            }
+            assertFailsWith<IllegalArgumentException> {
+                validator.validateExecutionFailure(status, VERSION_ID, cp, diagnostic(UP_STAGE, "alpha"), registeredIds)
+            }
+            assertFailsWith<IllegalArgumentException> {
+                validator.validateExecutionFailure(
+                    status,
+                    VERSION_ID,
+                    cp.copy(cursorMigrationId = "beta"),
+                    diagnostic(stage, "alpha"),
+                    registeredIds,
+                )
+            }
+            assertFailsWith<IllegalArgumentException> {
+                validator.validateExecutionFailure(
+                    status,
+                    VERSION_ID,
+                    cp.copy(phase = MigrationRetryPhase.RECORD_PENDING),
+                    diagnostic(stage, "alpha"),
+                    registeredIds,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `accepts UP and DOWN recording diagnostics and cursor advancement null identity`() {
         validateRecord(
             MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,

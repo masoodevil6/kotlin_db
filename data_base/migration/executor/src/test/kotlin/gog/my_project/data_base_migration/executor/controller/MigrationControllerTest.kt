@@ -5,8 +5,14 @@ import gog.my_project.data_base_migration.api.model.migration_state.MigrationVer
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
 import gog.my_project.data_base_migration.core.tags.MigrationTagTypeCodes
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusReport
 import model.migration_status.MigrationVersionStatus
@@ -67,22 +73,23 @@ class MigrationControllerTest {
     @Test
     fun `current returns the latest applied public Version`() {
         val jdbc = historyConnection(history(appliedVersionCount = 2))
-        val scope = testScope(jdbc.connection)
 
-        val result = MigrationController(configuration).current(scope)
+        val invocation = managed(jdbc.connection) { MigrationController(configuration).current(it) }
+        val result = invocation.result
 
         val current = assertIs<ExecuteResult.Success<MigrationVersion?>>(result).result
         assertSame(configuration.registrations[1], current)
         assertEquals("v2", current?.name)
         assertEquals(3, jdbc.queryCount)
+        assertEquals(1, jdbc.lockAcquireCount)
+        assertEquals(1, jdbc.lockReleaseCount)
     }
 
     @Test
     fun `current returns success null when no Version has been applied`() {
         val jdbc = historyConnection(history(appliedVersionCount = 0))
-        val scope = testScope(jdbc.connection)
 
-        val result = MigrationController(configuration).current(scope)
+        val result = managed(jdbc.connection) { MigrationController(configuration).current(it) }.result
 
         assertNull(assertIs<ExecuteResult.Success<MigrationVersion?>>(result).result)
         assertEquals(3, jdbc.queryCount)
@@ -96,13 +103,13 @@ class MigrationControllerTest {
             ),
         )
         val jdbc = historyConnection(invalid)
-        val scope = testScope(jdbc.connection)
 
-        val result = MigrationController(configuration).current(scope)
+        val invocation = managed(jdbc.connection) { MigrationController(configuration).current(it) }
+        val result = invocation.result
 
         val failure = assertIs<ExecuteResult.Failure>(result)
         assertTrue(failure.exception.message.orEmpty().contains("references missing Tag"))
-        assertSame(failure.exception, scope.firstFailure)
+        assertSame(failure.exception, invocation.scope.firstFailure)
         assertEquals(3, jdbc.queryCount)
     }
 
@@ -110,12 +117,12 @@ class MigrationControllerTest {
     fun `current preserves original History reader failure`() {
         val originalFailure = SQLException("history read failed")
         val jdbc = historyConnection(history(appliedVersionCount = 0), queryFailure = originalFailure)
-        val scope = testScope(jdbc.connection)
 
-        val result = MigrationController(configuration).current(scope)
+        val invocation = managed(jdbc.connection) { MigrationController(configuration).current(it) }
+        val result = invocation.result
 
         assertSame(originalFailure, assertIs<ExecuteResult.Failure>(result).exception)
-        assertSame(originalFailure, scope.firstFailure)
+        assertSame(originalFailure, invocation.scope.firstFailure)
         assertEquals(1, jdbc.queryCount)
     }
 
@@ -133,11 +140,28 @@ class MigrationControllerTest {
     }
 
     @Test
+    fun `current and status fail closed for identityless Scopes`() {
+        val currentJdbc = historyConnection(history(appliedVersionCount = 0))
+        val statusJdbc = StatusJdbc(emptyList())
+        val controller = MigrationController(configuration)
+
+        val currentFailure = assertIs<ExecuteResult.Failure>(controller.current(testScope(currentJdbc.connection)))
+        val statusFailure = assertIs<ExecuteResult.Failure>(controller.status(testScope(statusJdbc.connection)))
+
+        assertTrue(currentFailure.exception.message.orEmpty().contains("canonical DatabaseIdentity"))
+        assertTrue(statusFailure.exception.message.orEmpty().contains("canonical DatabaseIdentity"))
+        assertEquals(0, currentJdbc.queryCount)
+        assertEquals(0, statusJdbc.queryCount)
+        assertEquals(0, currentJdbc.lockAcquireCount)
+        assertEquals(0, statusJdbc.lockAcquireCount)
+    }
+
+    @Test
     fun `status returns report for the controller configured Versions`() {
         val jdbc = StatusJdbc(emptyList())
-        val scope = testScope(jdbc.connection)
 
-        val result = MigrationController(configuration).status(scope)
+        val invocation = managed(jdbc.connection) { MigrationController(configuration).status(it) }
+        val result = invocation.result
 
         val report = assertIs<MigrationStatusReport>(assertIs<ExecuteResult.Success<MigrationStatusReport>>(result).result)
         assertEquals(listOf("v1", "v2", "v3"), report.versions.map { it.name })
@@ -146,22 +170,59 @@ class MigrationControllerTest {
             report.versions.map { it.status },
         )
         assertEquals(2, jdbc.queryCount)
+        assertEquals(1, jdbc.lockAcquireCount)
+        assertEquals(1, jdbc.lockReleaseCount)
         assertEquals(0, jdbc.transactionControlCalls)
-        assertEquals(0, jdbc.connectionCloseCount)
+        assertEquals(1, jdbc.connectionCloseCount)
     }
 
     @Test
     fun `status propagates reader failure without replacing its cause`() {
         val originalFailure = SQLException("status query failed")
         val jdbc = StatusJdbc(emptyList(), queryFailure = originalFailure)
-        val scope = testScope(jdbc.connection)
 
-        val result = MigrationController(configuration).status(scope)
+        val invocation = managed(jdbc.connection) { MigrationController(configuration).status(it) }
+        val result = invocation.result
 
         assertSame(originalFailure, assertIs<ExecuteResult.Failure>(result).exception)
-        assertSame(originalFailure, scope.firstFailure)
+        assertSame(originalFailure, invocation.scope.firstFailure)
         assertEquals(1, jdbc.queryCount)
     }
+
+    private fun <T> managed(
+        connection: Connection,
+        action: (OperationExecutionScope) -> ExecuteResult<T>,
+    ): ManagedInvocation<T> {
+        val config = DatabaseConfig(
+            connection = DatabaseConnectionConfig(
+                dbDomain = "jdbc:mysql://migration-controller-test.local",
+                dbPort = 3306,
+                dbName = "migration_controller_test",
+                dbUserName = "test-user",
+                dbPassword = "test-password",
+            ),
+            platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        )
+        val context = DatabaseContext(
+            name = "migration-controller-test",
+            config = config,
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection = connection
+            },
+            databaseIdentity = requireNotNull(DatabaseIdentity.from(config)),
+        )
+        var scope: OperationExecutionScope? = null
+        val result = OperationExecutionExecutor(context).connection { managedScope ->
+            scope = managedScope
+            action(managedScope)
+        }
+        return ManagedInvocation(result, requireNotNull(scope))
+    }
+
+    private data class ManagedInvocation<T>(
+        val result: ExecuteResult<T>,
+        val scope: OperationExecutionScope,
+    )
 
     private fun testScope(connection: Connection) =
         OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
@@ -264,6 +325,10 @@ class MigrationControllerTest {
         private val responses = ArrayDeque(listOf(rows.tags, rows.versions, rows.applied))
         var queryCount = 0
             private set
+        var lockAcquireCount = 0
+            private set
+        var lockReleaseCount = 0
+            private set
 
         val connection: Connection = Proxy.newProxyInstance(
             javaClass.classLoader,
@@ -282,9 +347,21 @@ class MigrationControllerTest {
         ) { _, method, _ ->
             when (method.name) {
                 "executeQuery" -> {
-                    queryCount++
-                    queryFailure?.let { throw it }
-                    resultSet(responses.removeFirst(), statementSql)
+                    when {
+                        "get_lock(" in statementSql.lowercase() -> {
+                            lockAcquireCount++
+                            resultSet(listOf(mapOf("acquired" to 1)), statementSql)
+                        }
+                        "release_lock(" in statementSql.lowercase() -> {
+                            lockReleaseCount++
+                            resultSet(listOf(mapOf("released" to 1)), statementSql)
+                        }
+                        else -> {
+                            queryCount++
+                            queryFailure?.let { throw it }
+                            resultSet(responses.removeFirst(), statementSql)
+                        }
+                    }
                 }
                 "close" -> null
                 "isClosed" -> false
@@ -324,6 +401,10 @@ class MigrationControllerTest {
     ) {
         var queryCount = 0
             private set
+        var lockAcquireCount = 0
+            private set
+        var lockReleaseCount = 0
+            private set
         var transactionControlCalls = 0
             private set
         var connectionCloseCount = 0
@@ -342,9 +423,21 @@ class MigrationControllerTest {
                     ) { _, statementMethod, _ ->
                         when (statementMethod.name) {
                             "executeQuery" -> {
-                                queryCount++
-                                if (queryCount == 1) queryFailure?.let { throw it }
-                                resultSet(if (queryCount == 1) rows else versionRows, statementSql)
+                                when {
+                                    "get_lock(" in statementSql.lowercase() -> {
+                                        lockAcquireCount++
+                                        resultSet(listOf(mapOf("acquired" to 1)), statementSql)
+                                    }
+                                    "release_lock(" in statementSql.lowercase() -> {
+                                        lockReleaseCount++
+                                        resultSet(listOf(mapOf("released" to 1)), statementSql)
+                                    }
+                                    else -> {
+                                        queryCount++
+                                        if (queryCount == 1) queryFailure?.let { throw it }
+                                        resultSet(if (queryCount == 1) rows else versionRows, statementSql)
+                                    }
+                                }
                             }
                             "close" -> null
                             "isClosed" -> false

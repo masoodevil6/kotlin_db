@@ -61,7 +61,10 @@ class DatabaseHandleMigrationTest {
 
     @Test
     fun `registration-bound facade supports init then migrate on one managed scope`() =
-        withHandle(attachedConfiguration = configuration("MainVersion")) { handle, driver ->
+        withHandle(
+            attachedConfiguration = configuration("MainVersion"),
+            canonicalDatabaseIdentity = false,
+        ) { handle, driver ->
             var initResult: ExecuteResult<Boolean>? = null
             var migrateResult: ExecuteResult<Boolean>? = null
 
@@ -410,14 +413,19 @@ class DatabaseHandleMigrationTest {
     private fun <T> withHandle(
         driver: TrackingDriver = TrackingDriver(),
         attachedConfiguration: MigrationConfiguration? = null,
+        canonicalDatabaseIdentity: Boolean = true,
         block: (DatabaseHandleApi, TrackingDriver) -> T,
     ): T {
         DriverManager.registerDriver(driver)
         val manager = DatabaseManager {
             database(TestDatabase) {
                 config = DatabaseConfig(
-                    dbDomain = "jdbc:migration-facade-test://localhost",
-                    dbPort = null,
+                    dbDomain = if (canonicalDatabaseIdentity) {
+                        "jdbc:mysql://localhost"
+                    } else {
+                        "jdbc:migration-facade-test://localhost"
+                    },
+                    dbPort = if (canonicalDatabaseIdentity) 3306 else null,
                     dbName = "test_catalog",
                     dbUserName = "test_user",
                     dbPassword = "test_password",
@@ -441,8 +449,8 @@ class DatabaseHandleMigrationTest {
     private object AnalyticsDatabase : DatabaseKey
 
     private fun databaseConfig() = DatabaseConfig(
-        dbDomain = "jdbc:migration-facade-test://localhost",
-        dbPort = null,
+        dbDomain = "jdbc:mysql://localhost",
+        dbPort = 3306,
         dbName = "test_catalog",
         dbUserName = "test_user",
         dbPassword = "test_password",
@@ -488,7 +496,9 @@ class DatabaseHandleMigrationTest {
             return ConnectionState(this).also { connections += it }.connection
         }
 
-        override fun acceptsURL(url: String?): Boolean = url?.startsWith("jdbc:migration-facade-test:") == true
+        override fun acceptsURL(url: String?): Boolean =
+            url?.startsWith("jdbc:migration-facade-test:") == true ||
+                url?.startsWith("jdbc:mysql://localhost:3306/") == true
 
         override fun getPropertyInfo(url: String?, info: Properties?): Array<DriverPropertyInfo> = emptyArray()
 
@@ -514,6 +524,8 @@ class DatabaseHandleMigrationTest {
 
         inner class ConnectionState(private val driver: TrackingDriver) {
             var queryCount = 0
+            var lockAcquireCount = 0
+            var lockReleaseCount = 0
             var ddlCount = 0
             var closeCount = 0
             var commitCount = 0
@@ -552,9 +564,25 @@ class DatabaseHandleMigrationTest {
             ) { _, method, _ ->
                 when (method.name) {
                     "executeQuery" -> {
-                        queryCount++
-                        driver.queryFailure?.let { throw it }
-                        resultSet()
+                        when {
+                            "get_lock(" in sql.lowercase() -> {
+                                lockAcquireCount++
+                                resultSet(sql, mapOf("acquired" to 1))
+                            }
+                            "release_lock(" in sql.lowercase() -> {
+                                lockReleaseCount++
+                                resultSet(sql, mapOf("released" to 1))
+                            }
+                            else -> {
+                                queryCount++
+                                if (sql.contains("information_schema.COLUMNS", ignoreCase = true)) {
+                                    retryCheckpointColumnProbeResultSet()
+                                } else {
+                                    driver.queryFailure?.let { throw it }
+                                    resultSet(sql)
+                                }
+                            }
+                        }
                     }
                     "execute" -> {
                         ddlCount++
@@ -568,25 +596,72 @@ class DatabaseHandleMigrationTest {
                 }
             } as PreparedStatement
 
-            private fun resultSet(): ResultSet = Proxy.newProxyInstance(
-                javaClass.classLoader,
-                arrayOf(ResultSet::class.java),
-            ) { _, method, _ ->
-                when (method.name) {
-                    "next" -> false
-                    "getMetaData" -> metadata()
-                    "close" -> null
-                    "isClosed" -> false
-                    else -> defaultValue(method.returnType)
-                }
-            } as ResultSet
+            private fun retryCheckpointColumnProbeResultSet(): ResultSet {
+                var returnedRow = false
+                return Proxy.newProxyInstance(
+                    javaClass.classLoader,
+                    arrayOf(ResultSet::class.java),
+                ) { _, method, args ->
+                    when (method.name) {
+                        "next" -> if (returnedRow) false else {
+                            returnedRow = true
+                            true
+                        }
+                        "getString" -> when (args?.firstOrNull()) {
+                            "selected_schema" -> "test_db"
+                            else -> error("Unexpected retry_checkpoint probe column: ${args?.firstOrNull()}")
+                        }
+                        "getLong" -> when (args?.firstOrNull()) {
+                            "column_count" -> 1L
+                            else -> error("Unexpected retry_checkpoint probe column: ${args?.firstOrNull()}")
+                        }
+                        "wasNull" -> false
+                        "getMetaData" -> metadata(listOf("selected_schema", "column_count"))
+                        "close" -> null
+                        "isClosed" -> false
+                        else -> defaultValue(method.returnType)
+                    }
+                } as ResultSet
+            }
 
-            private fun metadata(): ResultSetMetaData = Proxy.newProxyInstance(
+            private fun resultSet(sql: String, row: Map<String, Any?>? = null): ResultSet {
+                var rowReturned = false
+                return Proxy.newProxyInstance(
+                    javaClass.classLoader,
+                    arrayOf(ResultSet::class.java),
+                ) { _, method, args ->
+                    when (method.name) {
+                        "next" -> if (row == null || rowReturned) false else {
+                            rowReturned = true
+                            true
+                        }
+                        "getInt" -> (row?.get(args?.firstOrNull()?.toString()) as? Number)?.toInt() ?: 0
+                        "getMetaData" -> metadata(
+                            when {
+                                "get_lock(" in sql.lowercase() -> listOf("acquired")
+                                "release_lock(" in sql.lowercase() -> listOf("released")
+                                else -> emptyList()
+                            },
+                        )
+                        "close" -> null
+                        "isClosed" -> false
+                        else -> defaultValue(method.returnType)
+                    }
+                } as ResultSet
+            }
+
+            private fun metadata(columnLabels: List<String> = emptyList()): ResultSetMetaData = Proxy.newProxyInstance(
                 javaClass.classLoader,
                 arrayOf(ResultSetMetaData::class.java),
-            ) { _, method, _ ->
+            ) { _, method, args ->
                 when (method.name) {
-                    "getColumnCount" -> 0
+                    "getColumnCount" -> columnLabels.size
+                    "getColumnLabel", "getColumnName" -> {
+                        val index = args?.firstOrNull() as? Int
+                            ?: error("Expected a column index for ${method.name}")
+                        columnLabels.getOrNull(index - 1)
+                            ?: error("Unexpected retry_checkpoint probe column index: $index")
+                    }
                     else -> defaultValue(method.returnType)
                 }
             } as ResultSetMetaData

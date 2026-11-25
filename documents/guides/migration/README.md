@@ -16,9 +16,11 @@ dependencies {
 
 ## راهنماها
 
-- [تعریف Migration و ثبت Configuration](registration.md)
-- [فرمان‌ها، Status، Failure و Lock](execution.md)
-- [نمونه‌های AST و Schema](ast-examples.md)
+- [تعریف Migration و استفاده از Tag](migration_define/README.md)
+- [Version بندی، گروه‌بندی و ترتیب Migrationها](version_define/README.md)
+- [استفاده از Migration Executor](executor/README.md)
+- [وضعیت‌های پایدار Migration](states/README.md)
+- [راهنمای چندبخشی AST و Schema در Migration](example_ast/README.md)
 - [نمونهٔ دو Database Registration](../../../example/README.md)
 - [نمونه‌های رندر Schema در ماژول `data_base:migration:example`](../../../data_base/migration/example/README.md)
 

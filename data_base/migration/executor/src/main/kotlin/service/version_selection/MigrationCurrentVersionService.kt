@@ -5,6 +5,7 @@ import gog.my_project.data_base_migration.api.registration.configuration.Migrati
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryReader
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryState
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryValidator
+import gog.my_project.data_base_operation.config.data_base.SystemLock
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
 
@@ -15,11 +16,13 @@ internal class MigrationCurrentVersionService(
     private val historyReader = MigrationVersionHistoryReader()
     private val historyValidator = MigrationVersionHistoryValidator()
 
-    /** Returns the latest applied Version in Configuration order, or `Success(null)` when none exist. */
+    /** Returns the latest applied Version from one Migration-locked history snapshot. */
     fun currentVersion(scope: OperationExecutionScope): ExecuteResult<PreparedMigrationVersion?> =
-        when (val result = validatedHistoryState(scope)) {
-            is ExecuteResult.Failure -> result
-            is ExecuteResult.Success -> ExecuteResult.Success(result.result?.currentVersion)
+        scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
+            when (val result = validatedHistoryState(lockedScope)) {
+                is ExecuteResult.Failure -> result
+                is ExecuteResult.Success -> ExecuteResult.Success(result.result?.currentVersion)
+            }
         }
 
     /** Reads and validates History once, retaining the Snapshot and its derived current Version. */
@@ -45,5 +48,9 @@ internal class MigrationCurrentVersionService(
         } catch (failure: Throwable) {
             scope.failed(failure)
         }
+    }
+
+    private companion object {
+        const val MIGRATION_LOCK_TIMEOUT_SECONDS = 60
     }
 }

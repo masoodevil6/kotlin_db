@@ -11,8 +11,14 @@ import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
 import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.manager.DatabaseContext
+import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
+import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusReport
 import model.migration_status.MigrationVersionStatus
@@ -54,17 +60,18 @@ class MigrationStatusServiceTest {
                 mapOf("id" to 10, "tagId" to 1, "status" to MigrationVersionState.STATUS_MIGRATE_COMPLETED),
             ),
         )
-        val scope = newScope(jdbc.connection)
-
-        val result = MigrationStatusService(configuration).status(scope)
+        val invocation = invoke(jdbc) { MigrationStatusService(configuration).status(it) }
+        val result = invocation.result
 
         val report = assertIs<MigrationStatusReport>(assertIs<ExecuteResult.Success<MigrationStatusReport>>(result).result)
         assertEquals(listOf("v1"), report.versions.map { it.name })
         assertEquals(listOf(MigrationVersionStatus.APPLIED), report.versions.map { it.status })
         assertEquals("status_probe", report.versions.single().migrations.single().id)
         assertEquals(2, jdbc.queryCount)
+        assertEquals(1, jdbc.lockAcquireCount)
+        assertEquals(1, jdbc.lockReleaseCount)
         assertEquals(0, jdbc.transactionControlCalls)
-        assertEquals(0, jdbc.connectionCloseCount)
+        assertEquals(1, jdbc.connectionCloseCount)
         assertEquals(0, CallbackProbeMigration.callbackCount.get())
     }
 
@@ -76,7 +83,7 @@ class MigrationStatusServiceTest {
                 mapOf("id" to 10, "tagId" to 1, "status" to MigrationVersionState.STATUS_MIGRATE_STARTED),
             ),
         )
-        val result = MigrationStatusService(configuration).status(newScope(jdbc.connection))
+        val result = invoke(jdbc) { MigrationStatusService(configuration).status(it) }.result
 
         val report = assertIs<MigrationStatusReport>(assertIs<ExecuteResult.Success<MigrationStatusReport>>(result).result)
         assertEquals(MigrationVersionStatus.INVALID, report.versions.single().status)
@@ -89,9 +96,7 @@ class MigrationStatusServiceTest {
     @Test
     fun `empty history returns configured versions as pending`() {
         val jdbc = FakeJdbc(emptyList())
-        val scope = newScope(jdbc.connection)
-
-        val result = MigrationStatusService(configuration).status(scope)
+        val result = invoke(jdbc) { MigrationStatusService(configuration).status(it) }.result
 
         val report = assertIs<MigrationStatusReport>(assertIs<ExecuteResult.Success<MigrationStatusReport>>(result).result)
         assertEquals(listOf("v1"), report.versions.map { it.name })
@@ -103,12 +108,11 @@ class MigrationStatusServiceTest {
     fun `reader failure is propagated with its original cause`() {
         val original = SQLException("status history read failed")
         val jdbc = FakeJdbc(emptyList(), queryFailure = original)
-        val scope = newScope(jdbc.connection)
-
-        val result = MigrationStatusService(configuration).status(scope)
+        val invocation = invoke(jdbc) { MigrationStatusService(configuration).status(it) }
+        val result = invocation.result
 
         assertSame(original, assertIs<ExecuteResult.Failure>(result).exception)
-        assertSame(original, scope.firstFailure)
+        assertSame(original, invocation.scope.firstFailure)
         assertEquals(1, jdbc.queryCount)
     }
 
@@ -129,13 +133,13 @@ class MigrationStatusServiceTest {
     fun `analyzer exception is recorded as the operation failure`() {
         val original = IllegalArgumentException("status analysis failed")
         val jdbc = FakeJdbc(emptyList())
-        val scope = newScope(jdbc.connection)
         val analyzer = MigrationStatusAnalyzer { throw original }
 
-        val result = MigrationStatusService(configuration, analyzer = analyzer).status(scope)
+        val invocation = invoke(jdbc) { MigrationStatusService(configuration, analyzer = analyzer).status(it) }
+        val result = invocation.result
 
         assertSame(original, assertIs<ExecuteResult.Failure>(result).exception)
-        assertSame(original, scope.firstFailure)
+        assertSame(original, invocation.scope.firstFailure)
         assertEquals(2, jdbc.queryCount)
     }
 
@@ -143,17 +147,54 @@ class MigrationStatusServiceTest {
     fun `fatal analyzer error is recorded and rethrown`() {
         val fatal = AssertionError("fatal status analysis error")
         val jdbc = FakeJdbc(emptyList())
-        val scope = newScope(jdbc.connection)
         val analyzer = MigrationStatusAnalyzer { throw fatal }
+        var scope: OperationExecutionScope? = null
 
         val thrown = assertFailsWith<AssertionError> {
-            MigrationStatusService(configuration, analyzer = analyzer).status(scope)
+            managedExecutor(jdbc.connection).connection { managedScope ->
+                scope = managedScope
+                MigrationStatusService(configuration, analyzer = analyzer).status(managedScope)
+            }
         }
 
         assertSame(fatal, thrown)
-        assertSame(fatal, scope.fatalError)
-        assertSame(fatal, scope.firstFailure)
+        assertSame(fatal, requireNotNull(scope).fatalError)
+        assertSame(fatal, requireNotNull(scope).firstFailure)
         assertEquals(2, jdbc.queryCount)
+    }
+
+    private fun invoke(
+        jdbc: FakeJdbc,
+        action: (OperationExecutionScope) -> ExecuteResult<MigrationStatusReport>,
+    ): ManagedInvocation<MigrationStatusReport> {
+        var scope: OperationExecutionScope? = null
+        val result = managedExecutor(jdbc.connection).connection { managedScope ->
+            scope = managedScope
+            action(managedScope)
+        }
+        return ManagedInvocation(result, requireNotNull(scope))
+    }
+
+    private fun managedExecutor(connection: Connection): OperationExecutionExecutor {
+        val config = DatabaseConfig(
+            connection = DatabaseConnectionConfig(
+                dbDomain = "jdbc:mysql://migration-status-test.local",
+                dbPort = 3306,
+                dbName = "migration_status_test",
+                dbUserName = "test-user",
+                dbPassword = "test-password",
+            ),
+            platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        )
+        val context = DatabaseContext(
+            name = "migration-status-test",
+            config = config,
+            connectionProvider = object : IDatabaseConnection {
+                override fun build(): Connection = connection
+            },
+            databaseIdentity = requireNotNull(DatabaseIdentity.from(config)),
+        )
+        return OperationExecutionExecutor(context)
     }
 
     private fun newScope(connection: Connection) =
@@ -193,6 +234,10 @@ class MigrationStatusServiceTest {
     ) {
         var queryCount = 0
             private set
+        var lockAcquireCount = 0
+            private set
+        var lockReleaseCount = 0
+            private set
         var transactionControlCalls = 0
             private set
         var connectionCloseCount = 0
@@ -203,13 +248,22 @@ class MigrationStatusServiceTest {
                 "prepareStatement" -> proxy(PreparedStatement::class.java) { statementMethod, _ ->
                     when (statementMethod.name) {
                         "executeQuery" -> {
-                            queryCount++
-                            val failure = if (queryCount == 1) queryFailure else null
-                            failure?.let { throw it }
-                            resultSet(
-                                args.firstOrNull()?.toString().orEmpty(),
-                                if (queryCount == 1) rows else versionRows,
-                            )
+                            val sql = args.firstOrNull()?.toString().orEmpty()
+                            when {
+                                "get_lock(" in sql.lowercase() -> {
+                                    lockAcquireCount++
+                                    resultSet(sql, listOf(mapOf("acquired" to 1)))
+                                }
+                                "release_lock(" in sql.lowercase() -> {
+                                    lockReleaseCount++
+                                    resultSet(sql, listOf(mapOf("released" to 1)))
+                                }
+                                else -> {
+                                    queryCount++
+                                    if (queryCount == 1) queryFailure?.let { throw it }
+                                    resultSet(sql, if (queryCount == 1) rows else versionRows)
+                                }
+                            }
                         }
                         "close" -> null
                         "isClosed" -> false
@@ -291,4 +345,9 @@ class MigrationStatusServiceTest {
         java.lang.Character.TYPE -> '\u0000'
         else -> null
     }
+
+    private data class ManagedInvocation<T>(
+        val result: ExecuteResult<T>,
+        val scope: OperationExecutionScope,
+    )
 }

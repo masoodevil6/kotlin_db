@@ -78,6 +78,28 @@ class MigrationVersionCheckpointPersistenceTest {
                 action = { persistence.normalizeDownRecordingFailure(scope(it), 34, "expected-down-record") },
             ),
             Case(
+                expectedSql = "UPDATE system_migration_version SET status = ? " +
+                    "WHERE id = ? AND status = ? AND CAST(retry_checkpoint AS BINARY) = CAST(? AS BINARY)",
+                expectedValues = listOf(
+                    MigrationVersionState.STATUS_MIGRATE_STARTED,
+                    37,
+                    MigrationVersionState.STATUS_MIGRATE_FAILED_UP,
+                    "expected-up-execution",
+                ),
+                action = { persistence.normalizeUpExecutionFailure(scope(it), 37, "expected-up-execution") },
+            ),
+            Case(
+                expectedSql = "UPDATE system_migration_version SET status = ? " +
+                    "WHERE id = ? AND status = ? AND CAST(retry_checkpoint AS BINARY) = CAST(? AS BINARY)",
+                expectedValues = listOf(
+                    MigrationVersionState.STATUS_ROLLBACK_STARTED,
+                    38,
+                    MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN,
+                    "expected-down-execution",
+                ),
+                action = { persistence.normalizeDownExecutionFailure(scope(it), 38, "expected-down-execution") },
+            ),
+            Case(
                 expectedSql = "UPDATE system_migration_version SET status = ?, retry_checkpoint = NULL " +
                     "WHERE id = ? AND status = ? AND CAST(retry_checkpoint AS BINARY) = CAST(? AS BINARY)",
                 expectedValues = listOf(

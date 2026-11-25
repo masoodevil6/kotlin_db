@@ -2,7 +2,10 @@ package gog.my_project.data_base_migration.executor.service.run
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryOperation
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryTarget
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionSelection
+import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_migration.executor.model.version_selection.MigrationVersionSelectionDirection
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionTransactionService
@@ -67,6 +70,74 @@ internal class MigrationRunOrchestrationService(
         recoveryTarget = target,
         toCompleteVersion = toCompleteVersion,
     )
+
+    /** Reads the latest incomplete state, then delegates to the existing validated Retry paths. */
+    fun recovery(
+        scope: OperationExecutionScope,
+        toCompleteVersion: Boolean = true,
+    ): ExecuteResult<Boolean> {
+        return when (
+            val stateResult = stateService.state(scope, MigrationVersionSelection.LATEST_INCOMPLETE)
+        ) {
+            is ExecuteResult.Failure -> stateResult
+            is ExecuteResult.Success -> {
+                val target = stateResult.result ?: return ExecuteResult.Success(null)
+                dispatchRecovery(target, toCompleteVersion, scope)
+            }
+        }
+    }
+
+    /** Dispatches the selected operation; the existing Retry path revalidates the snapshot under lock. */
+    internal fun dispatchRecovery(
+        target: MigrationRecoveryTarget,
+        toCompleteVersion: Boolean,
+        scope: OperationExecutionScope,
+    ): ExecuteResult<Boolean> {
+        val status = target.version.status
+        return when (target.operation) {
+            MigrationRecoveryOperation.UP_EXECUTION -> when (status) {
+                MigrationVersionState.STATUS_MIGRATE_FAILED_UP -> retryUp(target, toCompleteVersion, scope)
+                else -> recoveryFailure(scope, "UP execution operation is incompatible with status $status")
+            }
+
+            MigrationRecoveryOperation.DOWN_EXECUTION -> when (status) {
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_DOWN -> retryDown(target, toCompleteVersion, scope)
+                else -> recoveryFailure(scope, "DOWN execution operation is incompatible with status $status")
+            }
+
+            MigrationRecoveryOperation.UP_RECORDING_EXECUTION -> when (status) {
+                MigrationVersionState.STATUS_MIGRATE_STARTED,
+                MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD,
+                -> retryUp(target, toCompleteVersion, scope)
+                else -> recoveryFailure(scope, "UP recording operation is incompatible with status $status")
+            }
+
+            MigrationRecoveryOperation.DOWN_RECORDING_EXECUTION -> when (status) {
+                MigrationVersionState.STATUS_ROLLBACK_STARTED,
+                MigrationVersionState.STATUS_ROLLBACK_FAILED_RECORD,
+                -> retryDown(target, toCompleteVersion, scope)
+                else -> recoveryFailure(scope, "DOWN recording operation is incompatible with status $status")
+            }
+
+            MigrationRecoveryOperation.START_EXECUTION -> when (status) {
+                MigrationVersionState.STATUS_MIGRATE_STARTED -> retryUp(target, toCompleteVersion, scope)
+                MigrationVersionState.STATUS_ROLLBACK_STARTED -> retryDown(target, toCompleteVersion, scope)
+                else -> recoveryFailure(scope, "Start operation is incompatible with status $status")
+            }
+
+            MigrationRecoveryOperation.MIGRATE_DONE -> ExecuteResult.Success(null)
+
+            MigrationRecoveryOperation.UNKNOWN,
+            MigrationRecoveryOperation.UP_MANUAL_RECOVERY_REQUIRED,
+            MigrationRecoveryOperation.DOWN_MANUAL_RECOVERY_REQUIRED,
+            -> recoveryFailure(scope, "Automatic recovery is not permitted for operation ${target.operation}")
+        }
+    }
+
+    private fun recoveryFailure(
+        scope: OperationExecutionScope,
+        message: String,
+    ): ExecuteResult<Boolean> = scope.failed(IllegalStateException(message))
 
     private fun run(
         scope: OperationExecutionScope,
