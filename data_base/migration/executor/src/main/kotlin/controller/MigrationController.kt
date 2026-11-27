@@ -35,7 +35,7 @@ class MigrationController(
      * Returns the currently applied public Migration Version, or `Success(null)` if none is applied.
      * The supplied Scope must be an active managed root Connection Scope with a canonical
      * [DatabaseIdentity], a MySQL or MariaDB dialect, and no active session advisory lock.
-     * Unsupported Scopes fail through the existing Operation system-lock contract.
+     * Unsupported Scopes fail through the Operation lock contract.
      */
     fun current(scope: OperationExecutionScope): ExecuteResult<MigrationVersion?> =
         when (val result = currentVersionService.currentVersion(scope)) {
@@ -64,10 +64,10 @@ class MigrationController(
     ): ExecuteResult<MigrationRecoveryTarget?> = stateService.state(scope, versionId)
 
     /**
-     * Reads and analyzes persisted Migration status under one Migration system lock.
+     * Reads and analyzes persisted Migration status under one Migration Operation lock.
      * The supplied Scope must be an active managed root Connection Scope with a canonical
      * [DatabaseIdentity], a MySQL or MariaDB dialect, and no active session advisory lock.
-     * Unsupported Scopes fail through the existing Operation system-lock contract.
+     * Unsupported Scopes fail through the Operation lock contract.
      */
     fun status(scope: OperationExecutionScope): ExecuteResult<MigrationStatusReport> =
         statusService.status(scope)

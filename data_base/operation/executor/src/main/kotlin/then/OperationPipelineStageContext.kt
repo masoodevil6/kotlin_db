@@ -6,6 +6,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.DdlExecutionOutcome
 import gog.my_project.data_base_operation.executor.transaction.DdlFailurePolicy
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
+import gog.my_project.data_base_operation.executor.transaction.OperationLockResult
 import gog.my_project.data_base_operation.executor.transaction.OperationParameter
 import gog.my_project.data_base_operation.executor.transaction.OperationQueryRows
 import gog.my_project.data_base_operation.executor.session.result.SessionConsumer
@@ -18,6 +19,8 @@ import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.acquire
 import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.release.IReleaseSessionAdvisoryLockApi
 import gog.my_project.data_base_session.ast.interfaces.advisory_lock.acquire.IAcquireSessionAdvisoryLockAst
 import gog.my_project.data_base_session.ast.interfaces.advisory_lock.release.IReleaseSessionAdvisoryLockAst
+import gog.my_project.data_base_session.ast.value.LockResource
+import gog.my_project.data_base_session.ast.value.LockWaitPolicy
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -85,6 +88,16 @@ class OperationPipelineStageContext<T> internal constructor(
         val delegateConsumer = delegate.session(api)
         SessionConsumer {
             withStageAccess { delegateConsumer.execute() }
+        }
+    }
+
+    override fun <R> withOperationLock(
+        resource: LockResource,
+        waitPolicy: LockWaitPolicy,
+        block: (OperationExecutionContext) -> ExecuteResult<R>,
+    ): ExecuteResult<OperationLockResult<R>> = withStageAccess {
+        delegate.withOperationLock(resource, waitPolicy) {
+            block(this@OperationPipelineStageContext)
         }
     }
 

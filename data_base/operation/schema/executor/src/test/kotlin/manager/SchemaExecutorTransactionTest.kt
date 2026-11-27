@@ -1,7 +1,7 @@
 package gog.my_project.data_base_schema.executor.manager
 
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base.core.query.reader.BuiltQuery
@@ -44,7 +44,7 @@ class SchemaExecutorTransactionTest {
             operationEvents += it
             throw AssertionError("standalone SchemaExecutor event listener failed")
         })
-        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DatabaseDialect.MYSQL)
 
         try {
             var result: ExecuteResult<Boolean>? = null
@@ -84,7 +84,7 @@ class SchemaExecutorTransactionTest {
             },
         )
         val schemaExecutor = SchemaExecutor(databaseContext = databaseContext(connection))
-        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DatabaseDialect.MYSQL)
 
         try {
             val outcome = operationExecutor.connection { scope ->
@@ -130,7 +130,7 @@ class SchemaExecutorTransactionTest {
             queryExecutor = rawQueryExecutor,
             transactionExecutor = OperationTransactionExecutor { connection },
         )
-        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DatabaseDialect.MYSQL)
 
         try {
             val first = SchemaCreateIndexBuilder()
@@ -184,7 +184,7 @@ class SchemaExecutorTransactionTest {
             queryExecutor = rawQueryExecutor,
             transactionExecutor = OperationTransactionExecutor { connection },
         )
-        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DatabaseDialect.MYSQL)
 
         try {
             val operation = SchemaCreateIndexBuilder()
@@ -219,7 +219,7 @@ class SchemaExecutorTransactionTest {
             queryExecutor = rawQueryExecutor,
             transactionExecutor = OperationTransactionExecutor { connection },
         )
-        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DialectQuery.MY_SQL)
+        DefaultDatabaseConfig.config = previousConfig.copy(dialect = DatabaseDialect.MYSQL)
 
         try {
             val operation = SchemaCreateIndexBuilder()
@@ -284,7 +284,7 @@ class SchemaExecutorTransactionTest {
         val connection = connection(events)
         val scope = OperationExecutionScope(
             connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         )
         val query = BuiltQuery("CREATE TABLE `borrowed` (`id` INT)", mutableListOf())
         var suppliedConnection: Connection? = null
@@ -309,7 +309,7 @@ class SchemaExecutorTransactionTest {
         val connection = connection(events, preparedSql = preparedSql, boundParameters = bindings)
         val scope = OperationExecutionScope(
             connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         )
         val query = BuiltQuery(
             "CREATE TABLE `sample` (`value` INT DEFAULT :value)",
@@ -331,7 +331,7 @@ class SchemaExecutorTransactionTest {
         val events = mutableListOf<String>()
         val preparedSql = mutableListOf<String>()
         val connection = connection(events, preparedSql = preparedSql)
-        val operationContext = DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val operationContext = DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36))
         val executor = SchemaExecutor(
             transactionExecutor = OperationTransactionExecutor({ connection }, operationContext),
         )
@@ -353,7 +353,7 @@ class SchemaExecutorTransactionTest {
         val connection = connection(events)
         val scope = OperationExecutionScope(
             connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         )
         val queryInfo = mutableListOf<Pair<String?, MutableMap<String, Any?>>>()
         val executor = SchemaExecutor(queryExecutor = queryExecutor { _, _ -> ExecuteResult.Success(true) })
@@ -638,7 +638,7 @@ class SchemaExecutorTransactionTest {
                 dbUserName = "unused",
                 dbPassword = "",
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            platform = DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         ),
         connectionProvider = object : gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection {
             override fun build(): Connection = connection

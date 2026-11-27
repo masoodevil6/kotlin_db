@@ -13,6 +13,6 @@ object DatabaseConfig{
     val dbPassword  : String = "" ;
     val dbPoolSize  : Int    = 10 ;
 
-    //val dbTypeName : ITemplateSqlType = ObjectSqlTypes._TYPE_MY_SQL ;
+    //val dbTypeName : ITemplateSqlType = ObjectSqlTypes._TYPE_MYSQL ;
 
 }

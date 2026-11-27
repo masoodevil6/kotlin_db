@@ -7,7 +7,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 val mainConfig = DatabaseConfig(
     connection = DatabaseConnectionConfig(
@@ -20,7 +20,7 @@ val mainConfig = DatabaseConfig(
             ?: error("MAIN_DB_PASSWORD is required"),
     ),
     pool = DatabasePoolConfig(maxPoolSize = 10),
-    platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+    platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
 )
 ```
 
@@ -52,7 +52,7 @@ val jdbcUrl = connection.getDbUrl()
 
 `DefaultDatabaseConfig` و سازندهٔ بدون آرگومان برخی Executorهای قدیمی برای سازگاری باقی مانده‌اند، اما `DefaultDatabaseConfig` Deprecated است. برای کد جدید تنظیمات را به Registration بدهید یا یک `DatabaseContext` صریح بسازید. تنظیم واقعی Example ریشه در [راهنمای Example](../../../../example/README.md) توضیح داده شده است؛ Example مستقل `data_base:migration:example` صرفاً نمونه‌های AST را چاپ می‌کند و از این متغیرهای اتصال استفاده نمی‌کند.
 
-`DatabasePoolConfig.maxPoolSize` مقدار تنظیم‌شدهٔ Pool را نگه می‌دارد و مقدار پیش‌فرض آن `10` است؛ اما Provider فعلی از این مقدار برای ساخت یا مدیریت Pool استفاده نمی‌کند و Connectionهای JDBC مستقل باز می‌کند. بنابراین این گزینه را فعلاً تضمین‌کنندهٔ سقف Connectionهای هم‌زمان تلقی نکنید. `DatabasePlatformConfig.dialect` نوع Dialect را تعیین می‌کند؛ مقدار پیش‌فرض `DialectQuery.MY_SQL` است و `DialectQuery.MARIA_DB` نیز در Source تعریف شده است. `targetDatabaseVersion` اختیاری است و فقط وقتی به آن نیاز دارید تنظیمش کنید.
+`DatabasePoolConfig.maxPoolSize` مقدار تنظیم‌شدهٔ Pool را نگه می‌دارد و مقدار پیش‌فرض آن `10` است؛ اما Provider فعلی از این مقدار برای ساخت یا مدیریت Pool استفاده نمی‌کند و Connectionهای JDBC مستقل باز می‌کند. بنابراین این گزینه را فعلاً تضمین‌کنندهٔ سقف Connectionهای هم‌زمان تلقی نکنید. `DatabasePlatformConfig.dialect` نوع Dialect پیکربندی‌شده را با `DatabaseDialect` تعیین می‌کند؛ مقدار پیش‌فرض `DatabaseDialect.MYSQL` است و `DatabaseDialect.MARIA_DB` نیز پشتیبانی می‌شود. این مقدار نوع SQL انتخابی کتابخانه است و جایگزین تشخیص Product و نسخهٔ واقعی سرور نیست. `targetDatabaseVersion` اختیاری است و فقط وقتی به آن نیاز دارید تنظیمش کنید.
 
 مقادیر واقعی کاربر و گذرواژه را در Source یا مستندات ثبت نکنید. آن‌ها را از متغیر محیطی یا سامانهٔ امن تنظیمات برنامه بخوانید. `toString()` تنظیمات گذرواژه را redacted می‌کند، اما این جایگزین مراقبت از logها و پیام‌های خطا نیست.
 

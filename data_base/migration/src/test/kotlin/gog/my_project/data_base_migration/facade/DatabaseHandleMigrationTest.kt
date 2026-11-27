@@ -10,7 +10,7 @@ import gog.my_project.data_base_migration.api.registration.configuration.Migrati
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import model.migration_status.MigrationStatusReport
 import java.lang.reflect.Proxy
@@ -82,7 +82,7 @@ class DatabaseHandleMigrationTest {
             assertEquals(true, assertIs<ExecuteResult.Success<Boolean>>(initResult).result)
             val migrationFailure = assertIs<ExecuteResult.Failure>(migrateResult).exception
             assertIs<IllegalStateException>(migrationFailure)
-            assertEquals("A canonical DatabaseIdentity is required to run a system lock", migrationFailure.message)
+            assertEquals("A canonical DatabaseIdentity is required to run an Operation lock", migrationFailure.message)
             assertSame(migrationFailure, assertIs<ExecuteResult.Failure>(result).exception)
             assertEquals(1, driver.openCount)
             assertEquals(3, driver.connections.single().ddlCount)
@@ -429,7 +429,7 @@ class DatabaseHandleMigrationTest {
                     dbName = "test_catalog",
                     dbUserName = "test_user",
                     dbPassword = "test_password",
-                    dialect = DialectQuery.MY_SQL,
+                    dialect = DatabaseDialect.MYSQL,
                 )
                 attachedConfiguration?.let { migrationConfiguration = it }
             }
@@ -454,7 +454,7 @@ class DatabaseHandleMigrationTest {
         dbName = "test_catalog",
         dbUserName = "test_user",
         dbPassword = "test_password",
-        dialect = DialectQuery.MY_SQL,
+        dialect = DatabaseDialect.MYSQL,
     )
 
     private class LegacyHandle : DatabaseHandleApi {
@@ -558,7 +558,9 @@ class DatabaseHandleMigrationTest {
                 }
             } as Connection
 
-            private fun statement(sql: String): PreparedStatement = Proxy.newProxyInstance(
+            private fun statement(sql: String): PreparedStatement {
+                var lockRows: ResultSet? = null
+                return Proxy.newProxyInstance(
                 javaClass.classLoader,
                 arrayOf(PreparedStatement::class.java),
             ) { _, method, _ ->
@@ -585,16 +587,30 @@ class DatabaseHandleMigrationTest {
                         }
                     }
                     "execute" -> {
+                        if ("get_lock(" in sql.lowercase()) {
+                            lockAcquireCount++
+                            lockRows = resultSet(sql, mapOf("acquired" to 1))
+                            return@newProxyInstance true
+                        }
+                        if ("release_lock(" in sql.lowercase()) {
+                            lockReleaseCount++
+                            lockRows = resultSet(sql, mapOf("released" to 1))
+                            return@newProxyInstance true
+                        }
                         ddlCount++
                         driver.ddlFailure?.let { throw it }
                         true
                     }
+                    "getResultSet" -> lockRows
+                    "getMoreResults" -> false
+                    "getUpdateCount" -> -1
                     "close" -> null
                     "isClosed" -> false
                     "toString" -> sql
                     else -> defaultValue(method.returnType)
                 }
             } as PreparedStatement
+            }
 
             private fun retryCheckpointColumnProbeResultSet(): ResultSet {
                 var returnedRow = false
@@ -636,6 +652,7 @@ class DatabaseHandleMigrationTest {
                             true
                         }
                         "getInt" -> (row?.get(args?.firstOrNull()?.toString()) as? Number)?.toInt() ?: 0
+                        "getObject" -> row?.values?.firstOrNull()
                         "getMetaData" -> metadata(
                             when {
                                 "get_lock(" in sql.lowercase() -> listOf("acquired")

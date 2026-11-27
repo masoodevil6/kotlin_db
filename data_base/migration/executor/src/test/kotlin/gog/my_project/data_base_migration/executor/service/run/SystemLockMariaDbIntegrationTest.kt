@@ -12,7 +12,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.MARIA_DB
 import gog.my_project.data_base_operation.config.data_base.SystemLock
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
@@ -598,7 +598,7 @@ class SystemLockMariaDbIntegrationTest {
                 dbUserName = username,
                 dbPassword = password,
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MARIA_DB, MARIA_DB.Version(10, 4, 28)),
+            platform = DatabasePlatformConfig(DatabaseDialect.MARIA_DB, MARIA_DB.Version(10, 4, 28)),
         )
 
         fun openConnection(host: String): Connection = DriverManager.getConnection(

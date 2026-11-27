@@ -1,7 +1,7 @@
 package gog.my_project.data_base_schema.example
 
 import gog.my_project.data_base_schema.Schema
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_schema.example.operations.CustomerSchemaOperations
 
 /**
@@ -11,7 +11,7 @@ fun main() = renderSchemaOperations()
 
 private fun renderSchemaOperations() {
     CustomerSchemaOperations.examples().forEach { example ->
-        val sql = Schema.render(example.operation, SchemaDialect.MARIA_DB)
+        val sql = Schema.render(example.operation, DatabaseDialect.MARIA_DB)
         println("${example.name}:\n$sql\n")
     }
 }

@@ -8,7 +8,7 @@ import gog.my_project.data_base_session.ast.interfaces.advisory_lock.acquire.IAc
 import gog.my_project.data_base_session.ast.interfaces.advisory_lock.release.IReleaseSessionAdvisoryLockAst
 import gog.my_project.data_base_session.dialect.data_class.RenderedSessionCommand
 import gog.my_project.data_base_session.dialect.data_class.SessionCommandParameter
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_session.dialect.exceptions.SessionRenderException
 import gog.my_project.data_base_session.executor.exceptions.SessionExecutionException
 import gog.my_project.data_base_session.executor.exceptions.SessionProtocolException
@@ -23,7 +23,7 @@ class SessionExecutor {
     fun acquire(
         ast: IAcquireSessionAdvisoryLockAst,
         connection: Connection,
-        dialect: SessionDialect,
+        dialect: DatabaseDialect,
     ): AcquireSessionLockResult {
         val command = render(ast, dialect, SessionCommandKind.ACQUIRE_SESSION_ADVISORY_LOCK)
         return when (readStatus(command, connection, isAcquire = true)) {
@@ -37,7 +37,7 @@ class SessionExecutor {
     fun release(
         ast: IReleaseSessionAdvisoryLockAst,
         connection: Connection,
-        dialect: SessionDialect,
+        dialect: DatabaseDialect,
     ): ReleaseSessionLockResult {
         val command = render(ast, dialect, SessionCommandKind.RELEASE_SESSION_ADVISORY_LOCK)
         return when (readStatus(command, connection, isAcquire = false)) {
@@ -49,7 +49,7 @@ class SessionExecutor {
 
     private fun render(
         ast: ISessionCommandAst,
-        dialect: SessionDialect,
+        dialect: DatabaseDialect,
         expectedKind: SessionCommandKind,
     ): RenderedSessionCommand {
         val command = dialectSelector.select(dialect).render(ast)

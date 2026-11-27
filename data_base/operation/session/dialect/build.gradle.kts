@@ -11,6 +11,7 @@ repositories {
 }
 
 dependencies {
+    api(project(":data_base:dialect"))
     api(project(":data_base:operation:session:ast"))
 
     testImplementation(kotlin("test"))

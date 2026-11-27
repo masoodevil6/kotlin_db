@@ -15,6 +15,7 @@ import gog.my_project.data_base_query.executor.interfaces.IQueryBuilderExecutor
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.SQLException
+import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -64,6 +65,63 @@ class DatabaseHandleOperationScopeTest {
             })
             assertTrue(events.isEmpty())
         } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun `concurrent operations on one handle keep distinct identities through cleanup`() {
+        val provider = TrackingProvider()
+        val manager = manager(provider)
+        val handle: DatabaseHandleApi = manager[Primary]
+        val events = CopyOnWriteArrayList<OperationDatabaseEvent>()
+        val workers = Executors.newFixedThreadPool(2)
+        val enteredCallbacks = CountDownLatch(2)
+        val releaseCallbacks = CountDownLatch(1)
+        val subscription = handle.watch { event ->
+            if (event is OperationDatabaseEvent) events += event
+        }
+
+        try {
+            val operations = List(2) {
+                workers.submit(Callable {
+                    handle.withOperationScope { scope ->
+                        val operationId = scope.operationId
+                        enteredCallbacks.countDown()
+                        if (!releaseCallbacks.await(5, TimeUnit.SECONDS)) {
+                            return@withOperationScope ExecuteResult.Failure(
+                                IllegalStateException("Timed out waiting to release the concurrent Operation"),
+                            )
+                        }
+                        ExecuteResult.Success(operationId)
+                    }
+                })
+            }
+
+            assertTrue(enteredCallbacks.await(5, TimeUnit.SECONDS))
+            releaseCallbacks.countDown()
+            val results = operations.map {
+                assertIs<ExecuteResult.Success<String?>>(it.get(5, TimeUnit.SECONDS)).result
+            }
+            val operationIds = results.map { requireNotNull(it) }
+            assertEquals(2, operationIds.distinct().size)
+            assertEquals(2, provider.openCount.get())
+            assertEquals(2, provider.connectionCloseCount.get())
+
+            operationIds.forEach { operationId ->
+                val lifecycle = events.filter { it.operationId == operationId }.map(OperationDatabaseEvent::type)
+                assertEquals(
+                    listOf(
+                        OperationDatabaseEventType.CONNECTION_OPENED,
+                        OperationDatabaseEventType.CONNECTION_CLOSED,
+                    ),
+                    lifecycle,
+                )
+            }
+        } finally {
+            releaseCallbacks.countDown()
+            subscription.close()
+            workers.shutdownNow()
             manager.close()
         }
     }

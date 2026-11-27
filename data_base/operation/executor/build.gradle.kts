@@ -17,6 +17,7 @@ dependencies {
     api(project(":data_base:manager:connection"))
     api(project(":data_base:operation:failure-spi"))
     api(project(":data_base:operation:session:api"))
+    implementation(project(":data_base:operation:session:ast"))
     implementation(project(":data_base:operation:session:executor"))
 
     testImplementation(kotlin("test"))
@@ -30,16 +31,17 @@ tasks.test {
 }
 
 val mysqlIntegrationEnvironmentKeys = listOf(
-    "MAIN_DB_DOMAIN",
-    "MAIN_DB_PORT",
-    "MAIN_DB_NAME",
-    "MAIN_DB_USER",
-    "MAIN_DB_PASSWORD",
+    "KOTLIN_DB_OPERATION_IT_DOMAIN",
+    "KOTLIN_DB_OPERATION_IT_PORT",
+    "KOTLIN_DB_OPERATION_IT_SCHEMA",
+    "KOTLIN_DB_OPERATION_IT_ALLOWED_SCHEMAS",
+    "KOTLIN_DB_OPERATION_IT_USER",
+    "KOTLIN_DB_OPERATION_IT_PASSWORD",
 )
 
 tasks.register<org.gradle.api.tasks.testing.Test>("mysqlIntegrationTest") {
     group = "verification"
-    description = "Runs real Session advisory-lock tests against the configured local MySQL-compatible server."
+    description = "Runs real Operation and Session lock tests against an explicitly allowlisted local disposable schema."
     dependsOn(tasks.named("testClasses"))
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
@@ -48,7 +50,7 @@ tasks.register<org.gradle.api.tasks.testing.Test>("mysqlIntegrationTest") {
     }
     maxParallelForks = 1
     notCompatibleWithConfigurationCache(
-        "The MySQL integration task reads local database credentials from .env",
+        "The MySQL integration task reads local disposable-schema settings from .env",
     )
     doFirst {
         val requiredNames = mysqlIntegrationEnvironmentKeys.toSet()
@@ -89,7 +91,7 @@ tasks.register<org.gradle.api.tasks.testing.Test>("mysqlIntegrationTest") {
         }.toMap()
         val missingNames = mysqlIntegrationEnvironmentKeys.filter { integrationEnvironment[it].isNullOrEmpty() }
         require(missingNames.isEmpty()) {
-            "Missing required Session integration settings: ${missingNames.joinToString()}"
+            "Missing required Operation integration settings: ${missingNames.joinToString()}"
         }
         environment(integrationEnvironment)
     }

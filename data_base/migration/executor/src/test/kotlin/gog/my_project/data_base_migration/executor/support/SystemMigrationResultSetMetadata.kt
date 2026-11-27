@@ -7,6 +7,8 @@ import java.sql.ResultSetMetaData
 internal fun systemMigrationResultSetMetadata(sql: String): ResultSetMetaData {
     val normalizedSql = sql.lowercase()
     val labels = when {
+        "get_lock(" in normalizedSql -> listOf("acquired")
+        "release_lock(" in normalizedSql -> listOf("released")
         "retry_checkpoint" in normalizedSql && "message" in normalizedSql ->
             listOf("id", "tagId", "status", "message", "retryCheckpoint")
         "retry_checkpoint" in normalizedSql -> listOf("id", "tagId", "status", "retryCheckpoint")

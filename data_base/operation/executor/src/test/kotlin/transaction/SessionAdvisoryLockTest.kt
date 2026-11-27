@@ -8,7 +8,10 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionCon
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.SystemLock
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
+import gog.my_project.data_base_session.ast.value.LockResource
+import gog.my_project.data_base_session.ast.value.LockWaitPolicy
+import gog.my_project.data_base_session.builder.advisory_lock.acquireSessionAdvisoryLock
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -362,7 +365,7 @@ class SessionAdvisoryLockTest {
     @Test
     fun `scope created outside Operation lifecycle is rejected`() {
         val script = LockScript()
-        val scope = OperationExecutionScope(script.connection, DatabasePlatformConfig(DialectQuery.MY_SQL))
+        val scope = OperationExecutionScope(script.connection, DatabasePlatformConfig(DatabaseDialect.MYSQL))
 
         val result = scope.withSessionAdvisoryLock("app:migration:test", 1) {
             ExecuteResult.Success(Unit)
@@ -413,6 +416,48 @@ class SessionAdvisoryLockTest {
 
         assertIs<ExecuteResult.Failure>(result)
         assertEquals(1, callbackCount)
+        assertEquals(1, script.events.count { it == "execute:acquire" })
+        assertEquals(1, script.events.count { it == "execute:release" })
+    }
+
+    @Test
+    fun `direct Session command inside Legacy lock bracket is rejected`() {
+        val script = LockScript()
+        val api = acquireSessionAdvisoryLock {
+            resource("application", "direct-session")
+            noWait()
+        }
+
+        val result = OperationExecutionExecutor { script.connection }.connection { scope ->
+            scope.withSessionAdvisoryLock("app:legacy", 1) { activeScope ->
+                assertIs<ExecuteResult.Failure>(activeScope.session(api).execute())
+                ExecuteResult.Success(Unit)
+            }
+        }
+
+        assertIs<ExecuteResult.Failure>(result)
+        assertEquals(1, script.events.count { it == "execute:acquire" })
+        assertEquals(1, script.events.count { it == "execute:release" })
+    }
+
+    @Test
+    fun `Operation lock bracket inside Legacy lock bracket is rejected`() {
+        val script = LockScript()
+        val identity = configuredIdentity("db.internal", "catalog")
+
+        val result = runSystemLock(script, identity, SystemLock.MIGRATION) { _, activeScope ->
+            assertIs<ExecuteResult.Failure>(
+                activeScope.withOperationLock(
+                    LockResource("application", "operation-nested"),
+                    LockWaitPolicy.NoWait,
+                ) {
+                    ExecuteResult.Success(Unit)
+                },
+            )
+            ExecuteResult.Success(Unit)
+        }
+
+        assertIs<ExecuteResult.Failure>(result)
         assertEquals(1, script.events.count { it == "execute:acquire" })
         assertEquals(1, script.events.count { it == "execute:release" })
     }
@@ -488,7 +533,7 @@ class SessionAdvisoryLockTest {
 
     @Test
     fun `system lock uses both supported dialects through the same managed scope`() {
-        for (dialect in listOf(DialectQuery.MY_SQL, DialectQuery.MARIA_DB)) {
+        for (dialect in listOf(DatabaseDialect.MYSQL, DatabaseDialect.MARIA_DB)) {
             val script = LockScript()
             val result = runSystemLock(
                 script,
@@ -541,7 +586,7 @@ class SessionAdvisoryLockTest {
         val identity = configuredIdentity(host = "db.internal", database = "catalog")
         val scope = OperationExecutionScope(
             script.connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL),
             identity,
         )
         var callbackCount = 0
@@ -564,7 +609,7 @@ class SessionAdvisoryLockTest {
         val context = createSystemLockContext(
             script,
             identity,
-            DialectQuery.MY_SQL,
+            DatabaseDialect.MYSQL,
         )
         var callbackCount = 0
 
@@ -614,7 +659,7 @@ class SessionAdvisoryLockTest {
         script: LockScript,
         identity: DatabaseIdentity?,
         systemLock: SystemLock,
-        dialect: DialectQuery = DialectQuery.MY_SQL,
+        dialect: DatabaseDialect = DatabaseDialect.MYSQL,
         block: (OperationExecutionScope, OperationExecutionScope) -> ExecuteResult<T>,
     ): ExecuteResult<T> {
         val context = createSystemLockContext(script, identity, dialect)
@@ -630,7 +675,7 @@ class SessionAdvisoryLockTest {
     private fun createSystemLockContext(
         script: LockScript,
         identity: DatabaseIdentity?,
-        dialect: DialectQuery,
+        dialect: DatabaseDialect,
     ): DatabaseContext {
         val config = DatabaseConfig(
             connection = DatabaseConnectionConfig(

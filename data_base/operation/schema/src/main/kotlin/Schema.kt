@@ -1,9 +1,8 @@
 package gog.my_project.data_base_schema
 
-import gog.my_project.data_base_operation.config.data_base.DatabaseProduct
 import gog.my_project.data_base_operation.config.data_base.MARIA_DB
 import gog.my_project.data_base_operation.config.data_base.MYSQL
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
@@ -125,14 +124,14 @@ object Schema {
     /** Renders exactly one operation for an explicitly selected dialect and optional target version. */
     fun render(
         operation: SchemaOperation,
-        dialect: SchemaDialect,
+        dialect: DatabaseDialect,
         version: SchemaVersion? = null,
     ): String {
         require(version == null || version.dialect == dialect) {
             "Schema version dialect ${version?.dialect} does not match selected dialect $dialect"
         }
         val coreVersion = version?.toCoreVersion()
-        val rendered = dialectSelector.select(dialect.toCoreDialect(), coreVersion)
+        val rendered = dialectSelector.select(dialect, coreVersion)
             .render(operation.requireSchemaApi().ast)
         return requireSchemaSql(rendered)
     }
@@ -197,33 +196,11 @@ object Schema {
 
 }
 
-private fun SchemaDialect.toCoreDialect(): DialectQuery = when (this) {
-    SchemaDialect.MYSQL -> DialectQuery.MY_SQL
-    SchemaDialect.MARIA_DB -> DialectQuery.MARIA_DB
-}
-
 internal fun requireSchemaSql(rendered: String?): String =
     requireNotNull(rendered) { "Schema renderer returned no SQL for the supplied operation" }
 
-private fun DialectQuery.toSchemaDialect(): SchemaDialect = when (this) {
-    DialectQuery.MY_SQL -> SchemaDialect.MYSQL
-    DialectQuery.MARIA_DB -> SchemaDialect.MARIA_DB
-}
-
 private fun SchemaVersion.toCoreVersion() = when (dialect) {
-    SchemaDialect.MYSQL -> MYSQL.Version(major, minor, patch)
-    SchemaDialect.MARIA_DB -> MARIA_DB.Version(major, minor, patch)
-}
-
-private fun gog.my_project.data_base_operation.config.data_base.ProductDatabaseVersion.toSchemaVersion(
-    dialect: SchemaDialect,
-): SchemaVersion {
-    val expectedProduct = when (dialect) {
-        SchemaDialect.MYSQL -> DatabaseProduct.MYSQL
-        SchemaDialect.MARIA_DB -> DatabaseProduct.MARIA_DB
-    }
-    require(product == expectedProduct) {
-        "Configured database version product $product does not match dialect $dialect"
-    }
-    return SchemaVersion(dialect, major, minor, patch)
+    DatabaseDialect.MYSQL -> MYSQL.Version(major, minor, patch)
+    DatabaseDialect.MARIA_DB -> MARIA_DB.Version(major, minor, patch)
+    else -> throw UnsupportedOperationException("Schema rendering is not supported for dialect $dialect")
 }

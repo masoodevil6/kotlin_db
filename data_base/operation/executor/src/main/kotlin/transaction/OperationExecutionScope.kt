@@ -17,11 +17,14 @@ import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfi
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.SystemLock
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.events.OperationEvent
 import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_operation.executor.events.OperationEventType
+import gog.my_project.data_base_operation.executor.events.OperationLockEvent
+import gog.my_project.data_base_operation.executor.events.OperationLockEventType
 import gog.my_project.data_base.core.events.DatabaseEvent
+import gog.my_project.data_base.core.events.DatabaseEventFailure
 import gog.my_project.data_base_operation.executor.events.DatabaseEventPublisher
 import gog.my_project.data_base_operation.executor.events.publish
 import gog.my_project.data_base_session.api.result.AcquireSessionLockResult
@@ -33,8 +36,11 @@ import gog.my_project.data_base_session.api.interfaces.api.advisory_lock.release
 import gog.my_project.data_base_session.ast.interfaces.ISessionCommandAst
 import gog.my_project.data_base_session.ast.interfaces.advisory_lock.acquire.IAcquireSessionAdvisoryLockAst
 import gog.my_project.data_base_session.ast.interfaces.advisory_lock.release.IReleaseSessionAdvisoryLockAst
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base_session.ast.value.LockResource
+import gog.my_project.data_base_session.ast.value.LockWaitPolicy
+
 import gog.my_project.data_base_session.executor.manager.SessionExecutor
+import java.util.UUID
 import gog.my_project.data_base_operation.executor.session.result.SessionConsumer
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
@@ -45,6 +51,10 @@ import java.sql.ResultSet
 import java.sql.Types
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration.Companion.seconds
+
+private fun isOperationSessionDialectSupported(dialect: DatabaseDialect): Boolean =
+    dialect == DatabaseDialect.MYSQL || dialect == DatabaseDialect.MARIA_DB
 
 /**
  * Opaque, lifecycle-neutral view of an active Operation scope for operation-family facades.
@@ -68,6 +78,21 @@ interface OperationExecutionContext {
             ),
         )
     }
+
+    /**
+     * Runs [block] synchronously while a logical Operation lock is confirmed as acquired.
+     * The Operation retains Connection ownership and performs both lock commands internally.
+     * Before migrating Migration callers from the legacy lock, stop old Migration processes and
+     * terminate their existing database sessions; legacy and Operation lock identities require a
+     * coordinated hard cutover rather than overlapping execution.
+     */
+    fun <T> withOperationLock(
+        resource: LockResource,
+        waitPolicy: LockWaitPolicy,
+        block: (OperationExecutionContext) -> ExecuteResult<T>,
+    ): ExecuteResult<OperationLockResult<T>> = failed(
+        UnsupportedOperationException("Operation locks are not supported by this OperationExecutionContext"),
+    )
 
     /** Acquires a session-level advisory lock on the active Operation-owned Connection. */
     fun acquireSessionAdvisoryLock(
@@ -211,21 +236,34 @@ class OperationExecutionScope private constructor(
     val databaseIdentity: DatabaseIdentity?,
     internal val eventListener: OperationEventListener?,
     operationFailureOwner: OperationFailureOwner,
+    internal val operationIdentity: OperationId?,
     @Suppress("UNUSED_PARAMETER") constructorMarker: Unit,
 ) : OperationExecutionContext {
+
+    /** Opaque identifier of the managed root Operation, or null for a manually-created Scope. */
+    val operationId: String?
+        get() = operationIdentity?.asString()
 
     /** Preserves the established public constructor for manually-created, identity-less scopes. */
     constructor(
         connection: Connection,
         databasePlatformConfig: DatabasePlatformConfig,
-    ) : this(connection, databasePlatformConfig, null, null, OperationFailureOwner(), Unit)
+    ) : this(connection, databasePlatformConfig, null, null, OperationFailureOwner(), null, Unit)
 
     /** Internal Operation construction path that carries the registration's destination identity. */
     internal constructor(
         connection: Connection,
         databasePlatformConfig: DatabasePlatformConfig,
         databaseIdentity: DatabaseIdentity?,
-    ) : this(connection, databasePlatformConfig, databaseIdentity, null, OperationFailureOwner(), Unit)
+    ) : this(
+        connection,
+        databasePlatformConfig,
+        databaseIdentity,
+        null,
+        OperationFailureOwner(),
+        null,
+        Unit,
+    )
 
     /** Internal managed path that propagates its Operation-owned event observer to child scopes. */
     internal constructor(
@@ -233,7 +271,32 @@ class OperationExecutionScope private constructor(
         databasePlatformConfig: DatabasePlatformConfig,
         databaseIdentity: DatabaseIdentity?,
         eventListener: OperationEventListener?,
-    ) : this(connection, databasePlatformConfig, databaseIdentity, eventListener, OperationFailureOwner(), Unit)
+    ) : this(
+        connection,
+        databasePlatformConfig,
+        databaseIdentity,
+        eventListener,
+        OperationFailureOwner(),
+        null,
+        Unit,
+    )
+
+    /** Managed root construction path with its admitted Operation identity. */
+    internal constructor(
+        connection: Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+        databaseIdentity: DatabaseIdentity?,
+        eventListener: OperationEventListener?,
+        operationIdentity: OperationId?,
+    ) : this(
+        connection,
+        databasePlatformConfig,
+        databaseIdentity,
+        eventListener,
+        OperationFailureOwner(),
+        operationIdentity,
+        Unit,
+    )
 
     /** Managed Pipeline construction path that retains its pre-acquisition failure owner. */
     internal constructor(
@@ -248,6 +311,25 @@ class OperationExecutionScope private constructor(
         databaseIdentity,
         eventListener,
         operationFailureOwner,
+        null,
+        Unit,
+    )
+
+    /** Managed Pipeline root construction path with its admitted Operation identity. */
+    internal constructor(
+        connection: Connection,
+        databasePlatformConfig: DatabasePlatformConfig,
+        databaseIdentity: DatabaseIdentity?,
+        eventListener: OperationEventListener?,
+        operationFailureOwner: OperationFailureOwner,
+        operationIdentity: OperationId,
+    ) : this(
+        connection,
+        databasePlatformConfig,
+        databaseIdentity,
+        eventListener,
+        operationFailureOwner,
+        operationIdentity,
         Unit,
     )
 
@@ -258,6 +340,7 @@ class OperationExecutionScope private constructor(
         null,
         null,
         OperationFailureOwner(),
+        null,
         Unit,
     )
 
@@ -279,6 +362,13 @@ class OperationExecutionScope private constructor(
 
     /** A session lock is a single, non-reentrant lease on this managed Connection Scope. */
     private var sessionAdvisoryLockInProgress = false
+
+    /** Prevents nested lock brackets and direct Session lock commands inside this callback. */
+    private var operationLockInProgress = false
+
+    /** The lifecycle owner must invalidate this lease before returning it through close(). */
+    @Volatile
+    private var connectionDiscardRequested = false
 
     /** The exact Migration lock acquisition that currently owns a status-write capability. */
     private var activeMigrationFailureStatusLease: MigrationFailureStatusLease? = null
@@ -360,6 +450,8 @@ class OperationExecutionScope private constructor(
             val rejection = rejectOperation()
             if (rejection != null) {
                 ExecuteResult.Failure(rejection)
+            } else if (isLockBracketInProgress()) {
+                failed(IllegalStateException("Session commands cannot run inside an active lock bracket"))
             } else if (!OperationScopeGuard.isManagedConnectionScope(this)) {
                 failed(
                     IllegalStateException(
@@ -368,17 +460,10 @@ class OperationExecutionScope private constructor(
                 )
             } else {
                 val configuredDialect = databasePlatformConfig.dialect
-                val sessionDialect = when (configuredDialect) {
-                    DialectQuery.MY_SQL -> SessionDialect.MYSQL
-                    DialectQuery.MARIA_DB -> SessionDialect.MARIA_DB
-                    else -> null
-                }
-
-                if (sessionDialect == null) {
+                if (!isOperationSessionDialectSupported(configuredDialect)) {
                     failed(
                         UnsupportedOperationException(
-                            "Session commands are not supported for dialect " +
-                                configuredDialect::class.simpleName,
+                            "Session commands are not supported for dialect ${configuredDialect.name}",
                         ),
                     )
                 } else if (!consumed.compareAndSet(false, true)) {
@@ -388,7 +473,7 @@ class OperationExecutionScope private constructor(
                         try {
                             ExecuteResult.Success(
                                 api.dispatch(
-                                    OperationSessionCommandExecutor(jdbcConnection, sessionDialect),
+                                    OperationSessionCommandExecutor(jdbcConnection, configuredDialect),
                                 ),
                             )
                         } catch (error: Error) {
@@ -403,10 +488,360 @@ class OperationExecutionScope private constructor(
         }
     }
 
+    override fun <T> withOperationLock(
+        resource: LockResource,
+        waitPolicy: LockWaitPolicy,
+        block: (OperationExecutionContext) -> ExecuteResult<T>,
+    ): ExecuteResult<OperationLockResult<T>> {
+        val lockAttemptId = UUID.randomUUID().toString()
+        rejectOperation()?.let { return ExecuteResult.Failure(it) }
+        if (!OperationScopeGuard.isManagedConnectionScope(this)) {
+            return failed(
+                IllegalStateException(
+                    "Operation locks require the active Operation-managed root Connection Scope",
+                ),
+            )
+        }
+
+        val identity = databaseIdentity ?: return failed(
+            IllegalStateException("A canonical DatabaseIdentity is required to run an Operation lock"),
+        )
+
+        val effectiveResource = try {
+            OperationLockResourceGenerator.generate(identity, resource)
+        } catch (error: Error) {
+            if (fatalError !== error) recordFatal(error)
+            throw error
+        } catch (failure: Throwable) {
+            return failed(failure)
+        }
+
+        val sessionDialect = databasePlatformConfig.dialect
+        if (!isOperationSessionDialectSupported(sessionDialect)) {
+            return failed(
+                UnsupportedOperationException(
+                    "Operation locks are not supported for dialect ${sessionDialect.name}",
+                ),
+            )
+        }
+
+        val alreadyRunning = synchronized(this) {
+            if (operationLockInProgress || sessionAdvisoryLockInProgress) {
+                true
+            } else {
+                operationLockInProgress = true
+                sessionAdvisoryLockInProgress = true
+                false
+            }
+        }
+        if (alreadyRunning) {
+            return failed(IllegalStateException("Nested or overlapping lock brackets are not supported"))
+        }
+
+        try {
+            val backend = SessionOperationLockBackend(jdbcConnection, sessionDialect)
+            publishOperationLockEvent(
+                type = OperationLockEventType.LOCK_ACQUISITION_STARTED,
+                logicalResource = resource,
+                lockAttemptId = lockAttemptId,
+            )
+            val acquire = observeOperationLockCommand(
+                command = { backend.acquire(effectiveResource, waitPolicy) },
+                failure = { observation ->
+                    when (observation) {
+                        is OperationLockAcquireObservation.Failed -> observation.failure
+                        is OperationLockAcquireObservation.Unknown -> observation.failure
+                        else -> null
+                    }
+                },
+            )
+
+            return when (acquire) {
+                OperationLockAcquireObservation.Acquired -> {
+                    publishOperationLockEvent(
+                        type = OperationLockEventType.LOCK_ACQUIRED,
+                        logicalResource = resource,
+                        lockAttemptId = lockAttemptId,
+                    )
+                    executeOperationLockCallback(backend, effectiveResource, resource, lockAttemptId, block)
+                }
+
+                OperationLockAcquireObservation.TimedOut -> {
+                    publishOperationLockEvent(
+                        type = OperationLockEventType.LOCK_TIMED_OUT,
+                        logicalResource = resource,
+                        lockAttemptId = lockAttemptId,
+                    )
+                    ExecuteResult.Success(OperationLockResult.TimedOut)
+                }
+
+                is OperationLockAcquireObservation.Failed -> {
+                    publishOperationLockEvent(
+                        type = OperationLockEventType.LOCK_ACQUISITION_FAILED,
+                        logicalResource = resource,
+                        lockAttemptId = lockAttemptId,
+                        failure = acquire.failure,
+                    )
+                    val failure = recordOperationLockFailure(acquire.failure)
+                    if (failure is Error) throw failure
+                    ExecuteResult.Failure(failure)
+                }
+
+                is OperationLockAcquireObservation.Unknown -> {
+                    publishOperationLockEvent(
+                        type = OperationLockEventType.LOCK_ACQUISITION_UNKNOWN,
+                        logicalResource = resource,
+                        lockAttemptId = lockAttemptId,
+                        failure = acquire.failure,
+                    )
+                    cleanupUnknownOperationLockAcquisition(
+                        backend,
+                        effectiveResource,
+                        resource,
+                        lockAttemptId,
+                        acquire.failure,
+                    )
+                }
+            }
+        } catch (error: Error) {
+            if (fatalError !== error) recordFatal(error)
+            throw error
+        } catch (failure: Throwable) {
+            val primary = recordOperationLockFailure(failure)
+            if (primary is Error) throw primary
+            return ExecuteResult.Failure(primary)
+        } finally {
+            synchronized(this) {
+                operationLockInProgress = false
+                sessionAdvisoryLockInProgress = false
+            }
+        }
+    }
+
+    private fun <T> executeOperationLockCallback(
+        backend: OperationLockBackend,
+        resource: LockResource,
+        logicalResource: LockResource,
+        lockAttemptId: String,
+        block: (OperationExecutionContext) -> ExecuteResult<T>,
+    ): ExecuteResult<OperationLockResult<T>> {
+        var callbackResult: ExecuteResult<T>? = null
+        var callbackFailure: Throwable? = null
+
+        try {
+            callbackResult = block(this)
+            recordResult(callbackResult)
+            callbackFailure = firstFailure ?: (callbackResult as? ExecuteResult.Failure)?.exception
+        } catch (error: Error) {
+            callbackFailure = error
+            if (fatalError !== error) recordFatal(error)
+        } catch (failure: Throwable) {
+            val primary = recordOperationLockFailure(failure)
+            callbackFailure = primary
+        }
+
+        val release = attemptOperationLockRelease(backend, resource, logicalResource, lockAttemptId)
+        val releaseFailure = when (release) {
+            OperationLockReleaseObservation.Released -> null
+            OperationLockReleaseObservation.NotOwned -> IllegalStateException(
+                "Operation lock was no longer owned when its bracket completed",
+            )
+            is OperationLockReleaseObservation.Failed -> release.failure
+            is OperationLockReleaseObservation.Unknown -> release.failure
+        }
+
+        if (releaseFailure != null) {
+            val primary = fatalError ?: callbackFailure ?: firstFailure
+            if (primary == null) {
+                callbackFailure = recordOperationLockFailure(releaseFailure)
+            } else {
+                addSuppressedSafely(primary, releaseFailure)
+            }
+
+            if (release is OperationLockReleaseObservation.Failed ||
+                release is OperationLockReleaseObservation.Unknown
+            ) {
+                val discardFailure = requestOperationConnectionDiscard()
+                if (discardFailure != null) {
+                    val currentPrimary = fatalError ?: callbackFailure ?: firstFailure ?: releaseFailure
+                    addSuppressedSafely(currentPrimary, discardFailure)
+                }
+            }
+        }
+
+        val fatal = fatalError
+        if (fatal != null) throw fatal
+
+        val failure = callbackFailure ?: firstFailure
+        if (failure != null) return ExecuteResult.Failure(failure)
+
+        val success = callbackResult
+        if (success !is ExecuteResult.Success) {
+            return ExecuteResult.Failure(
+                recordOperationLockFailure(
+                    IllegalStateException("Operation lock callback completed without a successful result"),
+                ),
+            )
+        }
+        return ExecuteResult.Success(OperationLockResult.Acquired(success.result))
+    }
+
+    private fun cleanupUnknownOperationLockAcquisition(
+        backend: OperationLockBackend,
+        resource: LockResource,
+        logicalResource: LockResource,
+        lockAttemptId: String,
+        acquisitionFailure: Throwable,
+    ): ExecuteResult<OperationLockResult<Nothing>> {
+        val primary = recordOperationLockFailure(acquisitionFailure)
+        val release = attemptOperationLockRelease(
+            backend,
+            resource,
+            logicalResource,
+            lockAttemptId,
+            cleanupAfterUnknownAcquisition = true,
+        )
+        val cleanupFailure = when (release) {
+            OperationLockReleaseObservation.Released,
+            OperationLockReleaseObservation.NotOwned,
+            -> null
+            is OperationLockReleaseObservation.Failed -> release.failure
+            is OperationLockReleaseObservation.Unknown -> release.failure
+        }
+        if (cleanupFailure != null) addSuppressedSafely(primary, cleanupFailure)
+
+        // An acquire that failed after command dispatch may have granted the lock. Even a
+        // successful best-effort RELEASE cannot establish that the borrowed JDBC connection is
+        // otherwise healthy after the original execution/cleanup error.
+        val discardFailure = requestOperationConnectionDiscard()
+        if (discardFailure != null) addSuppressedSafely(primary, discardFailure)
+
+        val fatal = fatalError
+        if (fatal != null) throw fatal
+        return ExecuteResult.Failure(primary)
+    }
+
+    private fun attemptOperationLockRelease(
+        backend: OperationLockBackend,
+        resource: LockResource,
+        logicalResource: LockResource,
+        lockAttemptId: String,
+        cleanupAfterUnknownAcquisition: Boolean = false,
+    ): OperationLockReleaseObservation {
+        rejectCleanupOperation()?.let { rejection ->
+            publishOperationLockEvent(
+                type = OperationLockEventType.LOCK_RELEASE_FAILED,
+                logicalResource = logicalResource,
+                lockAttemptId = lockAttemptId,
+                failure = rejection,
+                cleanupAfterUnknownAcquisition = cleanupAfterUnknownAcquisition,
+            )
+            return OperationLockReleaseObservation.Failed(rejection)
+        }
+        publishOperationLockEvent(
+            type = OperationLockEventType.LOCK_RELEASE_STARTED,
+            logicalResource = logicalResource,
+            lockAttemptId = lockAttemptId,
+            cleanupAfterUnknownAcquisition = cleanupAfterUnknownAcquisition,
+        )
+        val observation = observeOperationLockCommand(
+            command = { backend.release(resource) },
+            failure = { observation ->
+                when (observation) {
+                    is OperationLockReleaseObservation.Failed -> observation.failure
+                    is OperationLockReleaseObservation.Unknown -> observation.failure
+                    else -> null
+                }
+            },
+        )
+        val (eventType, failure) = when (observation) {
+            OperationLockReleaseObservation.Released -> OperationLockEventType.LOCK_RELEASED to null
+            OperationLockReleaseObservation.NotOwned -> OperationLockEventType.LOCK_NOT_OWNED to null
+            is OperationLockReleaseObservation.Failed -> OperationLockEventType.LOCK_RELEASE_FAILED to observation.failure
+            is OperationLockReleaseObservation.Unknown -> OperationLockEventType.LOCK_RELEASE_UNKNOWN to observation.failure
+        }
+        publishOperationLockEvent(
+            type = eventType,
+            logicalResource = logicalResource,
+            lockAttemptId = lockAttemptId,
+            failure = failure,
+            cleanupAfterUnknownAcquisition = cleanupAfterUnknownAcquisition,
+        )
+        return observation
+    }
+
+    private fun publishOperationLockEvent(
+        type: OperationLockEventType,
+        logicalResource: LockResource,
+        lockAttemptId: String,
+        failure: Throwable? = null,
+        cleanupAfterUnknownAcquisition: Boolean = false,
+    ) {
+        try {
+            publishDatabaseEvent(
+                OperationLockEvent(
+                    type = type,
+                    operationId = operationId,
+                    lockAttemptId = lockAttemptId,
+                    namespace = logicalResource.namespace,
+                    name = logicalResource.name,
+                    failure = failure?.let(DatabaseEventFailure::from),
+                    cleanupAfterUnknownAcquisition = cleanupAfterUnknownAcquisition,
+                ),
+            )
+        } catch (_: Throwable) {
+            // Event construction and delivery are both best effort.
+        }
+    }
+
+    private fun requestOperationConnectionDiscard(): Throwable? {
+        rejectCleanupOperation()?.let { return it }
+        synchronized(this) { connectionDiscardRequested = true }
+        return null
+    }
+
+    /** Read by the owning Operation lifecycle immediately before it closes the Connection. */
+    internal val shouldDiscardConnection: Boolean
+        get() = connectionDiscardRequested
+
+    private fun recordOperationLockFailure(failure: Throwable): Throwable {
+        if (failure is Error) {
+            if (fatalError !== failure) recordFatal(failure)
+            return failure
+        }
+        val recorded = recordFailure(failure)
+        if (recorded !== failure) addSuppressedSafely(recorded, failure)
+        return fatalError ?: recorded
+    }
+
+    private inline fun <T> observeOperationLockCommand(
+        command: () -> T,
+        failure: (T) -> Throwable?,
+    ): T {
+        publishOperationEvent(OperationEvent(OperationEventType.SQL_STARTED))
+        return try {
+            val result = command()
+            val error = failure(result)
+            if (error == null) {
+                publishOperationEvent(OperationEvent(OperationEventType.SQL_SUCCEEDED))
+            } else {
+                publishOperationEvent(OperationEvent(OperationEventType.SQL_FAILED, error = error))
+            }
+            result
+        } catch (error: Throwable) {
+            publishOperationEvent(OperationEvent(OperationEventType.SQL_FAILED, error = error))
+            throw error
+        }
+    }
+
     private fun <T> executeSessionAdvisoryLock(
-        execute: (SessionDialect) -> T,
+        execute: (DatabaseDialect) -> T,
     ): ExecuteResult<T> {
         rejectOperation()?.let { return ExecuteResult.Failure(it) }
+
+        if (isLockBracketInProgress()) {
+            return failed(IllegalStateException("Session lock commands cannot run inside an active lock bracket"))
+        }
 
         if (!OperationScopeGuard.isManagedConnectionScope(this)) {
             return failed(
@@ -416,13 +851,12 @@ class OperationExecutionScope private constructor(
             )
         }
 
-        val sessionDialect = when (databasePlatformConfig.dialect) {
-            DialectQuery.MY_SQL -> SessionDialect.MYSQL
-            DialectQuery.MARIA_DB -> SessionDialect.MARIA_DB
-            else -> return failed(
+        val sessionDialect = databasePlatformConfig.dialect
+        if (!isOperationSessionDialectSupported(sessionDialect)) {
+            return failed(
                 UnsupportedOperationException(
                     "Session advisory locks are not supported for dialect " +
-                        databasePlatformConfig.dialect::class.simpleName,
+                        sessionDialect.name,
                 ),
             )
         }
@@ -437,6 +871,10 @@ class OperationExecutionScope private constructor(
                 failed(failure)
             }
         }
+    }
+
+    private fun isLockBracketInProgress(): Boolean = synchronized(this) {
+        operationLockInProgress || sessionAdvisoryLockInProgress
     }
 
     /**
@@ -478,36 +916,52 @@ class OperationExecutionScope private constructor(
     }
 
     /**
-     * Runs [block] under the Migration system lock and lends it one restricted failure-status
+     * Runs [block] under the Migration Operation lock and lends it one restricted failure-status
      * capability. The capability is valid only for this Scope, owner thread, and lock acquisition.
      */
     fun <T> withMigrationFailureStatusCapability(
         timeoutSeconds: Int,
         block: (capability: MigrationFailureStatusCapability) -> ExecuteResult<T>,
-    ): ExecuteResult<T> = withSystemLock(SystemLock.MIGRATION, timeoutSeconds) {
-        val lease = MigrationFailureStatusLease()
-        synchronized(this) {
-            check(active) { "Execution scope has ended; it cannot issue a Migration failure capability" }
-            check(Thread.currentThread() === ownerThread) {
-                "Migration failure capabilities must be issued on the scope callback thread"
-            }
-            check(activeChildScope == null) {
-                "A Migration failure capability cannot be issued while a child transaction is active"
-            }
-            check(activeMigrationFailureStatusLease == null) {
-                "A Migration failure capability lease is already active for this scope"
-            }
-            activeMigrationFailureStatusLease = lease
+    ): ExecuteResult<T> {
+        rejectOperation()?.let { return ExecuteResult.Failure(it) }
+        val waitPolicy = when (timeoutSeconds) {
+            0 -> LockWaitPolicy.NoWait
+            in 1..MAX_SESSION_ADVISORY_LOCK_TIMEOUT_SECONDS -> LockWaitPolicy.Timeout.of(timeoutSeconds.seconds)
+            else -> return failed(IllegalArgumentException("Migration lock timeout must be between 0 and 300 seconds"))
         }
-
-        try {
-            block(MigrationFailureStatusCapabilityImpl(this, lease))
-        } finally {
+        val result = withOperationLock(MIGRATION_OPERATION_LOCK_RESOURCE, waitPolicy) {
+            val lease = MigrationFailureStatusLease()
             synchronized(this) {
-                lease.active = false
-                if (activeMigrationFailureStatusLease === lease) {
-                    activeMigrationFailureStatusLease = null
+                check(active) { "Execution scope has ended; it cannot issue a Migration failure capability" }
+                check(Thread.currentThread() === ownerThread) {
+                    "Migration failure capabilities must be issued on the scope callback thread"
                 }
+                check(activeChildScope == null) {
+                    "A Migration failure capability cannot be issued while a child transaction is active"
+                }
+                check(activeMigrationFailureStatusLease == null) {
+                    "A Migration failure capability lease is already active for this scope"
+                }
+                activeMigrationFailureStatusLease = lease
+            }
+
+            try {
+                block(MigrationFailureStatusCapabilityImpl(this, lease))
+            } finally {
+                synchronized(this) {
+                    lease.active = false
+                    if (activeMigrationFailureStatusLease === lease) {
+                        activeMigrationFailureStatusLease = null
+                    }
+                }
+            }
+        }
+        return when (result) {
+            is ExecuteResult.Failure -> result
+            is ExecuteResult.Success -> when (val lockResult = result.result) {
+                is OperationLockResult.Acquired -> ExecuteResult.Success(lockResult.value)
+                OperationLockResult.TimedOut -> failed(TimeoutException("Timed out acquiring Migration Operation lock"))
+                null -> failed(IllegalStateException("Migration Operation lock returned no result"))
             }
         }
     }
@@ -556,17 +1010,16 @@ class OperationExecutionScope private constructor(
                 ),
             )
         }
-        when (databasePlatformConfig.dialect) {
-            DialectQuery.MY_SQL, DialectQuery.MARIA_DB -> Unit
-            else -> return failed(
+        if (!isOperationSessionDialectSupported(databasePlatformConfig.dialect)) {
+            return failed(
                 UnsupportedOperationException(
-                    "Session advisory locks are not supported for dialect ${databasePlatformConfig.dialect::class.simpleName}",
+                    "Session advisory locks are not supported for dialect ${databasePlatformConfig.dialect.name}",
                 ),
             )
         }
 
         val alreadyRunning = synchronized(this) {
-            if (sessionAdvisoryLockInProgress) {
+            if (operationLockInProgress || sessionAdvisoryLockInProgress) {
                 true
             } else {
                 sessionAdvisoryLockInProgress = true
@@ -574,7 +1027,7 @@ class OperationExecutionScope private constructor(
             }
         }
         if (alreadyRunning) {
-            return failed(IllegalStateException("Nested or reentrant session advisory locks are not supported"))
+            return failed(IllegalStateException("Nested or overlapping lock brackets are not supported"))
         }
 
         var acquired = false
@@ -730,6 +1183,10 @@ class OperationExecutionScope private constructor(
         } catch (_: Throwable) {
             // Event observers are best-effort and must not affect Operation semantics.
         }
+    }
+
+    private fun publishOperationEvent(event: OperationEvent) {
+        eventListener.publish(event.copy(operationId = operationId))
     }
 
     fun recordFailure(failure: Throwable): Throwable {
@@ -1157,6 +1614,7 @@ class OperationExecutionScope private constructor(
     }
 
     private companion object {
+        val MIGRATION_OPERATION_LOCK_RESOURCE = LockResource("textqb:migration", "system")
         const val MIGRATION_UP_STARTED_STATUS = 100
         const val MIGRATION_UP_FAILED_EXECUTION_STATUS = 101
         const val MIGRATION_UP_FAILED_RECORD_STATUS = 102
@@ -1582,18 +2040,18 @@ class OperationExecutionScope private constructor(
     }
 
     private inline fun <T> observeSql(sql: String?, execution: () -> ExecuteResult<T>): ExecuteResult<T> {
-        eventListener.publish(OperationEvent(OperationEventType.SQL_STARTED, sql))
+        publishOperationEvent(OperationEvent(OperationEventType.SQL_STARTED, sql))
         return try {
             val result = execution()
             when (result) {
-                is ExecuteResult.Success -> eventListener.publish(OperationEvent(OperationEventType.SQL_SUCCEEDED, sql))
+                is ExecuteResult.Success -> publishOperationEvent(OperationEvent(OperationEventType.SQL_SUCCEEDED, sql))
                 is ExecuteResult.Failure -> eventListener.publish(
-                    OperationEvent(OperationEventType.SQL_FAILED, sql, result.exception),
+                    OperationEvent(OperationEventType.SQL_FAILED, sql, result.exception, operationId),
                 )
             }
             result
         } catch (failure: Throwable) {
-            eventListener.publish(OperationEvent(OperationEventType.SQL_FAILED, sql, failure))
+            publishOperationEvent(OperationEvent(OperationEventType.SQL_FAILED, sql, failure))
             throw failure
         }
     }

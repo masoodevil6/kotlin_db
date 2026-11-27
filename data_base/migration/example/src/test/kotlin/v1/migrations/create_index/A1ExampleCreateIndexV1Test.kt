@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_index
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -25,7 +25,7 @@ class A1ExampleCreateIndexV1Test {
     fun rendersSingleColumnNonUniqueIndex() {
         assertEquals(
             "CREATE INDEX `idx_users_email` ON `users` (`email`)",
-            Schema.render(A1ExampleCreateIndexV1().migration(), SchemaDialect.MYSQL),
+            Schema.render(A1ExampleCreateIndexV1().migration(), DatabaseDialect.MYSQL),
         )
     }
 

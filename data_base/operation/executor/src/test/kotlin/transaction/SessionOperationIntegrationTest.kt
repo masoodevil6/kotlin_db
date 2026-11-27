@@ -6,7 +6,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.then.OperationPipelineStageContext
 import gog.my_project.data_base_session.api.result.AcquireSessionLockResult
 import gog.my_project.data_base_session.api.result.ReleaseSessionLockResult
@@ -27,7 +27,7 @@ import gog.my_project.data_base_session.ast.value.LockWaitPolicy
 import gog.my_project.data_base_session.ast.value.SessionAdvisoryLockNameGenerator
 import gog.my_project.data_base_session.builder.advisory_lock.acquireSessionAdvisoryLock
 import gog.my_project.data_base_session.builder.advisory_lock.releaseSessionAdvisoryLock
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+
 import gog.my_project.data_base_operation.executor.session.result.SessionConsumer
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -49,7 +49,7 @@ import kotlin.test.assertTrue
 class SessionOperationIntegrationTest {
     @Test
     fun `session command adapter delegates typed commands on its borrowed connection for each dialect`() {
-        for (dialect in listOf(SessionDialect.MYSQL, SessionDialect.MARIA_DB)) {
+        for (dialect in listOf(DatabaseDialect.MYSQL, DatabaseDialect.MARIA_DB)) {
             val script = SessionJdbcScript(listOf(1, 1))
             val adapter = OperationSessionCommandExecutor(script.connection, dialect)
             val acquireAst = acquireAst()
@@ -89,7 +89,7 @@ class SessionOperationIntegrationTest {
     fun `session command adapter propagates errors unchanged and leaves connection lifecycle alone`() {
         val fatal = AssertionError("session adapter execution failed")
         val script = SessionJdbcScript(statuses = listOf(1), executeError = fatal)
-        val adapter = OperationSessionCommandExecutor(script.connection, SessionDialect.MYSQL)
+        val adapter = OperationSessionCommandExecutor(script.connection, DatabaseDialect.MYSQL)
 
         val thrown = assertFailsWith<AssertionError> {
             adapter.acquire(acquireAst())
@@ -108,7 +108,7 @@ class SessionOperationIntegrationTest {
     fun `session command adapter propagates release errors unchanged`() {
         val fatal = AssertionError("session adapter release failed")
         val script = SessionJdbcScript(statuses = listOf(1), executeError = fatal)
-        val adapter = OperationSessionCommandExecutor(script.connection, SessionDialect.MARIA_DB)
+        val adapter = OperationSessionCommandExecutor(script.connection, DatabaseDialect.MARIA_DB)
 
         val thrown = assertFailsWith<AssertionError> {
             adapter.release(releaseAst())
@@ -488,7 +488,7 @@ class SessionOperationIntegrationTest {
 
     @Test
     fun `mysql and mariadb platform configurations execute acquire with compatible sql`() {
-        listOf(DialectQuery.MY_SQL, DialectQuery.MARIA_DB).forEach { platformDialect ->
+        listOf(DatabaseDialect.MYSQL, DatabaseDialect.MARIA_DB).forEach { platformDialect ->
             val script = SessionJdbcScript(listOf(1))
             val context = databaseContext(script.connection, platformDialect)
 
@@ -606,7 +606,7 @@ class SessionOperationIntegrationTest {
         val rootTransactionScript = SessionJdbcScript(emptyList())
         val rootTransactionResult = OperationTransactionExecutor(
             connectionFactory = { rootTransactionScript.connection },
-            databasePlatformConfig = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            databasePlatformConfig = DatabasePlatformConfig(DatabaseDialect.MYSQL),
         ).transaction { scope ->
             assertIs<ExecuteResult.Failure>(scope.acquireSessionAdvisoryLock(acquireApi()))
             assertIs<ExecuteResult.Failure>(scope.session(releaseApi()).execute())
@@ -640,7 +640,7 @@ class SessionOperationIntegrationTest {
         val script = SessionJdbcScript(emptyList())
         val scope = OperationExecutionScope(
             script.connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL),
         )
 
         val result = scope.acquireSessionAdvisoryLock(acquireApi())
@@ -902,7 +902,7 @@ class SessionOperationIntegrationTest {
         LockResource("application", "integration"),
     )
 
-    private fun databaseContext(connection: Connection, dialect: DialectQuery): DatabaseContext = DatabaseContext(
+    private fun databaseContext(connection: Connection, dialect: DatabaseDialect): DatabaseContext = DatabaseContext(
         name = "session-integration-test",
         config = DatabaseConfig(
             connection = DatabaseConnectionConfig("jdbc:mysql://localhost", 3306, "test", "user", ""),

@@ -25,4 +25,5 @@ data class OperationDatabaseEvent(
     val type: OperationDatabaseEventType,
     val sql: String? = null,
     val failure: DatabaseEventFailure? = null,
+    val operationId: String? = null,
 ) : DatabaseEvent

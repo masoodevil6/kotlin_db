@@ -7,7 +7,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionCon
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseProduct
 import gog.my_project.data_base_operation.config.data_base.DatabaseServerInfo
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_session.api.result.AcquireSessionLockResult
 import gog.my_project.data_base_session.api.result.ReleaseSessionLockResult
 import gog.my_project.data_base_session.ast.value.LockResource
@@ -469,10 +469,10 @@ class SessionOperationMySqlIntegrationTest {
         val driverName: String,
         val driverVersion: String,
     ) {
-        val operationDialect: DialectQuery
+        val operationDialect: DatabaseDialect
             get() = when (info.product) {
-                DatabaseProduct.MYSQL -> DialectQuery.MY_SQL
-                DatabaseProduct.MARIA_DB -> DialectQuery.MARIA_DB
+                DatabaseProduct.MYSQL -> DatabaseDialect.MYSQL
+                DatabaseProduct.MARIA_DB -> DatabaseDialect.MARIA_DB
             }
     }
 
@@ -489,11 +489,15 @@ class SessionOperationMySqlIntegrationTest {
         fun inspectServer(): InspectedDatabaseServer =
             DriverManager.getConnection(jdbcUrl, username, password).use { connection ->
                 connection.createStatement().use { statement ->
-                    statement.executeQuery("SELECT VERSION(), @@version_comment, DATABASE()").use { rows ->
+                    statement.executeQuery("SELECT VERSION(), @@version_comment, DATABASE(), CURRENT_USER()").use { rows ->
                         check(rows.next()) { "The database server did not return its identity row." }
                         val versionText = requireNotNull(rows.getString(1))
                         val versionComment = requireNotNull(rows.getString(2))
                         val selectedSchema = rows.getString(3)
+                        val connectionAccount = requireNotNull(rows.getString(4)).substringBefore('@')
+                        check(!connectionAccount.equals("root", ignoreCase = true)) {
+                            "Session integration tests require a non-root database account."
+                        }
                         check(selectedSchema == schema) {
                             "Connected Schema did not match the explicitly selected disposable Example Database."
                         }
@@ -535,32 +539,53 @@ class SessionOperationMySqlIntegrationTest {
 
         companion object {
             fun fromEnvironment(): MySqlIntegrationSettings {
-                val domain = requireNotNull(System.getenv("MAIN_DB_DOMAIN")) {
-                    "MAIN_DB_DOMAIN must be provided by the local .env or process environment."
+                val configuredDomain = requireNotNull(System.getenv("KOTLIN_DB_OPERATION_IT_DOMAIN")) {
+                    "KOTLIN_DB_OPERATION_IT_DOMAIN must be provided by the local .env or process environment."
                 }
-                val host = Regex("^jdbc:mysql://(localhost|127\\.0\\.0\\.1)(?:/)?$")
-                    .matchEntire(domain)?.groupValues?.get(1)
-                    ?: error("MAIN_DB_DOMAIN must point to localhost or 127.0.0.1.")
-                val port = requireNotNull(System.getenv("MAIN_DB_PORT")?.toIntOrNull()) {
-                    "MAIN_DB_PORT must be an integer."
+                val host = Regex("^jdbc:mysql://(localhost|127\\.0\\.0\\.1)$")
+                    .matchEntire(configuredDomain)?.groupValues?.get(1)
+                    ?: error("KOTLIN_DB_OPERATION_IT_DOMAIN must point to localhost or 127.0.0.1.")
+                val domain = "jdbc:mysql://$host"
+                val port = requireNotNull(System.getenv("KOTLIN_DB_OPERATION_IT_PORT")?.toIntOrNull()) {
+                    "KOTLIN_DB_OPERATION_IT_PORT must be an integer."
                 }
-                require(port in 1..65535) { "MAIN_DB_PORT must be between 1 and 65535." }
-                val schema = requireNotNull(System.getenv("MAIN_DB_NAME")) {
-                    "MAIN_DB_NAME must be provided by the local .env or process environment."
+                require(port in 1..65535) { "KOTLIN_DB_OPERATION_IT_PORT must be between 1 and 65535." }
+                val schema = requireNotNull(System.getenv("KOTLIN_DB_OPERATION_IT_SCHEMA")) {
+                    "KOTLIN_DB_OPERATION_IT_SCHEMA must be provided by the local .env or process environment."
                 }
-                require(schema in SAFE_EXAMPLE_DATABASES) {
-                    "Session lock tests only allow the repository's dedicated disposable Example Databases."
+                require(schema.matches(DISPOSABLE_SCHEMA_PATTERN)) {
+                    "KOTLIN_DB_OPERATION_IT_SCHEMA must use the dedicated Operation integration prefix."
                 }
-                val username = requireNotNull(System.getenv("MAIN_DB_USER")) {
-                    "MAIN_DB_USER must be provided by the local .env or process environment."
+                require(schema !in FORBIDDEN_SCHEMAS) {
+                    "Operation integration cannot use a sample, default, or system schema."
                 }
-                require(username.isNotBlank() && !username.equals("root", ignoreCase = true)) {
+                val allowlist = requireNotNull(System.getenv("KOTLIN_DB_OPERATION_IT_ALLOWED_SCHEMAS")) {
+                    "KOTLIN_DB_OPERATION_IT_ALLOWED_SCHEMAS must explicitly allow the disposable schema."
+                }.split(',').map { it.trim() }
+                require(allowlist.isNotEmpty() && allowlist.none { it.isEmpty() }) {
+                    "KOTLIN_DB_OPERATION_IT_ALLOWED_SCHEMAS must be a non-empty comma-separated list."
+                }
+                require(allowlist.distinct().size == allowlist.size) {
+                    "KOTLIN_DB_OPERATION_IT_ALLOWED_SCHEMAS must not contain duplicate schema names."
+                }
+                require(allowlist.all { it.matches(DISPOSABLE_SCHEMA_PATTERN) && it !in FORBIDDEN_SCHEMAS }) {
+                    "Every allowlisted schema must use the dedicated disposable Operation integration prefix."
+                }
+                require(schema in allowlist) {
+                    "KOTLIN_DB_OPERATION_IT_SCHEMA must also appear in KOTLIN_DB_OPERATION_IT_ALLOWED_SCHEMAS."
+                }
+                val username = requireNotNull(System.getenv("KOTLIN_DB_OPERATION_IT_USER")) {
+                    "KOTLIN_DB_OPERATION_IT_USER must be provided by the local .env or process environment."
+                }
+                require(username.isNotBlank() && username == username.trim() &&
+                    !username.equals("root", ignoreCase = true)
+                ) {
                     "Session integration tests require a non-root Database account."
                 }
-                val password = requireNotNull(System.getenv("MAIN_DB_PASSWORD")) {
-                    "MAIN_DB_PASSWORD must be provided by the local .env or process environment."
+                val password = requireNotNull(System.getenv("KOTLIN_DB_OPERATION_IT_PASSWORD")) {
+                    "KOTLIN_DB_OPERATION_IT_PASSWORD must be provided by the local .env or process environment."
                 }
-                require(password.isNotEmpty()) { "MAIN_DB_PASSWORD must not be empty." }
+                require(password.isNotEmpty()) { "KOTLIN_DB_OPERATION_IT_PASSWORD must not be empty." }
                 return MySqlIntegrationSettings(domain, host, port, schema, username, password)
             }
         }
@@ -568,6 +593,15 @@ class SessionOperationMySqlIntegrationTest {
 
     private companion object {
         const val WAIT_SECONDS = 20L
-        val SAFE_EXAMPLE_DATABASES = setOf("main_example", "analytics_example")
+        val DISPOSABLE_SCHEMA_PATTERN = Regex("^kotlin_db_operation_it_[a-z0-9][a-z0-9_]{0,40}$")
+        val FORBIDDEN_SCHEMAS = setOf(
+            "main_example",
+            "analytics_example",
+            "test",
+            "mysql",
+            "information_schema",
+            "performance_schema",
+            "sys",
+        )
     }
 }

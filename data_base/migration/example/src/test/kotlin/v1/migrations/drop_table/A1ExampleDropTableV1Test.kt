@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_table
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -21,7 +21,7 @@ class A1ExampleDropTableV1Test {
     fun rendersDropTableWithoutIfExists() {
         val sql = Schema.render(
             A1ExampleDropTableV1(useIfExists = false).migration(),
-            SchemaDialect.MYSQL,
+            DatabaseDialect.MYSQL,
         )
 
         assertEquals("DROP TABLE `users`", sql)
@@ -31,7 +31,7 @@ class A1ExampleDropTableV1Test {
     fun rendersDropTableWithIfExists() {
         val sql = Schema.render(
             A1ExampleDropTableV1(useIfExists = true).migration(),
-            SchemaDialect.MYSQL,
+            DatabaseDialect.MYSQL,
         )
 
         assertEquals("DROP TABLE IF EXISTS `users`", sql)

@@ -11,6 +11,8 @@ repositories {
 }
 
 dependencies {
+    api(project(":data_base:dialect"))
+
     testImplementation(kotlin("test"))
 }
 

@@ -4,7 +4,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -17,7 +17,7 @@ class DatabaseManagerTest {
         val config = DatabaseConfig(
             connection = DatabaseConnectionConfig("jdbc:mysql://localhost", 3306, "sample", "user", "secret"),
             pool = DatabasePoolConfig(maxPoolSize = 3),
-            platform = DatabasePlatformConfig(dialect = DialectQuery.MARIA_DB),
+            platform = DatabasePlatformConfig(dialect = DatabaseDialect.MARIA_DB),
         )
 
         val registered = manager.register("analytics", config)

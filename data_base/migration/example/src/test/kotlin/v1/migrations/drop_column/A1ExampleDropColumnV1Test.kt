@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.drop_column
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -19,7 +19,7 @@ import kotlin.test.Test
 class A1ExampleDropColumnV1Test {
     @Test
     fun rendersDropColumnForMySql() {
-        val sql = Schema.render(A1ExampleDropColumnV1().migration(), SchemaDialect.MYSQL)
+        val sql = Schema.render(A1ExampleDropColumnV1().migration(), DatabaseDialect.MYSQL)
 
         assertEquals("ALTER TABLE `users` DROP COLUMN `display_name`", sql)
     }
@@ -31,12 +31,12 @@ class A1ExampleDropColumnV1Test {
 
         assertEquals(
             "ALTER TABLE `users` DROP COLUMN `display_name`",
-            Schema.render(ordinary, SchemaDialect.MYSQL),
+            Schema.render(ordinary, DatabaseDialect.MYSQL),
         )
-        assertFailsWith<UnsupportedOperationException> { Schema.render(optional, SchemaDialect.MYSQL) }
+        assertFailsWith<UnsupportedOperationException> { Schema.render(optional, DatabaseDialect.MYSQL) }
         assertEquals(
             "ALTER TABLE `users` DROP COLUMN IF EXISTS `display_name`",
-            Schema.render(optional, SchemaDialect.MARIA_DB),
+            Schema.render(optional, DatabaseDialect.MARIA_DB),
         )
     }
 

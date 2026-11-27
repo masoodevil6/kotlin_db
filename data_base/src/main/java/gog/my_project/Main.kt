@@ -178,7 +178,7 @@ fun main() {
             username("root")
             password("")
         }
-        .dialect(DialectQuery.MY_SQL)
+        .dialect(DatabaseDialect.MYSQL)
         .execute(
             blockQuery = {
                 dialect ->

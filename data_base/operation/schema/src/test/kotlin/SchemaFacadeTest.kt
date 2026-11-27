@@ -6,7 +6,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.events.OperationEvent
 import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_operation.executor.events.OperationEventType
@@ -28,6 +28,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+private val schemaSupportedDialects = listOf(DatabaseDialect.MYSQL, DatabaseDialect.MARIA_DB)
 
 class SchemaFacadeTest {
     @Test
@@ -79,7 +81,7 @@ class SchemaFacadeTest {
             assertIs<SchemaOperation>(operation)
             val adapter = assertIs<ExistingSchemaOperationAdapter>(operation)
             assertNotNull(adapter.schemaApi.ast)
-            val sql = Schema.render(operation, SchemaDialect.MYSQL)
+            val sql = Schema.render(operation, DatabaseDialect.MYSQL)
             assertTrue(sql.contains(expectedFragment, ignoreCase = true), "Expected '$expectedFragment' in: $sql")
         }
 
@@ -88,7 +90,7 @@ class SchemaFacadeTest {
         )
         assertEquals(2, createAst.columns.size)
         assertEquals(5, createAst.definitions.size)
-        assertTrue(Schema.render(operations.first().first, SchemaDialect.MARIA_DB).startsWith("CREATE TABLE IF NOT EXISTS"))
+        assertTrue(Schema.render(operations.first().first, DatabaseDialect.MARIA_DB).startsWith("CREATE TABLE IF NOT EXISTS"))
     }
 
     @Test
@@ -108,7 +110,7 @@ class SchemaFacadeTest {
 
         assertNull(ordinaryAst.ifExistAst)
         assertNotNull(conditionalAst.ifExistAst)
-        SchemaDialect.values().forEach { dialect ->
+        schemaSupportedDialects.forEach { dialect ->
             assertEquals("DROP TABLE `customers`", Schema.render(ordinary, dialect))
             assertEquals("DROP TABLE IF EXISTS `customers`", Schema.render(conditional, dialect))
         }
@@ -127,7 +129,7 @@ class SchemaFacadeTest {
 
         assertNull(ordinaryAst.ifExistAst)
         assertNotNull(conditionalAst.ifExistAst)
-        SchemaDialect.values().forEach { dialect ->
+        schemaSupportedDialects.forEach { dialect ->
             assertEquals(
                 "ALTER TABLE `customers` DROP COLUMN `phone`",
                 Schema.render(ordinary, dialect),
@@ -135,17 +137,17 @@ class SchemaFacadeTest {
         }
         assertEquals(
             "ALTER TABLE `customers` DROP COLUMN IF EXISTS `phone`",
-            Schema.render(conditional, SchemaDialect.MARIA_DB),
+            Schema.render(conditional, DatabaseDialect.MARIA_DB),
         )
         assertFailsWith<UnsupportedOperationException> {
-            Schema.render(conditional, SchemaDialect.MYSQL)
+            Schema.render(conditional, DatabaseDialect.MYSQL)
         }
         assertFailsWith<UnsupportedOperationException> {
-            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 1))
+            Schema.render(conditional, DatabaseDialect.MARIA_DB, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 0, 1))
         }
         assertEquals(
             "ALTER TABLE `customers` DROP COLUMN IF EXISTS `phone`",
-            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 2)),
+            Schema.render(conditional, DatabaseDialect.MARIA_DB, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 0, 2)),
         )
     }
 
@@ -162,7 +164,7 @@ class SchemaFacadeTest {
 
         assertNull(ordinaryAst.ifExistAst)
         assertNotNull(conditionalAst.ifExistAst)
-        SchemaDialect.values().forEach { dialect ->
+        schemaSupportedDialects.forEach { dialect ->
             assertEquals(
                 "DROP INDEX `idx_phone` ON `customers`",
                 Schema.render(ordinary, dialect),
@@ -170,17 +172,17 @@ class SchemaFacadeTest {
         }
         assertEquals(
             "DROP INDEX IF EXISTS `idx_phone` ON `customers`",
-            Schema.render(conditional, SchemaDialect.MARIA_DB),
+            Schema.render(conditional, DatabaseDialect.MARIA_DB),
         )
         assertFailsWith<UnsupportedOperationException> {
-            Schema.render(conditional, SchemaDialect.MYSQL)
+            Schema.render(conditional, DatabaseDialect.MYSQL)
         }
         assertFailsWith<UnsupportedOperationException> {
-            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 1, 3))
+            Schema.render(conditional, DatabaseDialect.MARIA_DB, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 1, 3))
         }
         assertEquals(
             "DROP INDEX IF EXISTS `idx_phone` ON `customers`",
-            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 1, 4)),
+            Schema.render(conditional, DatabaseDialect.MARIA_DB, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 1, 4)),
         )
     }
 
@@ -197,7 +199,7 @@ class SchemaFacadeTest {
 
         assertNull(ordinaryAst.ifExistAst)
         assertNotNull(conditionalAst.ifExistAst)
-        SchemaDialect.values().forEach { dialect ->
+        schemaSupportedDialects.forEach { dialect ->
             assertEquals(
                 "ALTER TABLE `orders` DROP FOREIGN KEY `fk_customer`",
                 Schema.render(ordinary, dialect),
@@ -205,17 +207,17 @@ class SchemaFacadeTest {
         }
         assertEquals(
             "ALTER TABLE `orders` DROP FOREIGN KEY IF EXISTS `fk_customer`",
-            Schema.render(conditional, SchemaDialect.MARIA_DB),
+            Schema.render(conditional, DatabaseDialect.MARIA_DB),
         )
         assertFailsWith<UnsupportedOperationException> {
-            Schema.render(conditional, SchemaDialect.MYSQL)
+            Schema.render(conditional, DatabaseDialect.MYSQL)
         }
         assertFailsWith<UnsupportedOperationException> {
-            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 1))
+            Schema.render(conditional, DatabaseDialect.MARIA_DB, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 0, 1))
         }
         assertEquals(
             "ALTER TABLE `orders` DROP FOREIGN KEY IF EXISTS `fk_customer`",
-            Schema.render(conditional, SchemaDialect.MARIA_DB, SchemaVersion(SchemaDialect.MARIA_DB, 10, 0, 2)),
+            Schema.render(conditional, DatabaseDialect.MARIA_DB, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 0, 2)),
         )
     }
 
@@ -262,12 +264,12 @@ class SchemaFacadeTest {
     @Test
     fun `dialect version validation and renderer null contract are explicit`() {
         val rename = Schema.renameColumn { tableName("items"); name("old_name"); to("new_name") }
-        assertTrue(Schema.render(rename, SchemaDialect.MYSQL).contains("RENAME COLUMN"))
+        assertTrue(Schema.render(rename, DatabaseDialect.MYSQL).contains("RENAME COLUMN"))
         assertFailsWith<IllegalArgumentException> {
-            Schema.render(rename, SchemaDialect.MYSQL, SchemaVersion(SchemaDialect.MARIA_DB, 10, 4, 0))
+            Schema.render(rename, DatabaseDialect.MYSQL, SchemaVersion(DatabaseDialect.MARIA_DB, 10, 4, 0))
         }
         assertFailsWith<IllegalArgumentException> {
-            SchemaVersion(SchemaDialect.MYSQL, -1, 0, 0)
+            SchemaVersion(DatabaseDialect.MYSQL, -1, 0, 0)
         }
         val nullRender = assertFailsWith<IllegalArgumentException> { requireSchemaSql(null) }
         assertEquals("Schema renderer returned no SQL for the supplied operation", nullRender.message)
@@ -339,7 +341,7 @@ class SchemaFacadeTest {
             name = "schema-events-test",
             config = DatabaseConfig(
                 connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
-                platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+                platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
             ),
             connectionProvider = object : IDatabaseConnection {
                 override fun build(): Connection {

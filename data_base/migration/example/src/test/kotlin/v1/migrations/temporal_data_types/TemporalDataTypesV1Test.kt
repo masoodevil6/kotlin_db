@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.temporal_data_types
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -30,7 +30,7 @@ class TemporalDataTypesV1Test {
 
     @Test
     fun createTableRendersTemporalTypesAndFractionalPrecision() {
-        val sql = Schema.render(A1ExampleTemporalDataTypesV1().migration(), SchemaDialect.MYSQL)!!
+        val sql = Schema.render(A1ExampleTemporalDataTypesV1().migration(), DatabaseDialect.MYSQL)!!
 
         assertTrue(sql.contains("`event_date` DATE NOT NULL"))
         assertTrue(sql.contains("`elapsed_time` TIME(3) NOT NULL"))

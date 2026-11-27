@@ -2,7 +2,7 @@ package gog.my_project.data_base_migration.executor.init
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_migration.core.system_migration.schema.SystemMigrationTable
 import gog.my_project.data_base_migration.core.system_migration.schema.SystemMigrationTagTable
 import gog.my_project.data_base_migration.core.system_migration.schema.SystemMigrationVersionTable
@@ -142,13 +142,13 @@ class SystemMigrationInitializerTest {
         val result = SystemMigrationInitializer().init(scope)
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
-        assertTrue(failure.message.orEmpty().contains("canonical DatabaseIdentity"))
+        assertTrue(failure.message.orEmpty().contains("Operation-managed root Connection Scope"))
         assertTrue(statements.none { it.contains(tableReference(SystemMigrationTable.NAME)) })
         assertTrue(statements.none { it.contains("ALTER TABLE", ignoreCase = true) })
     }
 
     private fun testScope(connection: Connection) =
-        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
 
     private fun tableReference(name: String): String = "`$name`"
 

@@ -11,7 +11,7 @@ import gog.my_project.data_base_session.ast.schema.advisory_lock.release.Release
 import gog.my_project.data_base_session.ast.value.LockResource
 import gog.my_project.data_base_session.ast.value.LockWaitPolicy
 import gog.my_project.data_base_session.dialect.data_class.SessionCommandParameter
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_session.executor.exceptions.SessionExecutionException
 import gog.my_project.data_base_session.executor.exceptions.SessionProtocolException
 import gog.my_project.data_base_session.executor.manager.SessionExecutor
@@ -38,7 +38,7 @@ class SessionExecutorTest {
 
     @Test
     fun `acquire renders and binds SQL parameters in placeholder order`() {
-        SessionDialect.entries.forEach { dialect ->
+        listOf(DatabaseDialect.MYSQL, DatabaseDialect.MARIA_DB).forEach { dialect ->
             val jdbc = JdbcFake(rows = listOf(listOf<Any?>(1)))
 
             val result = executor.acquire(acquireAst(), jdbc.connection, dialect)
@@ -62,7 +62,7 @@ class SessionExecutorTest {
 
         assertEquals(
             AcquireSessionLockResult.Acquired,
-            executor.acquire(acquireAst(LockWaitPolicy.Timeout.of(30.seconds)), jdbc.connection, SessionDialect.MYSQL),
+            executor.acquire(acquireAst(LockWaitPolicy.Timeout.of(30.seconds)), jdbc.connection, DatabaseDialect.MYSQL),
         )
         assertEquals(30, jdbc.bindings[1].value)
         assertEquals(Types.INTEGER, jdbc.bindings[1].sqlType)
@@ -93,11 +93,11 @@ class SessionExecutorTest {
 
         assertEquals(
             AcquireSessionLockResult.Acquired,
-            executor.acquire(acquireAst(), acquired.connection, SessionDialect.MYSQL),
+            executor.acquire(acquireAst(), acquired.connection, DatabaseDialect.MYSQL),
         )
         assertEquals(
             AcquireSessionLockResult.TimedOut,
-            executor.acquire(acquireAst(), timedOut.connection, SessionDialect.MYSQL),
+            executor.acquire(acquireAst(), timedOut.connection, DatabaseDialect.MYSQL),
         )
     }
 
@@ -107,14 +107,14 @@ class SessionExecutorTest {
             val jdbc = JdbcFake(rows = listOf(listOf(value)))
             assertEquals(
                 AcquireSessionLockResult.Acquired,
-                executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL),
+                executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL),
             )
         }
 
         listOf<Any>(2L, -1L).forEach { value ->
             val jdbc = JdbcFake(rows = listOf(listOf(value)))
             assertIs<SessionProtocolException>(runCatching {
-                executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull())
         }
     }
@@ -126,7 +126,7 @@ class SessionExecutorTest {
         invalidValues.forEach { value ->
             val jdbc = JdbcFake(rows = listOf(listOf(value)))
             assertIs<SessionProtocolException>(runCatching {
-                executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull())
         }
     }
@@ -142,7 +142,7 @@ class SessionExecutorTest {
         expectations.forEach { (value, expected) ->
             val jdbc = JdbcFake(rows = listOf(listOf(value)))
 
-            assertEquals(expected, executor.release(releaseAst(), jdbc.connection, SessionDialect.MARIA_DB))
+            assertEquals(expected, executor.release(releaseAst(), jdbc.connection, DatabaseDialect.MARIA_DB))
             assertEquals("SELECT RELEASE_LOCK(?) AS released", jdbc.sql)
             assertEquals(
                 listOf(
@@ -159,7 +159,7 @@ class SessionExecutorTest {
         listOf(2, -1, 1.0, 1.5, "1", true, java.math.BigInteger.ONE).forEach { value ->
             val jdbc = JdbcFake(rows = listOf(listOf(value)))
             assertIs<SessionProtocolException>(runCatching {
-                executor.release(releaseAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.release(releaseAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull())
         }
     }
@@ -175,7 +175,7 @@ class SessionExecutorTest {
 
         scenarios.forEach { (jdbc, _) ->
             assertIs<SessionProtocolException>(runCatching {
-                executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull())
             assertTrue(jdbc.resultSetClosed)
             assertTrue(jdbc.statementClosed)
@@ -193,7 +193,7 @@ class SessionExecutorTest {
 
         scenarios.forEach { (jdbc, _) ->
             assertIs<SessionProtocolException>(runCatching {
-                executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull())
             assertTrue(jdbc.statementClosed)
             assertFalse(jdbc.connectionClosed)
@@ -205,7 +205,7 @@ class SessionExecutorTest {
         val jdbc = JdbcFake(resultSetAvailable = false)
 
         assertIs<SessionProtocolException>(runCatching {
-            executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+            executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
         }.exceptionOrNull())
 
         assertEquals(0, jdbc.resultSetCloseCalls)
@@ -225,7 +225,7 @@ class SessionExecutorTest {
 
         scenarios.forEach { jdbc ->
             assertIs<SessionProtocolException>(runCatching {
-                executor.release(releaseAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.release(releaseAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull())
             assertTrue(jdbc.resultSetClosed)
             assertEquals(1, jdbc.resultSetCloseCalls)
@@ -240,7 +240,7 @@ class SessionExecutorTest {
         val timeout = SQLTimeoutException("driver timed out")
         val timeoutJdbc = JdbcFake(failures = mapOf("execute" to timeout))
         val timeoutFailure = runCatching {
-            executor.acquire(acquireAst(), timeoutJdbc.connection, SessionDialect.MYSQL)
+            executor.acquire(acquireAst(), timeoutJdbc.connection, DatabaseDialect.MYSQL)
         }.exceptionOrNull()
         assertIs<SessionExecutionException>(timeoutFailure)
         assertSame(timeout, timeoutFailure.cause)
@@ -259,7 +259,7 @@ class SessionExecutorTest {
             val cause = SQLException("failed at $stage")
             val jdbc = JdbcFake(failures = mapOf(stage to cause))
             val failure = runCatching {
-                executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+                executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
             }.exceptionOrNull()
 
             assertIs<SessionExecutionException>(failure, stage)
@@ -276,7 +276,7 @@ class SessionExecutorTest {
             statementCloseFailure = statementClose,
         )
         val executionFailure = runCatching {
-            executor.acquire(acquireAst(), jdbcWithPrimaryFailure.connection, SessionDialect.MYSQL)
+            executor.acquire(acquireAst(), jdbcWithPrimaryFailure.connection, DatabaseDialect.MYSQL)
         }.exceptionOrNull()
         assertIs<SessionExecutionException>(executionFailure)
         assertSame(primary, executionFailure.cause)
@@ -292,7 +292,7 @@ class SessionExecutorTest {
             statementCloseFailure = protocolStatementClose,
         )
         val protocolFailure = runCatching {
-            executor.acquire(acquireAst(), jdbcWithProtocolFailure.connection, SessionDialect.MYSQL)
+            executor.acquire(acquireAst(), jdbcWithProtocolFailure.connection, DatabaseDialect.MYSQL)
         }.exceptionOrNull()
         assertIs<SessionProtocolException>(protocolFailure)
         assertTrue(protocolFailure.suppressed.any { it === protocolResultSetClose })
@@ -313,7 +313,7 @@ class SessionExecutorTest {
         )
 
         val failure = runCatching {
-            executor.acquire(acquireAst(), jdbc.connection, SessionDialect.MYSQL)
+            executor.acquire(acquireAst(), jdbc.connection, DatabaseDialect.MYSQL)
         }.exceptionOrNull()
 
         assertIs<SessionExecutionException>(failure)

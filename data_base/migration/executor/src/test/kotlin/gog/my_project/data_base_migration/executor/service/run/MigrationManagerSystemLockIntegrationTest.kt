@@ -158,7 +158,7 @@ class MigrationManagerSystemLockIntegrationTest {
                 }
             }
             assertTrue(assertIs<ExecuteResult.Failure>(currentResult).exception.message.orEmpty()
-                .contains("Nested or reentrant session advisory locks"))
+                .contains("Nested or overlapping lock brackets"))
             assertEquals(listOf("acquire", "release", "connection-close"), driver.scripts.last().events)
 
             val statusResult = handle.withOperationScope { scope ->
@@ -167,7 +167,7 @@ class MigrationManagerSystemLockIntegrationTest {
                 }
             }
             assertTrue(assertIs<ExecuteResult.Failure>(statusResult).exception.message.orEmpty()
-                .contains("Nested or reentrant session advisory locks"))
+                .contains("Nested or overlapping lock brackets"))
             assertEquals(listOf("acquire", "release", "connection-close"), driver.scripts.last().events)
         } finally {
             manager.close()
@@ -209,8 +209,19 @@ class MigrationManagerSystemLockIntegrationTest {
             }
         }
 
-        private fun statement(sql: String): PreparedStatement = proxy(PreparedStatement::class.java) { method, _ ->
+        private fun statement(sql: String): PreparedStatement {
+            var lockRows: ResultSet? = null
+            return proxy(PreparedStatement::class.java) { method, _ ->
             when (method.name) {
+                "execute" -> {
+                    val acquired = "get_lock(" in sql.lowercase()
+                    events += if (acquired) "acquire" else "release"
+                    lockRows = resultSet(sql, listOf(mapOf((if (acquired) "acquired" else "released") to 1)))
+                    true
+                }
+                "getResultSet" -> lockRows
+                "getMoreResults" -> false
+                "getUpdateCount" -> -1
                 "executeQuery" -> {
                     val lower = sql.lowercase()
                     val row = when {
@@ -234,6 +245,7 @@ class MigrationManagerSystemLockIntegrationTest {
                 else -> primitiveDefault(method.returnType)
             }
         }
+        }
 
         private fun resultSet(sql: String, rows: List<Map<String, Any?>>): ResultSet {
             var index = -1
@@ -242,6 +254,7 @@ class MigrationManagerSystemLockIntegrationTest {
                 when (method.name) {
                     "getMetaData" -> systemMigrationResultSetMetadata(sql)
                     "next" -> ++index < rows.size
+                    "getObject" -> rows[index].values.firstOrNull()
                     "getInt" -> {
                         val value = rows[index][args?.firstOrNull()?.toString().orEmpty()]
                         lastWasNull = value == null

@@ -1,5 +1,7 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_multi_column_index
 
+import gog.my_project.data_base.dialect.DatabaseDialect
+
 import gog.my_project.data_base_schema.*
 
 
@@ -18,7 +20,7 @@ class A1ExampleCreateMultiColumnIndexV1(
             columns(*columns.toTypedArray())
         }
 
-    fun render(dialect: SchemaDialect, version: SchemaVersion? = null) {
+    fun render(dialect: DatabaseDialect, version: SchemaVersion? = null) {
         val sql = Schema.render(migration(), dialect, version)
         println("\n=============================================")
         println("CREATE MULTI-COLUMN INDEX example")

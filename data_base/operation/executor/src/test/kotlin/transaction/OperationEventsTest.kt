@@ -11,6 +11,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.events.OperationEvent
 import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import gog.my_project.data_base_operation.executor.events.OperationEventType
+import gog.my_project.data_base_operation.then.OperationPipelineDefinition
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -21,6 +22,7 @@ import java.sql.Types
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -38,6 +40,7 @@ class OperationEventsTest {
                 type = OperationEventType.SQL_FAILED,
                 sql = "SELECT ?",
                 error = failure,
+                operationId = "operation-test-id",
             ),
         )
 
@@ -46,6 +49,7 @@ class OperationEventsTest {
         assertEquals("SELECT ?", event.sql)
         assertEquals(SQLException::class.qualifiedName, event.failure?.typeName)
         assertEquals(DatabaseEventFailure.Category.EXCEPTION, event.failure?.category)
+        assertEquals("operation-test-id", event.operationId)
     }
 
     @Test
@@ -156,11 +160,15 @@ class OperationEventsTest {
             received.filter { it.type == OperationEventType.SQL_STARTED }.mapNotNull { it.sql },
         )
         assertTrue(received.none { it.sql.orEmpty().contains("do-not-log") })
+        val operationId = assertConsistentOperationId(received)
+        assertEquals(operationId, received.first().operationId)
+        assertEquals(operationId, received.last().operationId)
         val started = fixture.timeline.indexOf("event:SQL_STARTED")
         val prepare = fixture.timeline.indexOf("jdbc:prepare:SELECT ? AS value")
         val execute = fixture.timeline.indexOf("jdbc:executeQuery")
         val succeeded = fixture.timeline.indexOf("event:SQL_SUCCEEDED")
         assertTrue(started < prepare && prepare < execute && execute < succeeded)
+        assertTrue(fixture.timeline.indexOf("jdbc:close") < fixture.timeline.lastIndexOf("event:CONNECTION_CLOSED"))
         assertEquals(1, fixture.connectionAcquisitionCount)
         assertTrue("jdbc:commit" !in fixture.timeline && "jdbc:rollback" !in fixture.timeline)
     }
@@ -627,6 +635,7 @@ class OperationEventsTest {
         assertSame(openFailure, assertIs<ExecuteResult.Failure>(openResult).exception)
         assertEquals(OperationEventType.CONNECTION_OPEN_FAILED, openEvents.single().type)
         assertSame(openFailure, openEvents.single().error)
+        assertConsistentOperationId(openEvents)
 
         val primary = SQLException("callback failed")
         val closeFailure = SQLException("close failed")
@@ -640,6 +649,7 @@ class OperationEventsTest {
         assertSame(primary, assertIs<ExecuteResult.Failure>(closeResult).exception)
         assertEquals(listOf(OperationEventType.CONNECTION_OPENED, OperationEventType.CONNECTION_CLOSE_FAILED), closeEvents.map { it.type })
         assertSame(closeFailure, closeEvents.last().error)
+        assertConsistentOperationId(closeEvents)
         assertEquals(listOf(closeFailure), primary.suppressed.toList())
     }
 
@@ -668,6 +678,7 @@ class OperationEventsTest {
             ),
             received.map { it.type },
         )
+        assertConsistentOperationId(received)
         assertEquals(1, fixture.connectionAcquisitionCount)
         assertEquals(1, fixture.closedCount)
     }
@@ -707,6 +718,7 @@ class OperationEventsTest {
         assertSame(sqlFailure, received.first { it.type == OperationEventType.SQL_FAILED }.error)
         assertSame(rollbackFailure, received.first { it.type == OperationEventType.TRANSACTION_ROLLBACK_FAILED }.error)
         assertSame(closeFailure, received.first { it.type == OperationEventType.CONNECTION_CLOSE_FAILED }.error)
+        assertConsistentOperationId(received)
         assertEquals(1, fixture.connectionAcquisitionCount)
         assertEquals(1, fixture.closedCount)
     }
@@ -740,6 +752,8 @@ class OperationEventsTest {
             ),
             rollbackEvents.map { it.type },
         )
+        assertConsistentOperationId(committedEvents)
+        assertConsistentOperationId(rollbackEvents)
         assertSame(commitFailure, rollbackEvents.first { it.type == OperationEventType.TRANSACTION_COMMIT_FAILED }.error)
     }
 
@@ -759,7 +773,72 @@ class OperationEventsTest {
             received.map { it.type },
         )
         assertSame(startFailure, received[1].error)
+        assertConsistentOperationId(received)
         assertEquals(1, fixture.closedCount)
+    }
+
+    @Test
+    fun `Pipeline Stages share the managed root Operation identity`() {
+        val fixture = JdbcFixture()
+        val received = mutableListOf<OperationEvent>()
+        val executor = OperationExecutionExecutor(
+            { fixture.acquireConnection() },
+            OperationEventListener { received += it },
+        )
+        val definition = OperationPipelineDefinition.create<Unit, Int>(stateFactory = { Unit }) {
+            start<Int> { context ->
+                assertEquals(ExecuteResult.Success(true), context.executeDdl("CREATE TABLE sample (id INT)"))
+                1
+            }.then<Int, Int> { value, context ->
+                assertEquals(
+                    ExecuteResult.Success(true),
+                    context.executeDdl("ALTER TABLE sample ADD COLUMN note INT"),
+                )
+                value + 1
+            }
+        }
+
+        val result = executor.executeConnectionDefinition(definition)
+
+        assertEquals(ExecuteResult.Success(2), result)
+        val operationId = assertConsistentOperationId(received)
+        val stageEvents = received.filter { it.type == OperationEventType.SQL_STARTED }
+        assertEquals(2, stageEvents.size)
+        assertEquals(
+            listOf("CREATE TABLE sample (id INT)", "ALTER TABLE sample ADD COLUMN note INT"),
+            stageEvents.map { it.sql },
+        )
+        assertTrue(stageEvents.all { it.operationId == operationId })
+        assertEquals(OperationEventType.CONNECTION_CLOSED, received.last().type)
+    }
+
+    @Test
+    fun `legacy Connection Factory roots receive distinct Operation identities`() {
+        val connectionEvents = mutableListOf<OperationEvent>()
+        val connectionResult = OperationExecutionExecutor(
+            { JdbcFixture().acquireConnection() },
+            OperationEventListener { connectionEvents += it },
+        ).connection { ExecuteResult.Success(Unit) }
+
+        val transactionEvents = mutableListOf<OperationEvent>()
+        val transactionResult = OperationTransactionExecutor(
+            { JdbcFixture().acquireConnection() },
+            OperationEventListener { transactionEvents += it },
+        ).transaction { ExecuteResult.Success(Unit) }
+
+        assertIs<ExecuteResult.Success<Unit>>(connectionResult)
+        assertIs<ExecuteResult.Success<Unit>>(transactionResult)
+        val connectionId = assertConsistentOperationId(connectionEvents)
+        val transactionId = assertConsistentOperationId(transactionEvents)
+        assertTrue(connectionId != transactionId)
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun `manually created Scope has no Operation identity`() {
+        val scope = OperationExecutionScope(JdbcFixture().connection)
+
+        assertNull(scope.operationId)
     }
 
     private class JdbcFixture(
@@ -922,5 +1001,12 @@ class OperationEventsTest {
             java.lang.Character.TYPE -> '\u0000'
             else -> null
         }
+    }
+
+    private fun assertConsistentOperationId(events: List<OperationEvent>): String {
+        assertTrue(events.isNotEmpty())
+        val operationId = requireNotNull(events.first().operationId)
+        assertTrue(events.all { it.operationId == operationId })
+        return operationId
     }
 }

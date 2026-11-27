@@ -164,6 +164,7 @@ internal class MigrationRunOrchestrationService(
                 type = MigrationEventType.MIGRATION_STARTED,
                 command = command,
                 targetVersionName = targetVersionName,
+                operationId = scope.operationId,
             ),
         )
 
@@ -178,6 +179,7 @@ internal class MigrationRunOrchestrationService(
                     command = command,
                     targetVersionName = targetVersionName,
                     failure = DatabaseEventFailure.from(failure),
+                    operationId = scope.operationId,
                 ),
             )
             throw failure
@@ -190,6 +192,7 @@ internal class MigrationRunOrchestrationService(
                     command = command,
                     targetVersionName = targetVersionName,
                     failure = DatabaseEventFailure.from(result.exception),
+                    operationId = scope.operationId,
                 ),
             )
         } else {
@@ -198,6 +201,7 @@ internal class MigrationRunOrchestrationService(
                     type = MigrationEventType.MIGRATION_COMPLETED,
                     command = command,
                     targetVersionName = targetVersionName,
+                    operationId = scope.operationId,
                 ),
             )
         }
@@ -295,6 +299,7 @@ internal class MigrationRunOrchestrationService(
                             MigrationVersionTraversalDirection.DOWN -> MigrationCommand.ROLLBACK
                         },
                         versionName = prepared.version.name,
+                        operationId = scope.operationId,
                     ),
                 )
                 val result = when (plan.direction) {
@@ -336,6 +341,7 @@ internal class MigrationRunOrchestrationService(
                                     MigrationVersionTraversalDirection.DOWN -> MigrationCommand.ROLLBACK
                                 },
                                 versionName = prepared.version.name,
+                                operationId = scope.operationId,
                             ),
                         )
                     }
@@ -398,6 +404,7 @@ internal class MigrationRunOrchestrationService(
                     MigrationVersionSelectionDirection.DOWN -> MigrationCommand.ROLLBACK
                 },
                 versionName = prepared.version.name,
+                operationId = scope.operationId,
             ),
         )
 
@@ -434,6 +441,7 @@ internal class MigrationRunOrchestrationService(
                                 MigrationVersionSelectionDirection.DOWN -> MigrationCommand.ROLLBACK
                             },
                             versionName = prepared.version.name,
+                            operationId = scope.operationId,
                         ),
                     )
                     ExecuteResult.Success(true)

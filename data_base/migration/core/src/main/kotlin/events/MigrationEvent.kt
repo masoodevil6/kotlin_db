@@ -26,4 +26,5 @@ data class MigrationEvent(
     val versionName: String? = null,
     val targetVersionName: String? = null,
     val failure: DatabaseEventFailure? = null,
+    val operationId: String? = null,
 ) : DatabaseEvent

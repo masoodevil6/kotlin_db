@@ -7,10 +7,14 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionCon
 import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
+import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnectionInvalidator
 import java.sql.Connection
+import java.util.concurrent.Executor
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
+
+private val synchronousAbortExecutor = Executor { command -> command.run() }
 
 /**
  * One selected database's immutable configuration and connection provider.
@@ -57,6 +61,18 @@ class DatabaseContext private constructor(
     fun openConnection(): Connection = lifecycleLock.read {
         check(!closed) { "DatabaseContext '$name' has been closed" }
         connectionProvider.build()
+    }
+
+    /** Forwards an explicit invalidation request for a Connection lease owned by Operation. */
+    fun discardConnection(connection: Connection) = lifecycleLock.read {
+        val invalidator = connectionProvider as? IDatabaseConnectionInvalidator
+        if (invalidator != null) {
+            invalidator.discard(connection)
+        } else {
+            // Backward-compatible fallback for existing providers. Pool implementations that
+            // cannot guarantee eviction through JDBC abort should implement the capability.
+            connection.abort(synchronousAbortExecutor)
+        }
     }
 
     /** Invalidates this context and closes a provider that explicitly owns closeable resources. */

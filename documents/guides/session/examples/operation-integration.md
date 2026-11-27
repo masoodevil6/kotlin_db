@@ -71,7 +71,7 @@ fun runAdvisoryLock(database: DatabaseHandleApi): ExecuteResult<Unit> =
 
 ## Scope، Connection و Dialect
 
-Operation فقط فرمان Session را در ریشهٔ فعال و مدیریت‌شدهٔ Connection Scope اجرا می‌کند. Root Transaction، Transaction Child و Scope مدیریت‌نشده پیش از آماده‌سازی SQL رد می‌شوند. Operation Dialect را از DatabasePlatformConfig می‌خواند و MySQL و MariaDB را به SessionDialect متناظر نگاشت می‌کند؛ Dialectهای دیگر Failure می‌گیرند.
+Operation فقط فرمان Session را در ریشهٔ فعال و مدیریت‌شدهٔ Connection Scope اجرا می‌کند. Root Transaction، Transaction Child و Scope مدیریت‌نشده پیش از آماده‌سازی SQL رد می‌شوند. Operation مقدار `DatabaseDialect` را از `DatabasePlatformConfig` می‌خواند و همان مقدار مرکزی را برای انتخاب پیاده‌سازی Session به Session Executor می‌دهد؛ خود Session همچنان Renderer و Registry اختصاصی خود را دارد. Dialectهایی که Operation پشتیبانی نمی‌کند پیش از آماده‌سازی SQL با Failure رد می‌شوند.
 
 Operation همان Connection داخلی Scope را به Session می‌دهد و lifecycle آن را نگه می‌دارد. Session فرمان Connection تازه نمی‌سازد، Connection را نمی‌بندد و commit، rollback یا auto-commit را تغییر نمی‌دهد. Context یا Consumer را پس از پایان callback نگه ندارید. در Pipeline، بررسی lifetime و Thread هم هنگام ساخت Consumer و هم هنگام execute اعمال می‌شود.
 

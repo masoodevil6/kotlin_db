@@ -4,7 +4,7 @@ import gog.my_project.data_base_migration.api.registration.group.MigrationGroup
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
 import gog.my_project.data_base_migration.api.registration.group.SingleMigration
 import gog.my_project.data_base_schema.Schema
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -37,16 +37,16 @@ class MigrationRegistrationExampleTest {
         val addEmail = AddCustomerEmailRegistrationExample()
 
         assertTrue(
-            Schema.render(createCustomers.up().operation, SchemaDialect.MYSQL)
+            Schema.render(createCustomers.up().operation, DatabaseDialect.MYSQL)
                 .contains("CREATE TABLE `customers`"),
         )
         assertEquals(
             "ALTER TABLE `customers` ADD COLUMN `email` VARCHAR(255) NOT NULL",
-            Schema.render(addEmail.up().operation, SchemaDialect.MYSQL),
+            Schema.render(addEmail.up().operation, DatabaseDialect.MYSQL),
         )
 
-        val rollbackDropColumn = Schema.render(addEmail.down().operation, SchemaDialect.MYSQL)
-        val rollbackDropTable = Schema.render(createCustomers.down().operation, SchemaDialect.MYSQL)
+        val rollbackDropColumn = Schema.render(addEmail.down().operation, DatabaseDialect.MYSQL)
+        val rollbackDropTable = Schema.render(createCustomers.down().operation, DatabaseDialect.MYSQL)
         assertEquals("ALTER TABLE `customers` DROP COLUMN `email`", rollbackDropColumn)
         assertEquals("DROP TABLE `customers`", rollbackDropTable)
     }

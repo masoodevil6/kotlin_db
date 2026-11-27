@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_spatial_index
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -22,7 +22,7 @@ class A1ExampleCreateSpatialIndexV1Test {
     fun rendersExactSingleColumnSpatialIndexSql() {
         assertEquals(
             "CREATE SPATIAL INDEX `spx_places_geom` ON `places` (`geom`)",
-            Schema.render(A1ExampleCreateSpatialIndexV1().migration(), SchemaDialect.MYSQL),
+            Schema.render(A1ExampleCreateSpatialIndexV1().migration(), DatabaseDialect.MYSQL),
         )
     }
 

@@ -1,7 +1,7 @@
 package gog.my_project.data_base_operation.executor.transaction
 
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
@@ -295,7 +295,7 @@ class OperationDdlFailurePolicyTest {
 
     private fun executor(connection: Connection) = OperationTransactionExecutor(
         connectionFactory = { connection },
-        databasePlatformConfig = DatabasePlatformConfig(dialect = DialectQuery.MARIA_DB),
+        databasePlatformConfig = DatabasePlatformConfig(dialect = DatabaseDialect.MARIA_DB),
     )
 
     private fun connection(

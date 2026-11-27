@@ -3,7 +3,7 @@ package gog.my_project.data_base_migration.executor.service.status
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusRow
 import model.migration_status.MigrationStatusSnapshot
@@ -198,7 +198,7 @@ class MigrationStatusReaderTest {
     }
 
     private fun newScope(connection: Connection) =
-        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
 
     private fun statusRow(
         tagId: Int,

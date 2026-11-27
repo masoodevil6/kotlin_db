@@ -1,6 +1,8 @@
 package gog.my_project.data_base_migration.executor.service.run
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
+import gog.my_project.data_base.core.events.DatabaseEvent
+import gog.my_project.data_base.core.events.DatabaseEventFailure
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
@@ -17,6 +19,9 @@ import gog.my_project.data_base_migration.core.migrate.MigrationDefinition
 import gog.my_project.data_base_migration.core.migrate.MigrationIdentity
 import gog.my_project.data_base_migration.core.tags.MigrationItemTag
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
+import gog.my_project.data_base_migration.core.events.MigrationFailurePersistenceEvent
+import gog.my_project.data_base_migration.core.events.MigrationFailurePersistenceOutcome
+import gog.my_project.data_base_migration.core.events.MigrationFailurePersistenceWriteMode
 import gog.my_project.data_base_migration.executor.controller.MigrationController
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationRecoveryOperation
@@ -28,12 +33,19 @@ import model.retry.MigrationRetryPhase
 import gog.my_project.data_base_migration.executor.service.result.MigrationExecutionResult
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionTransactionService
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionStateService
+import gog.my_project.data_base_migration.executor.support.systemMigrationResultSetMetadata
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusWriteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.executor.events.OperationDatabaseEvent
+import gog.my_project.data_base_operation.executor.events.OperationDatabaseEventType
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
+import gog.my_project.data_base_operation.executor.events.OperationLockEvent
+import gog.my_project.data_base_operation.executor.events.OperationLockEventType
 import gog.my_project.data_base_schema.Schema
 import gog.my_project.data_base_schema.SchemaDataType
 import kotlinx.serialization.json.Json
@@ -80,7 +92,7 @@ class MigrationRunServiceTest {
         database = FakeDatabase()
         scope = OperationExecutionScope(
             database.connection,
-            DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
         )
     }
 
@@ -1736,8 +1748,10 @@ class MigrationRunServiceTest {
     fun `UP execution failure writes status 101 under the original lock and Connection`() {
         database.failDdlCalls += 1
         database.respond(*emptyReadResponses())
+        val events = mutableListOf<DatabaseEvent>()
+        val eventListener = OperationEventListener.fromDatabaseEventListener { events += it }
 
-        val result = executeSampleMigration()
+        val result = executeSampleMigration(eventListener)
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
         assertTrue(failure.message.orEmpty().contains("DDL 1 failed"))
@@ -1760,6 +1774,25 @@ class MigrationRunServiceTest {
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
         assertEquals(1, database.connectionCloseCount)
+
+        val persistenceEvent = events.filterIsInstance<MigrationFailurePersistenceEvent>().single()
+        assertEquals(database.generatedIdForVersionInsert.toInt(), persistenceEvent.versionId)
+        assertEquals(MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS, persistenceEvent.writeMode)
+        assertEquals(MigrationFailurePersistenceOutcome.APPLIED, persistenceEvent.statusOutcome)
+        assertEquals(MigrationFailurePersistenceOutcome.APPLIED, persistenceEvent.checkpointOutcome)
+        val operationId = events.filterIsInstance<OperationDatabaseEvent>()
+            .first { it.type == OperationDatabaseEventType.CONNECTION_OPENED }.operationId
+        assertEquals(operationId, persistenceEvent.operationId)
+        val persistenceIndex = events.indexOf(persistenceEvent)
+        val releaseIndex = events.indexOfLast {
+            it is OperationLockEvent && it.type == OperationLockEventType.LOCK_RELEASED
+        }
+        assertTrue(persistenceIndex >= 0 && persistenceIndex < releaseIndex)
+        val lockEvents = events.filterIsInstance<OperationLockEvent>()
+        assertTrue(lockEvents.isNotEmpty())
+        assertTrue(lockEvents.all {
+            it.namespace == "textqb:migration" && it.name == "system" && it.operationId == operationId
+        })
     }
 
     @Test
@@ -2118,7 +2151,7 @@ class MigrationRunServiceTest {
             val conflictingDatabase = FakeDatabase()
             val conflictingScope = OperationExecutionScope(
                 conflictingDatabase.connection,
-                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
             )
             conflictingDatabase.respond(*reads)
 
@@ -2388,10 +2421,12 @@ class MigrationRunServiceTest {
         SampleMigration.upFailure = original
         database.failDmlWhen = { call -> if (isFailureStatusWrite(call)) fatal else null }
         database.respond(*emptyReadResponses())
+        val events = mutableListOf<DatabaseEvent>()
+        val eventListener = OperationEventListener.fromDatabaseEventListener { events += it }
         var activeScope: OperationExecutionScope? = null
 
         val thrown = assertFailsWith<AssertionError> {
-            OperationExecutionExecutor(versionTestContext()).connection { scope ->
+            OperationExecutionExecutor(versionTestContext(), eventListener).connection { scope ->
                 activeScope = scope
                 MigrationController(sampleConfiguration()).migrate(scope)
             }
@@ -2402,6 +2437,15 @@ class MigrationRunServiceTest {
         assertSame(original, activeScope?.firstFailure)
         assertTrue(fatal.suppressed.any { it === original })
         assertEquals(1, failureStatusCalls().size)
+        val persistenceEvent = events.filterIsInstance<MigrationFailurePersistenceEvent>().single()
+        assertEquals(MigrationFailurePersistenceOutcome.INDETERMINATE, persistenceEvent.statusOutcome)
+        assertEquals(MigrationFailurePersistenceOutcome.INDETERMINATE, persistenceEvent.checkpointOutcome)
+        assertEquals(fatal.javaClass.name, persistenceEvent.failure?.typeName)
+        assertEquals(DatabaseEventFailure.Category.ERROR, persistenceEvent.failure?.category)
+        assertTrue(!persistenceEvent.toString().contains("failure status write failed fatally"))
+        assertTrue(events.indexOf(persistenceEvent) < events.indexOfLast {
+            it is OperationLockEvent && it.type == OperationLockEventType.LOCK_RELEASED
+        })
     }
 
     @Test
@@ -2411,9 +2455,11 @@ class MigrationRunServiceTest {
         SampleMigration.upFailure = original
         database.failDmlWhen = { call -> if (isFailureStatusWrite(call)) statusFailure else null }
         database.respond(*emptyReadResponses())
+        val events = mutableListOf<DatabaseEvent>()
+        val eventListener = OperationEventListener.fromDatabaseEventListener { events += it }
         var activeScope: OperationExecutionScope? = null
 
-        val result = OperationExecutionExecutor(versionTestContext()).connection { scope ->
+        val result = OperationExecutionExecutor(versionTestContext(), eventListener).connection { scope ->
             activeScope = scope
             MigrationController(sampleConfiguration()).migrate(scope)
         }
@@ -2422,6 +2468,11 @@ class MigrationRunServiceTest {
         assertSame(original, activeScope?.firstFailure)
         assertTrue(original.suppressed.any { it === statusFailure })
         assertEquals(1, failureStatusCalls().size)
+        val persistenceEvent = events.filterIsInstance<MigrationFailurePersistenceEvent>().single()
+        assertEquals(MigrationFailurePersistenceOutcome.INDETERMINATE, persistenceEvent.statusOutcome)
+        assertEquals(MigrationFailurePersistenceOutcome.INDETERMINATE, persistenceEvent.checkpointOutcome)
+        assertEquals(MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS, persistenceEvent.writeMode)
+        assertTrue(persistenceEvent.failure == null)
     }
 
     @Test
@@ -2429,11 +2480,17 @@ class MigrationRunServiceTest {
         SampleMigration.upFailure = SQLException("Migration DDL failed")
         database.updateCountWhen = { call -> if (isFailureStatusWrite(call)) 0 else null }
         database.respond(*emptyReadResponses())
+        val events = mutableListOf<DatabaseEvent>()
+        val eventListener = OperationEventListener.fromDatabaseEventListener { events += it }
 
-        val result = executeSampleMigration()
+        val result = executeSampleMigration(eventListener)
 
         assertIs<ExecuteResult.Failure>(result)
         assertEquals(1, failureStatusCalls().size)
+        val persistenceEvent = events.filterIsInstance<MigrationFailurePersistenceEvent>().single()
+        assertEquals(MigrationFailurePersistenceOutcome.NOT_APPLIED, persistenceEvent.statusOutcome)
+        assertEquals(MigrationFailurePersistenceOutcome.NOT_APPLIED, persistenceEvent.checkpointOutcome)
+        assertEquals(MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS, persistenceEvent.writeMode)
     }
 
     @Test
@@ -2441,11 +2498,60 @@ class MigrationRunServiceTest {
         SampleMigration.upFailure = SQLException("Migration DDL failed")
         database.updateCountWhen = { call -> if (isFailureStatusWrite(call)) 2 else null }
         database.respond(*emptyReadResponses())
+        val events = mutableListOf<DatabaseEvent>()
+        val eventListener = OperationEventListener.fromDatabaseEventListener { events += it }
 
-        val result = executeSampleMigration()
+        val result = executeSampleMigration(eventListener)
 
         assertIs<ExecuteResult.Failure>(result)
         assertEquals(1, failureStatusCalls().size)
+        val persistenceEvent = events.filterIsInstance<MigrationFailurePersistenceEvent>().single()
+        assertEquals(MigrationFailurePersistenceOutcome.INDETERMINATE, persistenceEvent.statusOutcome)
+        assertEquals(MigrationFailurePersistenceOutcome.INDETERMINATE, persistenceEvent.checkpointOutcome)
+        assertEquals(MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS, persistenceEvent.writeMode)
+    }
+
+    @Test
+    fun `persistence events map all Status-only and atomic CAS outcomes`() {
+        val outcomes = listOf(
+            MigrationFailureStatusWriteResult.APPLIED to MigrationFailurePersistenceOutcome.APPLIED,
+            MigrationFailureStatusWriteResult.NOT_APPLIED to MigrationFailurePersistenceOutcome.NOT_APPLIED,
+            MigrationFailureStatusWriteResult.INDETERMINATE to MigrationFailurePersistenceOutcome.INDETERMINATE,
+        )
+        val modes = listOf(
+            MigrationFailurePersistenceWriteMode.STATUS_ONLY,
+            MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS,
+        )
+
+        modes.forEach { writeMode ->
+            outcomes.forEach { (writeResult, expectedOutcome) ->
+                database = FakeDatabase()
+                val events = mutableListOf<DatabaseEvent>()
+                val listener = OperationEventListener.fromDatabaseEventListener { events += it }
+                val service = MigrationVersionTransactionService(MigrationConfiguration(emptyList()))
+
+                val result = OperationExecutionExecutor(versionTestContext(), listener).connection { scope ->
+                    service.persistFailureStatus(scope, versionId = 77, writeMode = writeMode) { writeResult }
+                    ExecuteResult.Success(Unit)
+                }
+
+                assertIs<ExecuteResult.Success<Unit>>(result)
+                val persistenceEvent = events.filterIsInstance<MigrationFailurePersistenceEvent>().single()
+                assertEquals(77, persistenceEvent.versionId)
+                assertEquals(writeMode, persistenceEvent.writeMode)
+                assertEquals(expectedOutcome, persistenceEvent.statusOutcome)
+                assertEquals(
+                    if (writeMode == MigrationFailurePersistenceWriteMode.STATUS_ONLY) {
+                        MigrationFailurePersistenceOutcome.NOT_ATTEMPTED
+                    } else {
+                        expectedOutcome
+                    },
+                    persistenceEvent.checkpointOutcome,
+                )
+                assertTrue(persistenceEvent.operationId != null)
+                assertEquals(1, database.connectionBuildCount)
+            }
+        }
     }
 
     @Test
@@ -2630,14 +2736,14 @@ class MigrationRunServiceTest {
         }
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
-        assertTrue(failure.message.orEmpty().contains("Timed out acquiring session advisory lock"))
+        assertTrue(failure.message.orEmpty().contains("Timed out acquiring Migration Operation lock"))
         assertEquals(listOf("lock-acquire", "connection-close"), database.events)
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
     }
 
     @Test
-    fun `acquire SQL failure prevents History reads and does not attempt release`() {
+    fun `uncertain acquire SQL failure prevents History reads and attempts cleanup`() {
         val acquireFailure = SQLException("GET_LOCK failed")
         database.systemLockAcquireFailure = acquireFailure
 
@@ -2645,8 +2751,8 @@ class MigrationRunServiceTest {
             MigrationController(MigrationConfiguration(emptyList())).migrate(scope)
         }
 
-        assertSame(acquireFailure, assertIs<ExecuteResult.Failure>(result).exception)
-        assertEquals(listOf("lock-acquire", "connection-close"), database.events)
+        assertSame(acquireFailure, assertIs<ExecuteResult.Failure>(result).exception.cause)
+        assertEquals(listOf("lock-acquire", "lock-release", "connection-close"), database.events)
         assertEquals(0, database.commitCount)
         assertEquals(0, database.rollbackCount)
     }
@@ -2661,7 +2767,7 @@ class MigrationRunServiceTest {
         }
 
         val failure = assertIs<ExecuteResult.Failure>(result).exception
-        assertTrue(failure.message.orEmpty().contains("RELEASE_LOCK did not own"))
+        assertTrue(failure.message.orEmpty().contains("no longer owned"))
         assertEquals(3, database.events.count { it.startsWith("read:") })
         assertTrue(database.events.indexOf("lock-release") < database.events.indexOf("connection-close"))
     }
@@ -2681,7 +2787,7 @@ class MigrationRunServiceTest {
         val failure = assertIs<ExecuteResult.Failure>(result).exception
         assertTrue(failure.message.orEmpty().contains("no valid MigrationVersionTag"))
         assertEquals(1, failure.suppressed.size)
-        assertTrue(failure.suppressed.single().message.orEmpty().contains("RELEASE_LOCK did not own"))
+        assertTrue(failure.suppressed.single().message.orEmpty().contains("no longer owned"))
         assertTrue(database.events.indexOf("lock-release") < database.events.indexOf("connection-close"))
     }
 
@@ -3229,10 +3335,18 @@ class MigrationRunServiceTest {
         assertEquals(0, database.rollbackCount)
     }
 
-    private fun executeSampleMigration(): ExecuteResult<Boolean> =
-        OperationExecutionExecutor(versionTestContext()).connection { scope ->
+    private fun executeSampleMigration(
+        eventListener: OperationEventListener? = null,
+    ): ExecuteResult<Boolean> {
+        val executor = if (eventListener == null) {
+            OperationExecutionExecutor(versionTestContext())
+        } else {
+            OperationExecutionExecutor(versionTestContext(), eventListener)
+        }
+        return executor.connection { scope ->
             MigrationController(sampleConfiguration()).migrate(scope)
         }
+    }
 
     private fun sampleConfiguration(): MigrationConfiguration = migrationConfig {
         migrationVersion(VersionTagOne) { migration<SampleMigration>() }
@@ -4156,7 +4270,7 @@ class MigrationRunServiceTest {
     fun `recovery dispatches UP and DOWN recording states without rerunning schema`() {
         for (up in listOf(true, false)) {
             database = FakeDatabase()
-            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
             VersionMigrationTrace.reset()
 
             val startedStatus = if (up) MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -4197,7 +4311,7 @@ class MigrationRunServiceTest {
     fun `recovery dispatches UP and DOWN execution failures through validated Retry`() {
         for (up in listOf(true, false)) {
             database = FakeDatabase()
-            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
             VersionMigrationTrace.reset()
 
             val startedStatus = if (up) MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -4263,7 +4377,7 @@ class MigrationRunServiceTest {
     fun `recovery resumes UP and DOWN recording failures without rerunning schema`() {
         for (up in listOf(true, false)) {
             database = FakeDatabase()
-            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
             VersionMigrationTrace.reset()
 
             val startedStatus = if (up) MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -4349,7 +4463,7 @@ class MigrationRunServiceTest {
 
         for (status in rejectedStatuses) {
             database = FakeDatabase()
-            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
             VersionMigrationTrace.reset()
             database.respond(
                 listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, status, null)),
@@ -4712,7 +4826,7 @@ class MigrationRunServiceTest {
         assertEquals(1, database.events.count { it == "lock-acquire" })
 
         database = FakeDatabase()
-        scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
         val current = retryCheckpoint(
             MigrationVersionState.STATUS_MIGRATE_STARTED,
             7,
@@ -4737,7 +4851,7 @@ class MigrationRunServiceTest {
     fun `explicit retryUp and retryDown reexecute validated execution failures`() {
         for (up in listOf(true, false)) {
             database = FakeDatabase()
-            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
             VersionMigrationTrace.reset()
             val startedStatus = if (up) MigrationVersionState.STATUS_MIGRATE_STARTED
             else MigrationVersionState.STATUS_ROLLBACK_STARTED
@@ -4809,7 +4923,7 @@ class MigrationRunServiceTest {
         )) {
             for (up in listOf(true, false)) {
                 database = FakeDatabase()
-                scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+                scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
                 VersionMigrationTrace.reset()
                 val originalStatus = if (status == MigrationVersionState.STATUS_MIGRATE_MANUAL_RECOVERY_REQUIRED) {
                     MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -4861,7 +4975,7 @@ class MigrationRunServiceTest {
         for (up in listOf(true, false)) {
             for (outcome in listOf("not-applied", "indeterminate", "query-failure")) {
                 database = FakeDatabase()
-                scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+                scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
                 VersionMigrationTrace.reset()
                 val startedStatus = if (up) MigrationVersionState.STATUS_MIGRATE_STARTED
                 else MigrationVersionState.STATUS_ROLLBACK_STARTED
@@ -4933,7 +5047,7 @@ class MigrationRunServiceTest {
     fun `failed explicit execution Retry retains failure status and checkpoint cursor`() {
         for (up in listOf(true, false)) {
             database = FakeDatabase()
-            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+            scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
             VersionMigrationTrace.reset()
             val startedStatus = if (up) MigrationVersionState.STATUS_MIGRATE_STARTED
             else MigrationVersionState.STATUS_ROLLBACK_STARTED
@@ -5160,7 +5274,7 @@ class MigrationRunServiceTest {
             database = FakeDatabase()
             scope = OperationExecutionScope(
                 database.connection,
-                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
             )
             val originalDiagnostic = retryRecordingDiagnostic(
                 up,
@@ -5247,7 +5361,7 @@ class MigrationRunServiceTest {
                 database = FakeDatabase()
                 scope = OperationExecutionScope(
                     database.connection,
-                    DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                    DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
                 )
                 val startedStatus = if (case.up) {
                     MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -5320,7 +5434,7 @@ class MigrationRunServiceTest {
 
         // A malformed latest Diagnostic is rejected while validating the snapshot, before CAS.
         database = FakeDatabase()
-        scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        scope = OperationExecutionScope(database.connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
         val validDiagnostic = retryRecordingDiagnostic(up = true, migrationId = VersionItemFirst.value)
         val invalidCheckpoint = retryCheckpoint(
             MigrationVersionState.STATUS_MIGRATE_STARTED,
@@ -5364,7 +5478,7 @@ class MigrationRunServiceTest {
                     database = FakeDatabase()
                     scope = OperationExecutionScope(
                         database.connection,
-                        DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                        DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
                     )
                     val startedStatus = if (up) {
                         MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -5449,7 +5563,7 @@ class MigrationRunServiceTest {
                 database = FakeDatabase()
                 scope = OperationExecutionScope(
                     database.connection,
-                    DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                    DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
                 )
                 val startedStatus = if (up) {
                     MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -5536,7 +5650,7 @@ class MigrationRunServiceTest {
                 database = FakeDatabase()
                 scope = OperationExecutionScope(
                     database.connection,
-                    DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                    DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
                 )
                 val startedStatus = if (up) {
                     MigrationVersionState.STATUS_MIGRATE_STARTED
@@ -5778,7 +5892,7 @@ class MigrationRunServiceTest {
             database = FakeDatabase()
             scope = OperationExecutionScope(
                 database.connection,
-                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
             )
             database.respond(
                 listOf(versionStateRow(VERSION_ID_ONE, VERSION_TAG_ID_ONE, MigrationVersionState.STATUS_MIGRATE_FAILED_RECORD, diagnostic, checkpointJson(checkpoint))),
@@ -5942,7 +6056,7 @@ class MigrationRunServiceTest {
         database = FakeDatabase()
         scope = OperationExecutionScope(
             database.connection,
-            DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
         )
         database.respond(selectedRows, snapshotTags, snapshotVersions, emptyList())
         val controller = MigrationController(configuration)
@@ -5985,7 +6099,7 @@ class MigrationRunServiceTest {
                 dbUserName = "test-user",
                 dbPassword = "test-password",
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
         )
         val identity = if (withIdentity) DatabaseIdentity.from(config) else null
         return DatabaseContext(
@@ -6180,6 +6294,7 @@ class MigrationRunServiceTest {
 
         private fun preparedStatement(sql: String): PreparedStatement {
             val values = sortedMapOf<Int, Any?>()
+            var lockResult: ResultSet? = null
             return proxy(PreparedStatement::class.java) { method, args ->
                 when (method.name) {
                     "setObject", "setString", "setInt", "setLong", "setNull" -> {
@@ -6222,11 +6337,29 @@ class MigrationRunServiceTest {
                     }
                     "executeUpdate" -> executeUpdate(sql, values.values.toList())
                     "execute" -> {
+                        val normalizedSql = sql.lowercase()
+                        if ("get_lock(" in normalizedSql) {
+                            events += "lock-acquire"
+                            systemLockAcquireFailure?.let { throw it }
+                            migrationLockHeld = systemLockAcquireValue == 1
+                            lockResult = resultSet(listOf(mapOf("acquired" to systemLockAcquireValue)), sql)
+                            return@proxy true
+                        }
+                        if ("release_lock(" in normalizedSql) {
+                            events += "lock-release"
+                            systemLockReleaseFailure?.let { throw it }
+                            if (systemLockReleaseValue == 1) migrationLockHeld = false
+                            lockResult = resultSet(listOf(mapOf("released" to systemLockReleaseValue)), sql)
+                            return@proxy true
+                        }
                         events += "ddl:$sql"
                         ddlCount++
                         if (failDdl || ddlCount in failDdlCalls) throw SQLException("DDL $ddlCount failed")
                         true
                     }
+                    "getResultSet" -> lockResult
+                    "getMoreResults" -> false
+                    "getUpdateCount" -> -1
                     "getGeneratedKeys" -> resultSet(listOf(mapOf("key" to lastGeneratedId)))
                     "close" -> { statementCloseCount++; null }
                     "isClosed" -> false
@@ -6427,8 +6560,7 @@ class MigrationRunServiceTest {
             var lastValue: Any? = null
             return proxy(ResultSet::class.java) { method, args ->
                 when (method.name) {
-                    "getMetaData" -> gog.my_project.data_base_migration.executor.support
-                        .systemMigrationResultSetMetadata(statementSql)
+                    "getMetaData" -> systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
                     "getInt", "getLong", "getString", "getObject" -> {
                         val row = rows.getOrNull(index) ?: error("ResultSet cursor is not on a row")

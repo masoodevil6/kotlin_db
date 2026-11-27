@@ -9,7 +9,7 @@ import gog.my_project.data_base_session.ast.schema.advisory_lock.release.Release
 import gog.my_project.data_base_session.ast.value.LockResource
 import gog.my_project.data_base_session.ast.value.LockWaitPolicy
 import gog.my_project.data_base_session.dialect.data_class.SessionCommandParameter
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_session.dialect.exceptions.SessionRenderException
 import gog.my_project.data_base_session.dialect.interfaces.ISessionAstRenderer
 import gog.my_project.data_base_session.dialect.interfaces.ISessionRenderContext
@@ -73,7 +73,7 @@ class SessionDialectRenderingTest {
         val rendered = dialect.render(validAcquireAst())
 
         assertEquals("specialized", rendered.sql)
-        assertEquals(SessionDialect.MYSQL, dialect.dialect)
+        assertEquals(DatabaseDialect.MYSQL, dialect.dialect)
     }
 
     @Test
@@ -256,7 +256,7 @@ class SessionDialectRenderingTest {
 
     private class TestDialect(
         registerRenders: ISessionRendererRegistry.() -> Unit = {},
-    ) : BaseSessionDialect(SessionDialect.MYSQL, registerRenders)
+    ) : BaseSessionDialect(DatabaseDialect.MYSQL, registerRenders)
 
     private class FixedRenderer<A : ISessionCommandAst>(
         private val sql: String?,

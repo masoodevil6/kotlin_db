@@ -21,6 +21,7 @@ class OperationExecutionExecutor private constructor(
     private val databasePlatformConfig: DatabasePlatformConfig,
     private val databaseIdentity: DatabaseIdentity?,
     private val eventListener: OperationEventListener?,
+    private val connectionDiscarder: (Connection) -> Unit,
 ) {
     constructor() : this(DatabaseContext.legacyDefault())
 
@@ -29,6 +30,7 @@ class OperationExecutionExecutor private constructor(
         databaseContext.platformConfig,
         databaseContext.databaseIdentity,
         null,
+        databaseContext::discardConnection,
     )
 
     /** Adds a read-only observer to the lifecycle owned by this Operation executor. */
@@ -37,6 +39,7 @@ class OperationExecutionExecutor private constructor(
         databaseContext.platformConfig,
         databaseContext.databaseIdentity,
         eventListener,
+        databaseContext::discardConnection,
     )
 
     /** Compatibility constructor for callers that supply their own Connection factory. */
@@ -46,6 +49,7 @@ class OperationExecutionExecutor private constructor(
         DatabaseContext.legacyDefault().platformConfig,
         null,
         null,
+        ::abortOperationConnection,
     )
 
     /** Compatibility factory counterpart for caller-supplied Connection providers. */
@@ -55,6 +59,7 @@ class OperationExecutionExecutor private constructor(
         DatabaseContext.legacyDefault().platformConfig,
         null,
         eventListener,
+        ::abortOperationConnection,
     )
     fun <T> connection(
         block: (scope: OperationExecutionScope) -> ExecuteResult<T>,
@@ -127,6 +132,7 @@ class OperationExecutionExecutor private constructor(
                 null
             }
 
+            val operationId = OperationId.createRoot()
             var scope: OperationExecutionScope? = null
             var scopeActivated = false
             var pipelineAdmissionFinalized = false
@@ -137,7 +143,12 @@ class OperationExecutionExecutor private constructor(
                 if (connectionClosed) return primary
                 val ownedConnection = connection ?: return primary
                 connectionClosed = true
-                return closeConnection(ownedConnection, primary)
+                return closeConnection(
+                    ownedConnection,
+                    primary,
+                    discardBeforeClose = scope?.shouldDiscardConnection == true,
+                    operationId = operationId,
+                )
             }
 
             try {
@@ -168,17 +179,34 @@ class OperationExecutionExecutor private constructor(
 
                 connection = try {
                     requireNotNull(connectionFactory()).also {
-                        eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPENED))
+                        eventListener.publish(
+                            OperationEvent(
+                                OperationEventType.CONNECTION_OPENED,
+                                operationId = operationId.asString(),
+                            ),
+                        )
                     }
                 } catch (failure: Throwable) {
-                    eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPEN_FAILED, error = failure))
+                    eventListener.publish(
+                        OperationEvent(
+                            OperationEventType.CONNECTION_OPEN_FAILED,
+                            error = failure,
+                            operationId = operationId.asString(),
+                        ),
+                    )
                     throw failure
                 }
                 val ownedConnection = requireNotNull(connection)
 
                 val activeScope = try {
                     val createdScope = if (pipelineFailureOwner == null) {
-                        OperationExecutionScope(ownedConnection, databasePlatformConfig, databaseIdentity, eventListener)
+                        OperationExecutionScope(
+                            ownedConnection,
+                            databasePlatformConfig,
+                            databaseIdentity,
+                            eventListener,
+                            operationId,
+                        )
                     } else {
                         OperationExecutionScope(
                             ownedConnection,
@@ -186,6 +214,7 @@ class OperationExecutionExecutor private constructor(
                             databaseIdentity,
                             eventListener,
                             pipelineFailureOwner,
+                            operationId,
                         )
                     }
                     createdScope.also {
@@ -378,27 +407,61 @@ class OperationExecutionExecutor private constructor(
         eventListener,
     ).transactionWithPreparation(coordinator, prepare, block)
 
-    private fun closeConnection(connection: Connection, primary: Throwable?): Throwable? {
+    private fun closeConnection(
+        connection: Connection,
+        primary: Throwable?,
+        discardBeforeClose: Boolean = false,
+        operationId: OperationId,
+    ): Throwable? {
+        var primaryFailure = primary
+        if (discardBeforeClose) {
+            try {
+                connectionDiscarder(connection)
+            } catch (discardFailure: Throwable) {
+                if (primaryFailure == null) {
+                    primaryFailure = discardFailure
+                } else {
+                    addSuppressedSafely(primaryFailure, discardFailure)
+                }
+                try {
+                    abortOperationConnection(connection)
+                } catch (abortFailure: Throwable) {
+                    addSuppressedSafely(primaryFailure ?: discardFailure, abortFailure)
+                }
+            }
+        }
+
         val closeFailure = try {
             connection.close()
-            eventListener.publish(OperationEvent(OperationEventType.CONNECTION_CLOSED))
-            return primary
+            eventListener.publish(
+                OperationEvent(
+                    OperationEventType.CONNECTION_CLOSED,
+                    operationId = operationId.asString(),
+                ),
+            )
+            return primaryFailure
         } catch (failure: Throwable) {
-            eventListener.publish(OperationEvent(OperationEventType.CONNECTION_CLOSE_FAILED, error = failure))
+            eventListener.publish(
+                OperationEvent(
+                    OperationEventType.CONNECTION_CLOSE_FAILED,
+                    error = failure,
+                    operationId = operationId.asString(),
+                ),
+            )
             failure
         }
 
-        if (primary is Error) {
-            addSuppressedSafely(primary, closeFailure)
-            return primary
+        if (primaryFailure is Error) {
+            addSuppressedSafely(primaryFailure, closeFailure)
+            return primaryFailure
         }
         if (closeFailure is Error) {
-            if (primary != null) addSuppressedSafely(closeFailure, primary)
+            if (primaryFailure != null) addSuppressedSafely(closeFailure, primaryFailure)
             return closeFailure
         }
-        if (primary != null) {
-            addSuppressedSafely(primary, closeFailure)
-            return primary
+        if (primaryFailure != null) {
+            addSuppressedSafely(primaryFailure, closeFailure)
+            return primaryFailure
         }
         return closeFailure
     }

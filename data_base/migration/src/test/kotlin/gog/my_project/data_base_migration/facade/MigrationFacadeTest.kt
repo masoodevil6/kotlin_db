@@ -11,7 +11,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusReport
@@ -229,7 +229,7 @@ class MigrationFacadeTest {
 
     private fun scope(connection: Connection) = OperationExecutionScope(
         connection,
-        DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
     )
 
     private fun emptyConnection() = EmptyJdbc().connection
@@ -257,7 +257,7 @@ class MigrationFacadeTest {
                 dbUserName = "test-user",
                 dbPassword = "test-password",
             ),
-            platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
         )
         return OperationExecutionExecutor(
             DatabaseContext(
@@ -301,7 +301,9 @@ class MigrationFacadeTest {
             }
         } as Connection
 
-        private fun statement(sql: String): PreparedStatement = Proxy.newProxyInstance(
+        private fun statement(sql: String): PreparedStatement {
+            var lockRows: ResultSet? = null
+            return Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(PreparedStatement::class.java),
         ) { _, method, _ ->
@@ -328,15 +330,29 @@ class MigrationFacadeTest {
                     }
                 }
                 "execute" -> {
+                    if ("get_lock(" in sql.lowercase()) {
+                        lockAcquireCount++
+                        lockRows = resultSet(mapOf("acquired" to 1))
+                        return@newProxyInstance true
+                    }
+                    if ("release_lock(" in sql.lowercase()) {
+                        lockReleaseCount++
+                        lockRows = resultSet(mapOf("released" to 1))
+                        return@newProxyInstance true
+                    }
                     ddlCount++
                     ddlFailure?.let { throw it }
                     true
                 }
+                "getResultSet" -> lockRows
+                "getMoreResults" -> false
+                "getUpdateCount" -> -1
                 "close" -> null
                 "isClosed" -> false
                 else -> defaultValue(method.returnType)
             }
         } as PreparedStatement
+        }
 
         private fun resultSet(row: Map<String, Any?>? = null): ResultSet {
             var rowReturned = false
@@ -350,6 +366,7 @@ class MigrationFacadeTest {
                         true
                     }
                     "getInt" -> (row?.get(args?.firstOrNull()?.toString()) as? Number)?.toInt() ?: 0
+                    "getObject" -> row?.values?.firstOrNull()
                     "getMetaData" -> metadata(row?.keys?.toList().orEmpty())
                     "close" -> null
                     "isClosed" -> false

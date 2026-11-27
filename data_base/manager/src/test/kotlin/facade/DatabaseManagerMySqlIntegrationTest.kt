@@ -4,7 +4,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.MYSQL
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.builder.ast.delete_builder.query_render_delete.QueryRenderDeleteBuilder
@@ -232,7 +232,7 @@ class DatabaseManagerMySqlIntegrationTest {
                 dbUserName = username,
                 dbPassword = password,
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            platform = DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         )
 
         fun openConnection(): Connection = DriverManager.getConnection(

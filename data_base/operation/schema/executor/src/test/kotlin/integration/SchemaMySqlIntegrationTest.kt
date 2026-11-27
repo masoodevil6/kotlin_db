@@ -3,7 +3,7 @@ package gog.my_project.data_base_schema.executor.integration
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.MYSQL
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_schema.builder.ast.add_column.SchemaAddColumnBuilder
@@ -210,7 +210,7 @@ class SchemaMySqlIntegrationTest {
                 dbName = "$schema?serverTimezone=UTC",
                 dbUserName = username,
                 dbPassword = password,
-                dialect = DialectQuery.MY_SQL,
+                dialect = DatabaseDialect.MYSQL,
                 targetDatabaseVersion = MYSQL.Version(8, 0, 36),
             ),
         )

@@ -106,7 +106,7 @@ package gog.my_project.data_base_operation.executor.transaction
 
 مواردی که در این بخش قرار گرفته‌اند:
 
-- `DialectQuery`
+- `DatabaseDialect`
 - `DatabasePlatformConfig`
 - `ProductDatabaseVersion`
 
@@ -117,7 +117,7 @@ package gog.my_project.data_base_operation.executor.transaction
 ```kotlin
 DatabaseConfig(
     connection = DatabaseConnectionConfig(...),
-    platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL)
+    platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL)
 )
 ```
 

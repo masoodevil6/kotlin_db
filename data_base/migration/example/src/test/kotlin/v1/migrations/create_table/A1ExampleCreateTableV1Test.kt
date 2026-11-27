@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_table
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -28,7 +28,7 @@ import kotlin.test.Test
 class A1ExampleCreateTableV1Test {
     @Test
     fun rendersUsersTableForMySql() {
-        val sql = Schema.render(A1ExampleCreateTableV1().migration(), SchemaDialect.MYSQL)
+        val sql = Schema.render(A1ExampleCreateTableV1().migration(), DatabaseDialect.MYSQL)
 
         assertEquals(
             """CREATE TABLE `users` (
@@ -42,7 +42,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun includesAllExpectedColumns() {
-        val sql = Schema.render(A1ExampleCreateTableV1().migration(), SchemaDialect.MYSQL)
+        val sql = Schema.render(A1ExampleCreateTableV1().migration(), DatabaseDialect.MYSQL)
 
         assertContains(sql.orEmpty(), "`id`")
         assertContains(sql.orEmpty(), "`name`")
@@ -53,7 +53,7 @@ class A1ExampleCreateTableV1Test {
     fun rendersCreateTableWithIfNotExists() {
         val sql = Schema.render(
             A1ExampleCreateTableV1(useIfNotExists = true).migration(),
-            SchemaDialect.MYSQL,
+            DatabaseDialect.MYSQL,
         )
 
         assertEquals(true, sql.startsWith("CREATE TABLE IF NOT EXISTS `users` ("))
@@ -140,7 +140,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun versionedCreateTableConstraintsExampleRendersAllSupportedDefinitions() {
-        val sql = Schema.render(A1ExampleCreateTableConstraintsV1().migration(), SchemaDialect.MYSQL).orEmpty()
+        val sql = Schema.render(A1ExampleCreateTableConstraintsV1().migration(), DatabaseDialect.MYSQL).orEmpty()
 
         assertContains(sql, "PRIMARY KEY (`tenant_id`, `order_id`)")
         assertContains(sql, "CONSTRAINT `uq_orders_email` UNIQUE (`email`)")
@@ -154,7 +154,7 @@ class A1ExampleCreateTableV1Test {
 
     @Test
     fun versionedTimestampsExampleRendersSchemaOnlyColumns() {
-        val sql = Schema.render(A1ExampleCreateTableTimestampsV1().migration(), SchemaDialect.MYSQL)
+        val sql = Schema.render(A1ExampleCreateTableTimestampsV1().migration(), DatabaseDialect.MYSQL)
 
         assertContains(sql.orEmpty(), "`created_at` DATETIME NULL")
         assertContains(sql.orEmpty(), "`updated_at` DATETIME NULL")

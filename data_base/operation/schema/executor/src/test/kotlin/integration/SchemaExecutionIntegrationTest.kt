@@ -8,7 +8,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionCon
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.MARIA_DB
 import gog.my_project.data_base_operation.config.data_base.MYSQL
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_schema.builder.ast.create_index.SchemaCreateIndexBuilder
 import gog.my_project.data_base_schema.builder.ast.drop_column.SchemaDropColumnBuilder
@@ -28,7 +28,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `ordinary DDL is rendered once reported and sent directly to the supplied scope`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val scope = scope(jdbc, DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36))
         val queryInfo = mutableListOf<Pair<String, Map<String, Any?>>>()
 
         val result = SchemaExecutionIntegration.executeScoped(createIndex(), scope) { sql, parameters ->
@@ -46,7 +46,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `native rename executes only renderer output without server version reads`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val scope = scope(jdbc, DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36))
 
         val result = SchemaExecutionIntegration.executeScoped(renameColumn(), scope)
 
@@ -61,7 +61,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `legacy rename strategy failure is returned without metadata introspection`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MARIA_DB, MARIA_DB.Version(10, 4, 28))
+        val scope = scope(jdbc, DatabaseDialect.MARIA_DB, MARIA_DB.Version(10, 4, 28))
 
         val result = SchemaExecutionIntegration.executeScoped(renameColumn(), scope)
 
@@ -74,7 +74,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `drop column if exists sends renderer output directly for MariaDB`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MARIA_DB, MARIA_DB.Version(10, 4, 28))
+        val scope = scope(jdbc, DatabaseDialect.MARIA_DB, MARIA_DB.Version(10, 4, 28))
 
         val result = SchemaExecutionIntegration.executeScoped(dropColumn(ifExists = true), scope)
 
@@ -85,7 +85,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `unsupported MySQL drop column if exists is returned without preflight query`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val scope = scope(jdbc, DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36))
 
         val result = SchemaExecutionIntegration.executeScoped(dropColumn(ifExists = true), scope)
 
@@ -99,7 +99,7 @@ class SchemaExecutionIntegrationTest {
     fun `database DDL failure is passed through and latched rather than converted to success`() {
         val failure = SQLException("DDL rejected by database", "42000", 1044)
         val jdbc = FakeJdbc(ddlFailure = failure)
-        val scope = scope(jdbc, DialectQuery.MARIA_DB, MARIA_DB.Version(10, 4, 28))
+        val scope = scope(jdbc, DatabaseDialect.MARIA_DB, MARIA_DB.Version(10, 4, 28))
 
         val result = SchemaExecutionIntegration.executeScoped(dropColumn(ifExists = true), scope)
 
@@ -111,7 +111,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `query info callback failure is latched and prevents DDL execution`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val scope = scope(jdbc, DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36))
         val failure = IllegalStateException("query info callback failed")
 
         val result = SchemaExecutionIntegration.executeScoped(createIndex(), scope) { _, _ -> throw failure }
@@ -124,7 +124,7 @@ class SchemaExecutionIntegrationTest {
     @Test
     fun `prior scope failure prevents DDL execution`() {
         val jdbc = FakeJdbc()
-        val scope = scope(jdbc, DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36))
+        val scope = scope(jdbc, DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36))
         val prior = IllegalStateException("earlier operation failed")
         scope.failed<Boolean>(prior)
 
@@ -147,7 +147,7 @@ class SchemaExecutionIntegrationTest {
                     dbUserName = "unused",
                     dbPassword = "",
                 ),
-                platform = DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+                platform = DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
             ),
             connectionProvider = object : IDatabaseConnection {
                 override fun build(): Connection = jdbc.connection
@@ -162,7 +162,7 @@ class SchemaExecutionIntegrationTest {
         assertEquals(1, jdbc.connectionCloseCount)
     }
 
-    private fun scope(jdbc: FakeJdbc, dialect: DialectQuery, version: gog.my_project.data_base_operation.config.data_base.ProductDatabaseVersion) =
+    private fun scope(jdbc: FakeJdbc, dialect: DatabaseDialect, version: gog.my_project.data_base_operation.config.data_base.ProductDatabaseVersion) =
         OperationExecutionScope(jdbc.connection, DatabasePlatformConfig(dialect, version))
 
     private fun createIndex() = SchemaCreateIndexBuilder()

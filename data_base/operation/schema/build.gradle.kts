@@ -11,6 +11,7 @@ repositories {
 }
 
 dependencies {
+    api(project(":data_base:dialect"))
     api(project(":data_base:operation:executor"))
     api(project(":data_base:manager:execute"))
     api(project(":data_base:manager:connection"))

@@ -4,7 +4,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import java.lang.reflect.InvocationHandler
@@ -26,7 +26,7 @@ class OperationExecutionExecutorTest {
     fun `selected database platform is carried into the operation scope`() {
         val events = mutableListOf<String>()
         val connection = connection(events)
-        val platform = DatabasePlatformConfig(dialect = DialectQuery.MARIA_DB)
+        val platform = DatabasePlatformConfig(dialect = DatabaseDialect.MARIA_DB)
         val context = DatabaseContext(
             name = "maria-test",
             config = DatabaseConfig(

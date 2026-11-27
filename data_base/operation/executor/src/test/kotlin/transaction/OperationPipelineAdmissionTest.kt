@@ -2,7 +2,7 @@ package gog.my_project.data_base_operation.executor.transaction
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -46,7 +46,7 @@ class OperationPipelineAdmissionTest {
 
         val scope = OperationExecutionScope(
             connection(mutableListOf()),
-            DatabasePlatformConfig(DialectQuery.MY_SQL),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL),
             null,
             null,
             owner,
@@ -279,7 +279,7 @@ class OperationPipelineAdmissionTest {
 
             val activeScope = OperationExecutionScope(
                 connection(events),
-                DatabasePlatformConfig(DialectQuery.MY_SQL),
+                DatabasePlatformConfig(DatabaseDialect.MYSQL),
                 null,
                 null,
                 owner,

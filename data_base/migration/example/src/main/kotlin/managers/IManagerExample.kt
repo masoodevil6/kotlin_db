@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.managers
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_schema.SchemaVersion
 import gog.my_project.data_base.migration.example.v1.migrations.IExampleV1
 import gog.my_project.data_base.migration.example.v1.migrations.add_column.A1ExampleAddColumnV1
@@ -53,7 +53,7 @@ interface IManagerExample {
 
     fun readyListExamples()
 
-    fun renderExamples(dialect: SchemaDialect, version: SchemaVersion? = null) {
+    fun renderExamples(dialect: DatabaseDialect, version: SchemaVersion? = null) {
         if (statusRunCreateTable) listExamplesCreateTable.forEach { it.render(dialect, version) }
         if (statusRunDropTable) listExamplesDropTable.forEach { it.render(dialect, version) }
         if (statusRunRenameTable) listExamplesRenameTable.forEach { it.render(dialect, version) }

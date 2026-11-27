@@ -1,6 +1,6 @@
 package gog.my_project.data_base_operation.config.data_base
 
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 /** Compatibility bridge for applications that still configure a single global database. */
 object DefaultDatabaseConfig {
@@ -16,7 +16,7 @@ object DefaultDatabaseConfig {
     )
 
     @Deprecated("Set dialect on DatabaseConfig / DatabaseConfigBuilder")
-    var dialect: DialectQuery
+    var dialect: DatabaseDialect
         get() = config.dialect
         set(value) { config = config.copy(dialect = value) }
 

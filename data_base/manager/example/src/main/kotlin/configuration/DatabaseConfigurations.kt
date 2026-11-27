@@ -3,7 +3,7 @@ package gog.my_project.data_base_manager.example.configuration
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 /** Creates one independent configuration from environment values; no connection is opened here. */
 fun databaseConfig(prefix: String, defaultDatabaseName: String): DatabaseConfig = DatabaseConfig(
@@ -14,7 +14,7 @@ fun databaseConfig(prefix: String, defaultDatabaseName: String): DatabaseConfig 
         dbUserName = System.getenv("${prefix}_DB_USER") ?: "example-user",
         dbPassword = System.getenv("${prefix}_DB_PASSWORD") ?: "",
     ),
-    platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+    platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
 )
 
 /** Require explicit credentials before any opt-in example can reach a database. */

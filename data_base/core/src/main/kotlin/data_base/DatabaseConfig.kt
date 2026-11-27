@@ -1,6 +1,6 @@
 package gog.my_project.data_base_operation.config.data_base
 
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 /**
  * Composition root for one database's connection, pool, and SQL platform settings.
@@ -22,7 +22,7 @@ class DatabaseConfig(
         dbUserName: String,
         dbPassword: String,
         dbPoolSize: Int = 10,
-        dialect: DialectQuery = DialectQuery.MY_SQL,
+        dialect: DatabaseDialect = DatabaseDialect.MYSQL,
         targetDatabaseVersion: ProductDatabaseVersion? = null,
     ) : this(
         connection = DatabaseConnectionConfig(dbDomain, dbPort, dbName, dbUserName, dbPassword),
@@ -43,7 +43,7 @@ class DatabaseConfig(
     @Deprecated("Use pool.maxPoolSize")
     val dbPoolSize: Int get() = pool.maxPoolSize
     @Deprecated("Use platform.dialect")
-    val dialect: DialectQuery get() = platform.dialect
+    val dialect: DatabaseDialect get() = platform.dialect
     @Deprecated("Use platform.targetDatabaseVersion")
     val targetDatabaseVersion: ProductDatabaseVersion? get() = platform.targetDatabaseVersion
 
@@ -57,7 +57,7 @@ class DatabaseConfig(
         dbUserName: String = this.dbUserName,
         dbPassword: String = this.dbPassword,
         dbPoolSize: Int = this.dbPoolSize,
-        dialect: DialectQuery = this.dialect,
+        dialect: DatabaseDialect = this.dialect,
         targetDatabaseVersion: ProductDatabaseVersion? = this.targetDatabaseVersion,
     ): DatabaseConfig = DatabaseConfig(
         dbDomain,
@@ -76,7 +76,7 @@ class DatabaseConfig(
     operator fun component4(): String = dbUserName
     operator fun component5(): String = dbPassword
     operator fun component6(): Int = dbPoolSize
-    operator fun component7(): DialectQuery = dialect
+    operator fun component7(): DatabaseDialect = dialect
     operator fun component8(): ProductDatabaseVersion? = targetDatabaseVersion
 
     override fun equals(other: Any?): Boolean = other is DatabaseConfig &&

@@ -3,7 +3,7 @@ package gog.my_project.data_base_migration.core.system_migration.schema
 import gog.my_project.data_base_migration.core.system_migration.model.SystemMigrationVersionModel
 import gog.my_project.data_base_query.builder.metadata.models.ModelMetadataResolver
 import gog.my_project.data_base_schema.Schema
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,14 +12,14 @@ import kotlin.test.assertTrue
 class SystemMigrationVersionTableTest {
     @Test
     fun `status column is integer not null with migrate started default`() {
-        val sql = Schema.render(SystemMigrationVersionTable.definition(), SchemaDialect.MYSQL)
+        val sql = Schema.render(SystemMigrationVersionTable.definition(), DatabaseDialect.MYSQL)
 
         assertTrue(sql.contains("`status` INT NOT NULL DEFAULT 100"), sql)
     }
 
     @Test
     fun `message column is nullable text without a default`() {
-        val sql = Schema.render(SystemMigrationVersionTable.definition(), SchemaDialect.MYSQL)
+        val sql = Schema.render(SystemMigrationVersionTable.definition(), DatabaseDialect.MYSQL)
 
         assertTrue(sql.contains("`message` TEXT NULL"), sql)
         assertFalse(sql.contains("`message` TEXT NOT NULL"), sql)
@@ -28,7 +28,7 @@ class SystemMigrationVersionTableTest {
 
     @Test
     fun `retry checkpoint column is nullable text without a default`() {
-        val sql = Schema.render(SystemMigrationVersionTable.definition(), SchemaDialect.MYSQL)
+        val sql = Schema.render(SystemMigrationVersionTable.definition(), DatabaseDialect.MYSQL)
 
         assertTrue(sql.contains("`retry_checkpoint` TEXT NULL"), sql)
         assertFalse(sql.contains("`retry_checkpoint` TEXT NOT NULL"), sql)

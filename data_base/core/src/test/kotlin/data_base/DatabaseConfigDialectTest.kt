@@ -1,6 +1,6 @@
 package gog.my_project.data_base_operation.config.data_base
 
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -10,11 +10,11 @@ class DatabaseConfigDialectTest {
     @Test
     fun builderKeepsDialectAndTargetVersionAsSeparateSettings() {
         val config = DatabaseConfigBuilder()
-            .dialect(DialectQuery.MARIA_DB)
+            .dialect(DatabaseDialect.MARIA_DB)
             .targetDatabaseVersion(MARIA_DB.Version(10, 4, 28))
             .build()
 
-        assertEquals(DialectQuery.MARIA_DB, config.platform.dialect)
+        assertEquals(DatabaseDialect.MARIA_DB, config.platform.dialect)
         assertEquals(MARIA_DB.Version(10, 4, 28), config.platform.targetDatabaseVersion)
         assertEquals(10, config.pool.maxPoolSize)
     }
@@ -29,12 +29,12 @@ class DatabaseConfigDialectTest {
             dbUserName = "user",
             dbPassword = "secret",
             dbPoolSize = 4,
-        ).copy(dialect = DialectQuery.MARIA_DB)
+        ).copy(dialect = DatabaseDialect.MARIA_DB)
 
         assertEquals("jdbc:mysql://localhost:3307/legacy", config.getDbUrl())
         assertEquals("legacy", config.dbName)
         assertEquals(4, config.pool.maxPoolSize)
-        assertEquals(DialectQuery.MARIA_DB, config.platform.dialect)
+        assertEquals(DatabaseDialect.MARIA_DB, config.platform.dialect)
         assertEquals(
             DatabaseConnectionConfig("jdbc:mysql://localhost", 3307, "legacy", "user", "secret"),
             config.connection,

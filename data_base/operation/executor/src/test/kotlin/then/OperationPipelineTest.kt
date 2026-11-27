@@ -8,7 +8,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionCon
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.SystemLock
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -321,7 +321,7 @@ class OperationPipelineTest {
                 dbUserName = "user",
                 dbPassword = "secret",
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
         )
         val databaseContext = DatabaseContext(
             "typed-pipeline-lock-test",
@@ -556,7 +556,7 @@ class OperationPipelineTest {
                 dbUserName = "user",
                 dbPassword = "secret",
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
         )
         val databaseContext = DatabaseContext(
             "pipeline-lock-test",

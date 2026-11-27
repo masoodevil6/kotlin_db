@@ -15,7 +15,7 @@ import gog.my_project.data_base_migration.core.tags.MigrationTagType
 import gog.my_project.data_base_migration.executor.model.version_selection.MigrationVersionSelection
 import gog.my_project.data_base_migration.executor.model.version_selection.MigrationVersionSelectionDirection
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.version_history.MigrationHistoryEntry
 import model.version_history.MigrationHistoryTag
@@ -402,7 +402,7 @@ class MigrationVersionTraversalServiceTest {
         )
         val scope = OperationExecutionScope(
             jdbc.connection,
-            DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
         )
 
         val result = MigrationVersionHistoryReader().read(scope)
@@ -495,7 +495,7 @@ class MigrationVersionTraversalServiceTest {
             val jdbc = SnapshotJdbc(case.tags, case.versions, case.applied)
             val scope = OperationExecutionScope(
                 jdbc.connection,
-                DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+                DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
             )
 
             val result = MigrationVersionHistoryReader().read(scope)

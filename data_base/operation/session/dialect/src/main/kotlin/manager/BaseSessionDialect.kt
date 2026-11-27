@@ -2,13 +2,13 @@ package gog.my_project.data_base_session.dialect.manager
 
 import gog.my_project.data_base_session.ast.interfaces.ISessionCommandAst
 import gog.my_project.data_base_session.dialect.data_class.RenderedSessionCommand
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_session.dialect.exceptions.SessionRenderException
 import gog.my_project.data_base_session.dialect.interfaces.ISessionDialect
 import gog.my_project.data_base_session.dialect.interfaces.ISessionRendererRegistry
 
 abstract class BaseSessionDialect(
-    final override val dialect: SessionDialect,
+    final override val dialect: DatabaseDialect,
     registerRenders: ISessionRendererRegistry.() -> Unit = {},
 ) : ISessionDialect {
 

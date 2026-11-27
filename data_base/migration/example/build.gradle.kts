@@ -36,6 +36,7 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":data_base:dialect"))
     implementation(project(":data_base:migration:api"))
     testImplementation(kotlin("test"))
     testImplementation(project(":data_base:operation:schema:ast"))

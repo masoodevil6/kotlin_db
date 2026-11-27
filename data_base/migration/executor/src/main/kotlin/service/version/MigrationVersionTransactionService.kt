@@ -1,5 +1,6 @@
 package gog.my_project.data_base_migration.executor.service.version
 
+import gog.my_project.data_base.core.events.DatabaseEventFailure
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
@@ -9,6 +10,9 @@ import gog.my_project.data_base_migration.core.system_migration.cte.SystemMigrat
 import gog.my_project.data_base_migration.core.system_migration.query.SystemMigrationTagInsertQuery
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
 import gog.my_project.data_base_migration.core.tags.MigrationVersionTag
+import gog.my_project.data_base_migration.core.events.MigrationFailurePersistenceEvent
+import gog.my_project.data_base_migration.core.events.MigrationFailurePersistenceOutcome
+import gog.my_project.data_base_migration.core.events.MigrationFailurePersistenceWriteMode
 import gog.my_project.data_base_migration.executor.service.run.PreparedMigration
 import gog.my_project.data_base_migration.executor.service.run.MigrationRunService
 import gog.my_project.data_base_migration.executor.service.run.MigrationRunOutcome
@@ -22,6 +26,7 @@ import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailure
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCommand
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCapability
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusCommand
+import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureStatusWriteResult
 import gog.my_project.data_base_operation.migration.failure.spi.write
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_query.api.interfaces.api.insert_api.query_render_insert.IQueryRenderInsertApi
@@ -669,7 +674,11 @@ internal class MigrationVersionTransactionService(
             null
         }
         if (diagnostic == null || diagnosticMessage == null) {
-            capability.write(statusOnlyCommand)
+            persistFailureStatus(
+                scope,
+                versionId,
+                MigrationFailurePersistenceWriteMode.STATUS_ONLY,
+            ) { capability.write(statusOnlyCommand) }
             return
         }
 
@@ -677,7 +686,11 @@ internal class MigrationVersionTransactionService(
         if (checkpointCapability == null) {
             // Older/custom capability implementations retain their status-only contract. The
             // Operation implementation used by managed execution supports the atomic Checkpoint write.
-            capability.write(statusOnlyCommand, diagnostic)
+            persistFailureStatus(
+                scope,
+                versionId,
+                MigrationFailurePersistenceWriteMode.STATUS_ONLY,
+            ) { capability.write(statusOnlyCommand, diagnostic) }
             return
         }
 
@@ -692,14 +705,100 @@ internal class MigrationVersionTransactionService(
             )
             buildCheckpointCommand(expectedCheckpoint, updatedCheckpoint, diagnosticMessage)
         } catch (fatal: Error) {
+            publishFailurePersistenceEvent(
+                scope = scope,
+                versionId = versionId,
+                writeMode = MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS,
+                statusOutcome = MigrationFailurePersistenceOutcome.NOT_ATTEMPTED,
+                checkpointOutcome = MigrationFailurePersistenceOutcome.NOT_ATTEMPTED,
+                failure = fatal,
+            )
             propagateDiagnosticFatal(scope, fatal)
         } catch (constructionFailure: Throwable) {
             recordDiagnosticConstructionFailure(scope, constructionFailure)
-            capability.write(statusOnlyCommand, diagnostic)
+            persistFailureStatus(
+                scope,
+                versionId,
+                MigrationFailurePersistenceWriteMode.STATUS_ONLY,
+            ) { capability.write(statusOnlyCommand, diagnostic) }
             return
         }
-        checkpointCapability.writeCheckpoint(command)
+        persistFailureStatus(
+            scope,
+            versionId,
+            MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS,
+        ) { checkpointCapability.writeCheckpoint(command) }
     }
+
+    internal fun persistFailureStatus(
+        scope: OperationExecutionScope,
+        versionId: Int,
+        writeMode: MigrationFailurePersistenceWriteMode,
+        write: () -> MigrationFailureStatusWriteResult,
+    ) {
+        val includeCheckpoint = writeMode == MigrationFailurePersistenceWriteMode.STATUS_CHECKPOINT_CAS
+        val result = try {
+            write()
+        } catch (failure: Throwable) {
+            publishFailurePersistenceEvent(
+                scope = scope,
+                versionId = versionId,
+                writeMode = writeMode,
+                statusOutcome = MigrationFailurePersistenceOutcome.INDETERMINATE,
+                checkpointOutcome = if (includeCheckpoint) {
+                    MigrationFailurePersistenceOutcome.INDETERMINATE
+                } else {
+                    MigrationFailurePersistenceOutcome.NOT_ATTEMPTED
+                },
+                failure = failure,
+            )
+            throw failure
+        }
+        val outcome = result.toPersistenceOutcome()
+        publishFailurePersistenceEvent(
+            scope = scope,
+            versionId = versionId,
+            writeMode = writeMode,
+            statusOutcome = outcome,
+            checkpointOutcome = if (includeCheckpoint) {
+                outcome
+            } else {
+                MigrationFailurePersistenceOutcome.NOT_ATTEMPTED
+            },
+            failure = null,
+        )
+    }
+
+    private fun publishFailurePersistenceEvent(
+        scope: OperationExecutionScope,
+        versionId: Int,
+        writeMode: MigrationFailurePersistenceWriteMode,
+        statusOutcome: MigrationFailurePersistenceOutcome,
+        checkpointOutcome: MigrationFailurePersistenceOutcome,
+        failure: Throwable?,
+    ) {
+        try {
+            scope.publishDatabaseEvent(
+                MigrationFailurePersistenceEvent(
+                    operationId = scope.operationId,
+                    versionId = versionId,
+                    writeMode = writeMode,
+                    statusOutcome = statusOutcome,
+                    checkpointOutcome = checkpointOutcome,
+                    failure = failure?.let(DatabaseEventFailure::from),
+                ),
+            )
+        } catch (_: Throwable) {
+            // Event construction and delivery are best effort; persistence keeps its own outcome.
+        }
+    }
+
+    private fun MigrationFailureStatusWriteResult.toPersistenceOutcome(): MigrationFailurePersistenceOutcome =
+        when (this) {
+            MigrationFailureStatusWriteResult.APPLIED -> MigrationFailurePersistenceOutcome.APPLIED
+            MigrationFailureStatusWriteResult.NOT_APPLIED -> MigrationFailurePersistenceOutcome.NOT_APPLIED
+            MigrationFailureStatusWriteResult.INDETERMINATE -> MigrationFailurePersistenceOutcome.INDETERMINATE
+        }
 
     private fun initialCheckpoint(
         originalStatus: Int,

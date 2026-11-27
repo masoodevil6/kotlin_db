@@ -131,6 +131,7 @@ class OperationTransactionExecutor private constructor(
                 null
             }
 
+            val operationId = OperationId.createRoot()
             var connection: Connection? = null
             var connectionClosed = false
             var scope: OperationExecutionScope? = null
@@ -141,13 +142,14 @@ class OperationTransactionExecutor private constructor(
             fun closeOnce(primary: Throwable?): Throwable? {
                 if (connectionClosed) return primary
                 connectionClosed = true
-                return closeConnection(requireNotNull(connection), primary)
+                return closeConnection(requireNotNull(connection), primary, operationId)
             }
 
             fun rollbackAndClose(primary: Throwable): Error? = rollbackAndClose(
                 requireNotNull(connection),
                 primary,
                 ::closeOnce,
+                operationId,
             )
 
             try {
@@ -178,10 +180,21 @@ class OperationTransactionExecutor private constructor(
 
                 connection = try {
                     requireNotNull(connectionFactory()).also {
-                        eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPENED))
+                        eventListener.publish(
+                            OperationEvent(
+                                OperationEventType.CONNECTION_OPENED,
+                                operationId = operationId.asString(),
+                            ),
+                        )
                     }
                 } catch (failure: Throwable) {
-                    eventListener.publish(OperationEvent(OperationEventType.CONNECTION_OPEN_FAILED, error = failure))
+                    eventListener.publish(
+                        OperationEvent(
+                            OperationEventType.CONNECTION_OPEN_FAILED,
+                            error = failure,
+                            operationId = operationId.asString(),
+                        ),
+                    )
                     if (pipelineFailureOwner != null) {
                         pipelineFailureOwner.recordThrowable(failure)
                         val failureToReturn = coordinator.finishPipelinePreparation(pipelineFailureOwner)
@@ -195,9 +208,20 @@ class OperationTransactionExecutor private constructor(
                 try {
                     connection.autoCommit = false
                     transactionStarted = true
-                    eventListener.publish(OperationEvent(OperationEventType.TRANSACTION_STARTED))
+                    eventListener.publish(
+                        OperationEvent(
+                            OperationEventType.TRANSACTION_STARTED,
+                            operationId = operationId.asString(),
+                        ),
+                    )
                 } catch (failure: Throwable) {
-                    eventListener.publish(OperationEvent(OperationEventType.TRANSACTION_START_FAILED, error = failure))
+                    eventListener.publish(
+                        OperationEvent(
+                            OperationEventType.TRANSACTION_START_FAILED,
+                            error = failure,
+                            operationId = operationId.asString(),
+                        ),
+                    )
                     val closeFailure = closeOnce(failure)
                     if (pipelineFailureOwner != null) {
                         pipelineFailureOwner.recordThrowable(failure)
@@ -214,7 +238,13 @@ class OperationTransactionExecutor private constructor(
                 }
 
                 val activeScope = if (pipelineFailureOwner == null) {
-                    OperationExecutionScope(connection, databasePlatformConfig, databaseIdentity, eventListener)
+                    OperationExecutionScope(
+                        connection,
+                        databasePlatformConfig,
+                        databaseIdentity,
+                        eventListener,
+                        operationId,
+                    )
                 } else {
                     OperationExecutionScope(
                         connection,
@@ -222,6 +252,7 @@ class OperationTransactionExecutor private constructor(
                         databaseIdentity,
                         eventListener,
                         pipelineFailureOwner,
+                        operationId,
                     )
                 }
                 scope = activeScope
@@ -294,13 +325,28 @@ class OperationTransactionExecutor private constructor(
         return ExecuteResult.Failure(failure)
     }
 
-    private fun closeConnection(connection: Connection, primary: Throwable?): Throwable? {
+    private fun closeConnection(
+        connection: Connection,
+        primary: Throwable?,
+        operationId: OperationId,
+    ): Throwable? {
         val closeFailure = try {
             connection.close()
-            eventListener.publish(OperationEvent(OperationEventType.CONNECTION_CLOSED))
+            eventListener.publish(
+                OperationEvent(
+                    OperationEventType.CONNECTION_CLOSED,
+                    operationId = operationId.asString(),
+                ),
+            )
             return primary
         } catch (failure: Throwable) {
-            eventListener.publish(OperationEvent(OperationEventType.CONNECTION_CLOSE_FAILED, error = failure))
+            eventListener.publish(
+                OperationEvent(
+                    OperationEventType.CONNECTION_CLOSE_FAILED,
+                    error = failure,
+                    operationId = operationId.asString(),
+                ),
+            )
             failure
         }
 
@@ -323,12 +369,14 @@ class OperationTransactionExecutor private constructor(
         connection: Connection,
         primary: Throwable,
         closeOnce: (Throwable?) -> Throwable?,
+        operationId: OperationId,
     ): Error? = rollbackAndFinalize(
         connection = connection,
         primary = primary,
         closeOnce = closeOnce,
         autoCommitToRestore = null,
         eventListener = eventListener,
+        operationId = operationId.asString(),
     )
 
     internal companion object {
@@ -346,6 +394,7 @@ class OperationTransactionExecutor private constructor(
                 parentScope.databasePlatformConfig,
                 parentScope.databaseIdentity,
                 parentScope.eventListener,
+                parentScope.operationIdentity,
             )
             val admissionFailure = OperationScopeGuard.enterChildTransaction(parentScope, transactionScope)
             if (admissionFailure != null) {
@@ -360,7 +409,11 @@ class OperationTransactionExecutor private constructor(
                     connection.autoCommit
                 } catch (failure: Throwable) {
                     transactionScope.eventListener.publish(
-                        OperationEvent(OperationEventType.TRANSACTION_START_FAILED, error = failure),
+                        OperationEvent(
+                            OperationEventType.TRANSACTION_START_FAILED,
+                            error = failure,
+                            operationId = transactionScope.operationId,
+                        ),
                     )
                     transactionScope.recordFailure(failure)
                     result = ExecuteResult.Failure(failure)
@@ -373,7 +426,11 @@ class OperationTransactionExecutor private constructor(
                         "Cannot start a child transaction while the parent Connection is already transactional; nested transactions and savepoints are not supported",
                     )
                     transactionScope.eventListener.publish(
-                        OperationEvent(OperationEventType.TRANSACTION_START_FAILED, error = failure),
+                        OperationEvent(
+                            OperationEventType.TRANSACTION_START_FAILED,
+                            error = failure,
+                            operationId = transactionScope.operationId,
+                        ),
                     )
                     transactionScope.recordFailure(failure)
                     result = ExecuteResult.Failure(failure)
@@ -383,11 +440,18 @@ class OperationTransactionExecutor private constructor(
                     try {
                         connection.autoCommit = false
                         transactionScope.eventListener.publish(
-                            OperationEvent(OperationEventType.TRANSACTION_STARTED),
+                            OperationEvent(
+                                OperationEventType.TRANSACTION_STARTED,
+                                operationId = transactionScope.operationId,
+                            ),
                         )
                     } catch (beginFailure: Throwable) {
                         transactionScope.eventListener.publish(
-                            OperationEvent(OperationEventType.TRANSACTION_START_FAILED, error = beginFailure),
+                            OperationEvent(
+                                OperationEventType.TRANSACTION_START_FAILED,
+                                error = beginFailure,
+                                operationId = transactionScope.operationId,
+                            ),
                         )
                         transactionScope.recordFailure(beginFailure)
                         val cleanupError = rollbackAndFinalize(
@@ -396,6 +460,7 @@ class OperationTransactionExecutor private constructor(
                             closeOnce = { primary -> primary },
                             autoCommitToRestore = autoCommit,
                             eventListener = transactionScope.eventListener,
+                            operationId = transactionScope.operationId,
                         )
                         if (cleanupError != null) {
                             thrown = cleanupError
@@ -467,12 +532,26 @@ class OperationTransactionExecutor private constructor(
             val primary = scope.firstFailure ?: returnedFailure?.exception
             val fatal = scope.fatalError ?: (primary as? Error)
             if (fatal != null) {
-                val cleanupError = rollbackAndFinalize(connection, fatal, closeOnce, autoCommitToRestore, scope.eventListener)
+                val cleanupError = rollbackAndFinalize(
+                    connection,
+                    fatal,
+                    closeOnce,
+                    autoCommitToRestore,
+                    scope.eventListener,
+                    scope.operationId,
+                )
                 throw cleanupError ?: fatal
             }
 
             if (primary != null) {
-                val cleanupError = rollbackAndFinalize(connection, primary, closeOnce, autoCommitToRestore, scope.eventListener)
+                val cleanupError = rollbackAndFinalize(
+                    connection,
+                    primary,
+                    closeOnce,
+                    autoCommitToRestore,
+                    scope.eventListener,
+                    scope.operationId,
+                )
                 if (cleanupError != null) throw cleanupError
                 if (returnedFailure?.exception === primary) return returnedFailure
                 return ExecuteResult.Failure(primary)
@@ -480,24 +559,47 @@ class OperationTransactionExecutor private constructor(
 
             val result = callbackResult ?: run {
                 val missingResult = IllegalStateException("Transaction callback returned no result")
-                val cleanupError = rollbackAndFinalize(connection, missingResult, closeOnce, autoCommitToRestore, scope.eventListener)
+                val cleanupError = rollbackAndFinalize(
+                    connection,
+                    missingResult,
+                    closeOnce,
+                    autoCommitToRestore,
+                    scope.eventListener,
+                    scope.operationId,
+                )
                 if (cleanupError != null) throw cleanupError
                 return ExecuteResult.Failure(missingResult)
             }
 
             try {
                 connection.commit()
-                scope.eventListener.publish(OperationEvent(OperationEventType.TRANSACTION_COMMITTED))
+                scope.eventListener.publish(
+                    OperationEvent(
+                        OperationEventType.TRANSACTION_COMMITTED,
+                        operationId = scope.operationId,
+                    ),
+                )
             } catch (commitFailure: Throwable) {
                 scope.eventListener.publish(
-                    OperationEvent(OperationEventType.TRANSACTION_COMMIT_FAILED, error = commitFailure),
+                    OperationEvent(
+                        OperationEventType.TRANSACTION_COMMIT_FAILED,
+                        error = commitFailure,
+                        operationId = scope.operationId,
+                    ),
                 )
                 val reportedFailure = if (commitFailure is Exception) {
                     OperationTransactionCommitException(commitFailure)
                 } else {
                     commitFailure
                 }
-                val cleanupError = rollbackAndFinalize(connection, reportedFailure, closeOnce, autoCommitToRestore, scope.eventListener)
+                val cleanupError = rollbackAndFinalize(
+                    connection,
+                    reportedFailure,
+                    closeOnce,
+                    autoCommitToRestore,
+                    scope.eventListener,
+                    scope.operationId,
+                )
                 if (cleanupError != null) throw cleanupError
                 if (commitFailure is Error) throw commitFailure
                 return ExecuteResult.Failure(reportedFailure)
@@ -522,6 +624,7 @@ class OperationTransactionExecutor private constructor(
             closeOnce: (Throwable?) -> Throwable?,
             autoCommitToRestore: Boolean?,
             eventListener: OperationEventListener?,
+            operationId: String?,
         ): Error? {
             var fatal: Error? = primary as? Error
 
@@ -541,10 +644,19 @@ class OperationTransactionExecutor private constructor(
 
             try {
                 connection.rollback()
-                eventListener.publish(OperationEvent(OperationEventType.TRANSACTION_ROLLED_BACK))
+                eventListener.publish(
+                    OperationEvent(
+                        OperationEventType.TRANSACTION_ROLLED_BACK,
+                        operationId = operationId,
+                    ),
+                )
             } catch (failure: Throwable) {
                 eventListener.publish(
-                    OperationEvent(OperationEventType.TRANSACTION_ROLLBACK_FAILED, error = failure),
+                    OperationEvent(
+                        OperationEventType.TRANSACTION_ROLLBACK_FAILED,
+                        error = failure,
+                        operationId = operationId,
+                    ),
                 )
                 retain(failure)
             }

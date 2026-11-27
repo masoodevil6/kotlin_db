@@ -5,7 +5,7 @@ import gog.my_project.data_base_manager.execute.interfaces.IQueryExecute
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.MYSQL
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.SQLException
@@ -32,7 +32,7 @@ class OperationScopedInjectedDdlTest {
         } as Connection
         val scope = OperationExecutionScope(
             connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         )
         val query = BuiltQuery("CREATE TABLE `owned` (`id` INT)", mutableListOf())
         var executorCalls = 0
@@ -62,7 +62,7 @@ class OperationScopedInjectedDdlTest {
         ) { _, _, _ -> null } as Connection
         val scope = OperationExecutionScope(
             connection,
-            DatabasePlatformConfig(DialectQuery.MY_SQL, MYSQL.Version(8, 0, 36)),
+            DatabasePlatformConfig(DatabaseDialect.MYSQL, MYSQL.Version(8, 0, 36)),
         )
         val failure = SQLException("injected DDL failed")
         val executor = injectedExecutor { _, _, callback -> callback(ExecuteResult.Failure(failure)) }

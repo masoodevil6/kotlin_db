@@ -1,19 +1,23 @@
 package gog.my_project.data_base_migration.executor.controller
 
+import gog.my_project.data_base.core.events.DatabaseEvent
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.api.registration.version.MigrationVersion
 import gog.my_project.data_base_migration.core.tags.MigrationTagTypeCodes
+import gog.my_project.data_base_migration.core.events.MigrationEvent
 import gog.my_project.data_base_manager.connection.interfaces.IDatabaseConnection
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
+import gog.my_project.data_base_operation.executor.events.OperationDatabaseEvent
+import gog.my_project.data_base_operation.executor.events.OperationEventListener
 import model.migration_status.MigrationStatusReport
 import model.migration_status.MigrationVersionStatus
 import java.lang.reflect.Proxy
@@ -148,8 +152,8 @@ class MigrationControllerTest {
         val currentFailure = assertIs<ExecuteResult.Failure>(controller.current(testScope(currentJdbc.connection)))
         val statusFailure = assertIs<ExecuteResult.Failure>(controller.status(testScope(statusJdbc.connection)))
 
-        assertTrue(currentFailure.exception.message.orEmpty().contains("canonical DatabaseIdentity"))
-        assertTrue(statusFailure.exception.message.orEmpty().contains("canonical DatabaseIdentity"))
+        assertTrue(currentFailure.exception.message.orEmpty().contains("Operation-managed root Connection Scope"))
+        assertTrue(statusFailure.exception.message.orEmpty().contains("Operation-managed root Connection Scope"))
         assertEquals(0, currentJdbc.queryCount)
         assertEquals(0, statusJdbc.queryCount)
         assertEquals(0, currentJdbc.lockAcquireCount)
@@ -189,8 +193,28 @@ class MigrationControllerTest {
         assertEquals(1, jdbc.queryCount)
     }
 
+    @Test
+    fun `Migration events inherit the managed root Operation identity`() {
+        val jdbc = historyConnection(history(appliedVersionCount = 0))
+        val events = mutableListOf<DatabaseEvent>()
+        val eventListener = OperationEventListener.fromDatabaseEventListener { event -> events += event }
+
+        val invocation = managed(jdbc.connection, eventListener) { scope ->
+            MigrationController(configuration).migrate(scope)
+        }
+        val operationId = requireNotNull(invocation.scope.operationId)
+        val migrationEvents = events.filterIsInstance<MigrationEvent>()
+        val operationEvents = events.filterIsInstance<OperationDatabaseEvent>()
+
+        assertTrue(migrationEvents.isNotEmpty())
+        assertTrue(migrationEvents.all { it.operationId == operationId })
+        assertTrue(operationEvents.isNotEmpty())
+        assertTrue(operationEvents.all { it.operationId == operationId })
+    }
+
     private fun <T> managed(
         connection: Connection,
+        eventListener: OperationEventListener? = null,
         action: (OperationExecutionScope) -> ExecuteResult<T>,
     ): ManagedInvocation<T> {
         val config = DatabaseConfig(
@@ -201,7 +225,7 @@ class MigrationControllerTest {
                 dbUserName = "test-user",
                 dbPassword = "test-password",
             ),
-            platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
         )
         val context = DatabaseContext(
             name = "migration-controller-test",
@@ -212,7 +236,12 @@ class MigrationControllerTest {
             databaseIdentity = requireNotNull(DatabaseIdentity.from(config)),
         )
         var scope: OperationExecutionScope? = null
-        val result = OperationExecutionExecutor(context).connection { managedScope ->
+        val executor = if (eventListener == null) {
+            OperationExecutionExecutor(context)
+        } else {
+            OperationExecutionExecutor(context, eventListener)
+        }
+        val result = executor.connection { managedScope ->
             scope = managedScope
             action(managedScope)
         }
@@ -225,7 +254,7 @@ class MigrationControllerTest {
     )
 
     private fun testScope(connection: Connection) =
-        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
 
     private fun connection(
         events: MutableList<String>,
@@ -341,11 +370,26 @@ class MigrationControllerTest {
             }
         } as Connection
 
-        private fun statement(statementSql: String): PreparedStatement = Proxy.newProxyInstance(
+        private fun statement(statementSql: String): PreparedStatement {
+            var lockRows: ResultSet? = null
+            return Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(PreparedStatement::class.java),
         ) { _, method, _ ->
             when (method.name) {
+                "execute" -> {
+                    if ("get_lock(" in statementSql.lowercase()) {
+                        lockAcquireCount++
+                        lockRows = resultSet(listOf(mapOf("acquired" to 1)), statementSql)
+                    } else {
+                        lockReleaseCount++
+                        lockRows = resultSet(listOf(mapOf("released" to 1)), statementSql)
+                    }
+                    true
+                }
+                "getResultSet" -> lockRows
+                "getMoreResults" -> false
+                "getUpdateCount" -> -1
                 "executeQuery" -> {
                     when {
                         "get_lock(" in statementSql.lowercase() -> {
@@ -368,6 +412,7 @@ class MigrationControllerTest {
                 else -> defaultValue(method.returnType)
             }
         } as PreparedStatement
+        }
 
         private fun resultSet(rows: List<Map<String, Any?>>, statementSql: String): ResultSet {
             var index = -1
@@ -380,6 +425,7 @@ class MigrationControllerTest {
                     "getMetaData" -> gog.my_project.data_base_migration.executor.support
                         .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
+                    "getObject" -> rows[index].values.firstOrNull()
                     "getInt", "getString" -> {
                         val value = rows[index][args?.firstOrNull()?.toString().orEmpty()]
                         wasNull = value == null
@@ -417,11 +463,25 @@ class MigrationControllerTest {
             when (method.name) {
                 "prepareStatement" -> {
                     val statementSql = args?.firstOrNull()?.toString().orEmpty()
+                    var lockRows: ResultSet? = null
                     Proxy.newProxyInstance(
                         javaClass.classLoader,
                         arrayOf(PreparedStatement::class.java),
                     ) { _, statementMethod, _ ->
                         when (statementMethod.name) {
+                            "execute" -> {
+                                if ("get_lock(" in statementSql.lowercase()) {
+                                    lockAcquireCount++
+                                    lockRows = resultSet(listOf(mapOf("acquired" to 1)), statementSql)
+                                } else {
+                                    lockReleaseCount++
+                                    lockRows = resultSet(listOf(mapOf("released" to 1)), statementSql)
+                                }
+                                true
+                            }
+                            "getResultSet" -> lockRows
+                            "getMoreResults" -> false
+                            "getUpdateCount" -> -1
                             "executeQuery" -> {
                                 when {
                                     "get_lock(" in statementSql.lowercase() -> {
@@ -469,6 +529,7 @@ class MigrationControllerTest {
                     "getMetaData" -> gog.my_project.data_base_migration.executor.support
                         .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < values.size
+                    "getObject" -> values[index].values.firstOrNull()
                     "getInt", "getString" -> {
                         val value = values[index][args?.firstOrNull()?.toString().orEmpty()]
                         wasNull = value == null

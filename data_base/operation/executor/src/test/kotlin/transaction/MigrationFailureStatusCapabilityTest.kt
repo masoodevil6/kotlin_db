@@ -8,7 +8,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnostic
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureDiagnosticStage
 import gog.my_project.data_base_operation.migration.failure.spi.MigrationFailureCheckpointWriteCommand
@@ -21,6 +21,7 @@ import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import java.sql.ResultSetMetaData
 import java.sql.SQLException
 import java.sql.Types
 import java.util.concurrent.CopyOnWriteArrayList
@@ -708,10 +709,12 @@ class MigrationFailureStatusCapabilityTest {
 
         assertEquals(MigrationFailureStatusWriteResult.INDETERMINATE, writeResult)
         assertSame(primary, assertIs<ExecuteResult.Failure>(result).exception)
-        assertEquals(
-            listOf(statusFailure, statementCloseFailure, releaseFailure, closeFailure),
-            primary.suppressed.toList(),
-        )
+        val suppressed = primary.suppressed.toList()
+        assertEquals(4, suppressed.size)
+        assertSame(statusFailure, suppressed[0])
+        assertSame(statementCloseFailure, suppressed[1])
+        assertSame(releaseFailure, suppressed[2].cause)
+        assertSame(closeFailure, suppressed[3])
         assertTrue(script.sql.indexOfFirst { it.startsWith("SELECT RELEASE_LOCK") } >
             script.sql.indexOfFirst { it.startsWith("UPDATE system_migration_version") })
         assertTrue(script.events.indexOf("connection.close") > script.events.indexOf("statement.close:release"))
@@ -791,7 +794,7 @@ class MigrationFailureStatusCapabilityTest {
                 dbUserName = "user",
                 dbPassword = "secret",
             ),
-            platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
         )
         val identity = requireNotNull(DatabaseIdentity.from(config))
         val context = DatabaseContext(
@@ -860,6 +863,7 @@ class MigrationFailureStatusCapabilityTest {
         private fun preparedStatement(statementSql: String): PreparedStatement {
             val bindings = CopyOnWriteArrayList<Binding>()
             val call = PreparedCall(statementSql)
+            var lockRows: ResultSet? = null
             return proxy(PreparedStatement::class.java) { method, args ->
                 when (method) {
                     "setObject" -> {
@@ -880,6 +884,15 @@ class MigrationFailureStatusCapabilityTest {
                         }
                         resultSet(value)
                     }
+                    "execute" -> {
+                        events += if (statementSql.startsWith("SELECT GET_LOCK")) "execute:acquire" else "execute:release"
+                        if (statementSql.startsWith("SELECT RELEASE_LOCK")) releaseFailure?.let { throw it }
+                        lockRows = resultSet(if (statementSql.startsWith("SELECT GET_LOCK")) acquireValue else releaseValue)
+                        true
+                    }
+                    "getResultSet" -> lockRows
+                    "getMoreResults" -> false
+                    "getUpdateCount" -> -1
                     "executeUpdate" -> {
                         events += "execute:update"
                         updates += UpdateCall(call, bindings.toList())
@@ -911,8 +924,13 @@ class MigrationFailureStatusCapabilityTest {
         private fun resultSet(value: Int?): ResultSet {
             var rowReturned = false
             var wasNull = false
+            val metadata = proxy(ResultSetMetaData::class.java) { method, _ ->
+                if (method == "getColumnCount") 1 else null
+            }
             return proxy(ResultSet::class.java) { method, args ->
                 when (method) {
+                    "getMetaData" -> metadata
+                    "getObject" -> value
                     "next" -> if (!rowReturned) {
                         rowReturned = true
                         true

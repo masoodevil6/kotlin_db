@@ -2,7 +2,7 @@ package gog.my_project.data_base_migration.api.builder
 
 import gog.my_project.data_base_schema.Schema
 import gog.my_project.data_base_schema.SchemaDataType
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -82,7 +82,7 @@ class MigrationDefinitionBuilderTest {
         }
 
         val definition = migration { operation(schemaOperation) }
-        val renderedSql = Schema.render(schemaOperation, SchemaDialect.MYSQL)
+        val renderedSql = Schema.render(schemaOperation, DatabaseDialect.MYSQL)
 
         assertSame(schemaOperation, definition.operation)
         assertTrue(renderedSql.contains("CREATE TABLE `customers`"))

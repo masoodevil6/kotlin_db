@@ -100,7 +100,7 @@ class OperationExecutionContextTest {
         val result = OperationTransactionExecutor(
             connectionFactory = { acquisitions++; script.connection },
             databasePlatformConfig = gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig(
-                dialect = gog.my_project.data_base_operation.config.query.dialect.DialectQuery.MARIA_DB,
+                dialect = gog.my_project.data_base.dialect.DatabaseDialect.MARIA_DB,
             ),
         ).transaction { scope ->
             val customer = scope.executeRead(
@@ -170,7 +170,7 @@ class OperationExecutionContextTest {
         val result = OperationTransactionExecutor(
             connectionFactory = { acquisitions++; script.connection },
             databasePlatformConfig = gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig(
-                dialect = gog.my_project.data_base_operation.config.query.dialect.DialectQuery.MARIA_DB,
+                dialect = gog.my_project.data_base.dialect.DatabaseDialect.MARIA_DB,
             ),
         ).transaction { scope ->
             val read = scope.executeRead("SELECT value FROM sample") { rows -> rows.next() }
@@ -209,7 +209,7 @@ class OperationExecutionContextTest {
         val result = OperationTransactionExecutor(
             connectionFactory = { script.connection },
             databasePlatformConfig = gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig(
-                dialect = gog.my_project.data_base_operation.config.query.dialect.DialectQuery.MARIA_DB,
+                dialect = gog.my_project.data_base.dialect.DatabaseDialect.MARIA_DB,
             ),
         ).transaction { scope ->
             val read = scope.executeRead("SELECT 7 AS id") { rows ->

@@ -7,7 +7,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DefaultDatabaseConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.executor.events.OperationEvent
 import gog.my_project.data_base_operation.executor.events.OperationEventListener
@@ -1537,7 +1537,7 @@ class TransactionExecutionTest {
             name = "raw-select-events-test",
             config = DatabaseConfig(
                 connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
-                platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+                platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
             ),
             connectionProvider = object : IDatabaseConnection {
                 override fun build(): Connection = jdbc.openConnection()
@@ -2012,7 +2012,7 @@ class TransactionExecutionTest {
             name = "raw-select-root-events-test",
             config = DatabaseConfig(
                 connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
-                platform = DatabasePlatformConfig(DialectQuery.MY_SQL),
+                platform = DatabasePlatformConfig(DatabaseDialect.MYSQL),
             ),
             connectionProvider = object : IDatabaseConnection {
                 override fun build(): Connection = jdbc.openConnection()

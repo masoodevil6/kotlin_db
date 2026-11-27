@@ -1,7 +1,6 @@
 package gog.my_project.data_base_session.dialect.interfaces
 
 import gog.my_project.data_base_session.ast.interfaces.ISessionCommandAst
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
 import gog.my_project.data_base_session.dialect.manager.SessionRenderState
 import kotlin.reflect.KClass
 

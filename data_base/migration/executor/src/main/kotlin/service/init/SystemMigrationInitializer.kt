@@ -4,7 +4,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.core.system_migration.schema.SystemMigrationTable
 import gog.my_project.data_base_migration.core.system_migration.schema.SystemMigrationTagTable
 import gog.my_project.data_base_migration.core.system_migration.schema.SystemMigrationVersionTable
-import gog.my_project.data_base_operation.config.data_base.SystemLock
+import gog.my_project.data_base_migration.executor.service.withMigrationLock
 import gog.my_project.data_base_operation.executor.transaction.OperationParameter
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import gog.my_project.data_base_schema.Schema
@@ -49,7 +49,7 @@ internal class SystemMigrationInitializer {
             is ExecuteResult.Success -> if (initial.result == true) {
                 ExecuteResult.Success(true)
             } else {
-                scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
+                withMigrationLock(scope) { lockedScope ->
                     when (val rechecked = retryCheckpointColumnExists(lockedScope)) {
                         is ExecuteResult.Failure -> rechecked
                         is ExecuteResult.Success -> if (rechecked.result == true) {
@@ -113,6 +113,5 @@ internal class SystemMigrationInitializer {
 
     private companion object {
         const val RETRY_CHECKPOINT_COLUMN = "retry_checkpoint"
-        const val MIGRATION_LOCK_TIMEOUT_SECONDS = 60
     }
 }

@@ -95,7 +95,7 @@ Session core مستقل از Operation، Manager، Query و Schema است. Opera
 
 ## Dialect و پشتیبانی
 
-نسخهٔ فعلی Renderer برای SessionDialect.MYSQL و SessionDialect.MARIA_DB فرمان‌ها را به این SQLها تبدیل می‌کند:
+نسخهٔ فعلی Renderer برای `DatabaseDialect.MYSQL` و `DatabaseDialect.MARIA_DB` فرمان‌ها را به این SQLها تبدیل می‌کند:
 
 ~~~sql
 SELECT GET_LOCK(?, ?) AS acquired
@@ -126,21 +126,21 @@ Operation Legacy API به نام withSessionAdvisoryLock نیز callback-based �
 
 ## مسیر پیشرفته: اجرای مستقیم SessionExecutor
 
-SessionExecutor یک API عمومی برای برنامه‌ای است که خودش AST، Connection و SessionDialect را مدیریت می‌کند. این مسیر برای مصرف‌کنندهٔ معمول Operation نیست:
+SessionExecutor یک API عمومی و مستقل از Operation برای برنامه‌ای است که خودش AST، Connection و `DatabaseDialect` را مدیریت می‌کند. در مسیر مستقیم، SessionExecutor همین Dialect مرکزی را می‌گیرد و پیاده‌سازی Session را در ماژول خودش انتخاب می‌کند:
 
 ~~~kotlin
 package sample.session
 
 import gog.my_project.data_base_session.api.result.AcquireSessionLockResult
 import gog.my_project.data_base_session.ast.interfaces.advisory_lock.acquire.IAcquireSessionAdvisoryLockAst
-import gog.my_project.data_base_session.dialect.enums.SessionDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_session.executor.manager.SessionExecutor
 import java.sql.Connection
 
 fun acquireDirectly(
     ast: IAcquireSessionAdvisoryLockAst,
     connection: Connection,
-    dialect: SessionDialect,
+    dialect: DatabaseDialect,
 ): AcquireSessionLockResult =
     SessionExecutor().acquire(ast, connection, dialect)
 ~~~

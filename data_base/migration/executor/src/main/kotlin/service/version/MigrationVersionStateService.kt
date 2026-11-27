@@ -7,7 +7,6 @@ import gog.my_project.data_base_migration.api.model.migration_state.MigrationVer
 import gog.my_project.data_base_migration.api.model.migration_state.MigrationVersionState
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
 import gog.my_project.data_base_migration.core.tags.MigrationTagType
-import gog.my_project.data_base_operation.config.data_base.SystemLock
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -63,7 +62,7 @@ internal class MigrationVersionStateService(
     }
 
     /**
-     * Re-reads and validates a Retry selector while the caller already owns SystemLock.MIGRATION.
+     * Re-reads and validates a Retry selector while the caller already owns the Migration lock.
      * This method deliberately does not acquire a lock and never calls the public state API.
      */
     internal fun validateTargetWhileMigrationLockHeld(
@@ -246,7 +245,7 @@ internal class MigrationVersionStateService(
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
         return try {
-            scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS, block)
+            gog.my_project.data_base_migration.executor.service.withMigrationLock(scope, block)
         } catch (error: Error) {
             scope.recordFatal(error)
             throw error
@@ -266,7 +265,6 @@ internal class MigrationVersionStateService(
     )
 
     private companion object {
-        const val MIGRATION_LOCK_TIMEOUT_SECONDS = 60
         const val DIAGNOSTIC_SCHEMA_VERSION = 1
     }
 }

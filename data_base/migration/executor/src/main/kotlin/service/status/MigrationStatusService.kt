@@ -2,7 +2,7 @@ package gog.my_project.data_base_migration.executor.service.status
 
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_migration.api.registration.configuration.MigrationConfiguration
-import gog.my_project.data_base_operation.config.data_base.SystemLock
+import gog.my_project.data_base_migration.executor.service.withMigrationLock
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.migration_status.MigrationStatusReport
 
@@ -15,7 +15,7 @@ internal class MigrationStatusService(
     fun status(scope: OperationExecutionScope): ExecuteResult<MigrationStatusReport> {
         scope.rejectOperation()?.let { return ExecuteResult.Failure(it) }
 
-        return scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
+        return withMigrationLock(scope) { lockedScope ->
             try {
                 when (val readResult = reader.read(lockedScope)) {
                     is ExecuteResult.Failure -> readResult
@@ -35,7 +35,4 @@ internal class MigrationStatusService(
         }
     }
 
-    private companion object {
-        const val MIGRATION_LOCK_TIMEOUT_SECONDS = 60
-    }
 }

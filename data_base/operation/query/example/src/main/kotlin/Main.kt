@@ -4,7 +4,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePoolConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_manager.connection.manager.DatabaseContext
 import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_query.example.runners.ExampleRunOptions
@@ -30,7 +30,7 @@ fun main(args: Array<String>) {
                 maxPoolSize = 10
             ),
             platform = DatabasePlatformConfig(
-                dialect = DialectQuery.MY_SQL
+                dialect = DatabaseDialect.MYSQL
             ),
         ),
     )

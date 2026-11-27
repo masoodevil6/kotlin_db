@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.foreign_key
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -31,16 +31,16 @@ class ForeignKeyV1Test {
                 "FOREIGN KEY (`tenant_id`, `user_id`) REFERENCES `users` (`tenant_id`, `id`) " +
                 "ON DELETE CASCADE ON UPDATE RESTRICT"
         val operation = A1ExampleCreateForeignKeyV1().migration()
-        assertEquals(expected, Schema.render(operation, SchemaDialect.MYSQL))
-        assertEquals(expected, Schema.render(operation, SchemaDialect.MARIA_DB))
+        assertEquals(expected, Schema.render(operation, DatabaseDialect.MYSQL))
+        assertEquals(expected, Schema.render(operation, DatabaseDialect.MARIA_DB))
     }
 
     @Test
     fun rendersDropSqlAndMariaDbUsesInheritedRegistration() {
         val operation = A1ExampleDropForeignKeyV1().migration()
-        val mysqlSql = Schema.render(operation, SchemaDialect.MYSQL)
+        val mysqlSql = Schema.render(operation, DatabaseDialect.MYSQL)
         assertEquals("ALTER TABLE `orders` DROP FOREIGN KEY `fk_orders_tenant_user`", mysqlSql)
-        assertEquals(mysqlSql, Schema.render(operation, SchemaDialect.MARIA_DB))
+        assertEquals(mysqlSql, Schema.render(operation, DatabaseDialect.MARIA_DB))
     }
 
     @Test

@@ -18,7 +18,7 @@ import gog.my_project.data_base_migration.facade.migrationConfiguration
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.events.OperationDatabaseEvent
 import gog.my_project.data_base_query.ast.enums.DataType
 import gog.my_project.data_base_query.builder.ast.insert_builder.query_render_insert.QueryRenderInsertBuilder
@@ -586,7 +586,7 @@ private fun databaseConfig(prefix: String, expectedDatabaseName: String): Databa
             dbUserName = user,
             dbPassword = password,
         ),
-        platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+        platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
     )
 }
 

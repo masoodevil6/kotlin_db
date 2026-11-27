@@ -34,6 +34,7 @@ include(":collection:core")
 include(":collection:1_examples.md")
 
 include(":data_base")
+include(":data_base:dialect")
 include(":data_base:core")
 include(":data_base:operation")
 include(":data_base:operation:config")

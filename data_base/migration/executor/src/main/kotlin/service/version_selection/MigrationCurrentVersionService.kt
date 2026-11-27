@@ -5,7 +5,7 @@ import gog.my_project.data_base_migration.api.registration.configuration.Migrati
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryReader
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryState
 import gog.my_project.data_base_migration.executor.service.version.MigrationVersionHistoryValidator
-import gog.my_project.data_base_operation.config.data_base.SystemLock
+import gog.my_project.data_base_migration.executor.service.withMigrationLock
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
 
@@ -18,7 +18,7 @@ internal class MigrationCurrentVersionService(
 
     /** Returns the latest applied Version from one Migration-locked history snapshot. */
     fun currentVersion(scope: OperationExecutionScope): ExecuteResult<PreparedMigrationVersion?> =
-        scope.withSystemLock(SystemLock.MIGRATION, MIGRATION_LOCK_TIMEOUT_SECONDS) { lockedScope ->
+        withMigrationLock(scope) { lockedScope ->
             when (val result = validatedHistoryState(lockedScope)) {
                 is ExecuteResult.Failure -> result
                 is ExecuteResult.Success -> ExecuteResult.Success(result.result?.currentVersion)
@@ -50,7 +50,4 @@ internal class MigrationCurrentVersionService(
         }
     }
 
-    private companion object {
-        const val MIGRATION_LOCK_TIMEOUT_SECONDS = 60
-    }
 }

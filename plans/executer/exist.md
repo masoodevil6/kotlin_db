@@ -61,7 +61,7 @@ DefaultDatabaseConfig.config = DatabaseConfig(
     dbName = System.getenv("DB_NAME") ?: "kotlin_db",
     dbUserName = System.getenv("DB_USER") ?: "root",
     dbPassword = System.getenv("DB_PASSWORD") ?: "",
-    dialect = DialectQuery.MARIA_DB,
+    dialect = DatabaseDialect.MARIA_DB,
     targetDatabaseVersion = MARIA_DB.Version(10, 4, 28),
 )
 ~~~

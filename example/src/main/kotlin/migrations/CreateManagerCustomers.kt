@@ -28,11 +28,11 @@ class CreateManagerCustomers : Migration(
                     dataType(SchemaDataType.VarcharType(120))
                     notNull()
                 }
-                addColumn {
+               /* addColumn {
                     name("display_name")
                     dataType(SchemaDataType.VarcharType(120))
                     notNull()
-                }
+                }*/
             }
         )
     }

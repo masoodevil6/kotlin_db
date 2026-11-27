@@ -36,6 +36,7 @@ data class OperationEvent(
     val type: OperationEventType,
     val sql: String? = null,
     val error: Throwable? = null,
+    val operationId: String? = null,
 )
 
 /** A synchronous, read-only observer. Listener failures, including [Error]s, are isolated. */
@@ -88,6 +89,7 @@ internal fun OperationEvent.toDatabaseEvent(): OperationDatabaseEvent = Operatio
     },
     sql = sql,
     failure = error?.let(DatabaseEventFailure::from),
+    operationId = operationId,
 )
 
 /** Event observers are best-effort and must never become part of Operation failure handling. */

@@ -19,7 +19,7 @@ import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseIdentity
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionExecutor
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionScope
 import model.prepared.PreparedMigrationVersion
@@ -234,7 +234,7 @@ class MigrationCurrentVersionServiceTest {
                 dbUserName = "test-user",
                 dbPassword = "test-password",
             ),
-            platform = DatabasePlatformConfig(dialect = DialectQuery.MY_SQL),
+            platform = DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL),
         )
         val context = DatabaseContext(
             name = "migration-current-test",
@@ -248,7 +248,7 @@ class MigrationCurrentVersionServiceTest {
     }
 
     private fun newScope(connection: Connection) =
-        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DialectQuery.MY_SQL))
+        OperationExecutionScope(connection, DatabasePlatformConfig(dialect = DatabaseDialect.MYSQL))
 
     private fun history(appliedVersionCount: Int): HistoryRows {
         val versionRows = listOf(
@@ -362,8 +362,22 @@ class MigrationCurrentVersionServiceTest {
 
         private fun statement(statementSql: String): PreparedStatement {
             sql += statementSql
+            var lockRows: ResultSet? = null
             return proxy(PreparedStatement::class.java) { method, _ ->
                 when (method.name) {
+                    "execute" -> {
+                        if ("get_lock(" in statementSql.lowercase()) {
+                            lockAcquireCount++
+                            lockRows = resultSet(listOf(mapOf("acquired" to 1)), statementSql)
+                        } else {
+                            lockReleaseCount++
+                            lockRows = resultSet(listOf(mapOf("released" to 1)), statementSql)
+                        }
+                        true
+                    }
+                    "getResultSet" -> lockRows
+                    "getMoreResults" -> false
+                    "getUpdateCount" -> -1
                     "executeQuery" -> {
                         when {
                             "get_lock(" in statementSql.lowercase() -> {
@@ -400,6 +414,7 @@ class MigrationCurrentVersionServiceTest {
                     "getMetaData" -> gog.my_project.data_base_migration.executor.support
                         .systemMigrationResultSetMetadata(statementSql)
                     "next" -> ++index < rows.size
+                    "getObject" -> rows[index].values.firstOrNull()
                     "getInt", "getString" -> {
                         val value = rows[index][args.first().toString()]
                         wasNull = value == null

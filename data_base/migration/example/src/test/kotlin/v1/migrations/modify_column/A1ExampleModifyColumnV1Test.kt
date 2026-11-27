@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.modify_column
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -30,7 +30,7 @@ class A1ExampleModifyColumnV1Test {
     fun rendersFullDesiredDefinition() {
         assertEquals(
             "ALTER TABLE `users` MODIFY COLUMN `name` VARCHAR(255) NOT NULL DEFAULT 'Unknown'",
-            Schema.render(A1ExampleModifyColumnV1().migration(), SchemaDialect.MYSQL),
+            Schema.render(A1ExampleModifyColumnV1().migration(), DatabaseDialect.MYSQL),
         )
     }
 

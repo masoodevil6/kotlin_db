@@ -11,7 +11,7 @@ import gog.my_project.data_base_manager.execute.tools.ExecuteResult
 import gog.my_project.data_base_operation.config.data_base.DatabaseConfig
 import gog.my_project.data_base_operation.config.data_base.DatabaseConnectionConfig
 import gog.my_project.data_base_operation.config.data_base.DatabasePlatformConfig
-import gog.my_project.data_base_operation.config.query.dialect.DialectQuery
+import gog.my_project.data_base.dialect.DatabaseDialect
 import gog.my_project.data_base_operation.executor.transaction.DdlFailurePolicy
 import gog.my_project.data_base_operation.executor.transaction.DdlExecutionOutcome
 import gog.my_project.data_base_operation.executor.transaction.OperationExecutionContext
@@ -390,7 +390,7 @@ class ScopeBoundQueryExecutionTest {
             name = "scope-bound-test",
             config = DatabaseConfig(
                 connection = DatabaseConnectionConfig("jdbc:unused", null, "unused", "unused", "unused"),
-                platform = DatabasePlatformConfig(DialectQuery.MARIA_DB),
+                platform = DatabasePlatformConfig(DatabaseDialect.MARIA_DB),
             ),
             connectionProvider = provider,
         )
@@ -483,7 +483,7 @@ class ScopeBoundQueryExecutionTest {
     }
 
     private class RecordingOperationContext : OperationExecutionContext {
-        override val databasePlatformConfig = DatabasePlatformConfig(DialectQuery.MY_SQL)
+        override val databasePlatformConfig = DatabasePlatformConfig(DatabaseDialect.MYSQL)
         val statements = mutableListOf<QueryExecutionStatement>()
         val failures = mutableListOf<Throwable>()
         var rows: List<Map<String, Any?>> = emptyList()

@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.create_multi_column_index
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -23,7 +23,7 @@ class A1ExampleCreateMultiColumnIndexV1Test {
     fun rendersOrderedNonUniqueIndex() {
         assertEquals(
             "CREATE INDEX `idx_users_name_email` ON `users` (`last_name`, `first_name`, `email`)",
-            Schema.render(A1ExampleCreateMultiColumnIndexV1().migration(), SchemaDialect.MYSQL),
+            Schema.render(A1ExampleCreateMultiColumnIndexV1().migration(), DatabaseDialect.MYSQL),
         )
     }
 

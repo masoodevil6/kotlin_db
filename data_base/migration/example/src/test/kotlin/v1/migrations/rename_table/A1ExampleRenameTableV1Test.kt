@@ -1,6 +1,6 @@
 package gog.my_project.data_base.migration.example.v1.migrations.rename_table
 
-import gog.my_project.data_base_schema.SchemaDialect
+import gog.my_project.data_base.dialect.DatabaseDialect
 
 import gog.my_project.data_base_schema.Schema
 
@@ -18,7 +18,7 @@ class A1ExampleRenameTableV1Test {
 
     @Test
     fun rendersRenameTable() {
-        val sql = Schema.render(A1ExampleRenameTableV1().migration(), SchemaDialect.MYSQL)
+        val sql = Schema.render(A1ExampleRenameTableV1().migration(), DatabaseDialect.MYSQL)
 
         assertEquals("RENAME TABLE `users` TO `customers`", sql)
     }
